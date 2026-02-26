@@ -3,12 +3,10 @@ import { AppModule } from './app.module';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { BigIntInterceptor } from './common/interceptors/bigint.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const logger = new Logger('Bootstrap');
-  app.useGlobalInterceptors(new BigIntInterceptor());
   // Obtener el ConfigService
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') ?? 4000;
