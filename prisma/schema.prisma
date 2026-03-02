@@ -6,360 +6,59 @@ datasource db {
   provider = "postgresql"
 }
 
-model User {
-  id                      String                  @id @default(uuid())
-  email                   String                  @unique
-  password                String?
-  firstName               String
-  lastName                String
-  phoneNumber             String?
-  country                 Country                 @default(BOLIVIA)
-  walletAddress           String?                 @unique
-  kycStatus               KycStatus               @default(UNVERIFIED)
-  createdAt               DateTime                @default(now())
-  updatedAt               DateTime                @updatedAt
-  lastLogin               DateTime?
-  role                    UserRole                @default(USER)
-  resetPasswordExpiry     DateTime?
-  resetPasswordToken      String?
-  isGoogleAccount         Boolean                 @default(false)
-  isOnboardingCompleted   Boolean                 @default(false)
-  isVerified              Boolean                 @default(false)
-  bankAccounts            BankAccount[]
-  fiatOperations          FiatOperation[]
-  validatedFiatOperations FiatOperation[]         @relation("FiatOperationValidatedBy")
-  kycDocuments            KycDocument[]
-  kycRequests             KycRequest[]            @relation("KycRequestUser")
-  verification_requests   verification_requests[]
-  kycReviewedRequests     KycRequest[]            @relation("KycRequestReviewedBy")
-  blacklistEntries        BlacklistEntry[]
-
-  @@map("users")
-}
-
-model KycDocument {
-  id            String            @id @default(uuid())
-  userId        String
-  kycRequestId  String
-  docType       KycDocumentType
-  docUrl        String?           // legacy
-  publicId      String
-  folder        String
-  resourceType  KycResourceType
-  mimeType      String?
-  bytes         Int?
-  uploadedAt    DateTime?         @default(now())
-
-  user          User              @relation(fields: [userId], references: [id])
-  kycRequest    KycRequest        @relation(fields: [kycRequestId], references: [id])
-
-  @@unique([kycRequestId, docType])
-  @@index([kycRequestId])
-  @@map("kyc_documents")
-}
-
-model KycRequest {
-  id           String    @id @default(uuid())
-  userId       String
-  status       KycStatus @default(PENDING)
-  reviewNote   String?
-  reviewedById String?
-  reviewedAt   DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  user        User  @relation("KycRequestUser", fields: [userId], references: [id])
-  reviewedBy  User? @relation("KycRequestReviewedBy", fields: [reviewedById], references: [id])
-
-  documents KycDocument[]
-
-  @@map("kyc_requests")
-}
-
-model FiatOperation {
-  id            String              @id @default(uuid())
-  type          FiatOperationType
-  userId        String
-  currency      FiatCurrency
-  amount        Decimal             @db.Decimal(36, 18)
-  feeRate       Decimal             @db.Decimal(10, 6)
-  serviceFee    Decimal             @db.Decimal(36, 18)
-  totalAmount   Decimal             @db.Decimal(36, 18)
-  rateUsed      Decimal?            @db.Decimal(36, 18)
-  rateSource    String?
-  rateQuotedAt  DateTime?
-  rateExpiresAt DateTime?
-  referenceCode String              @unique //revisar si hay que mantener o borrar
-  status        FiatOperationStatus @default(PENDING)
-  validatedById String?
-  validatedAt   DateTime?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  processedAt   DateTime?
-  deposit       DepositDetail?
-  user          User                @relation(fields: [userId], references: [id])
-  validatedBy   User?               @relation("FiatOperationValidatedBy", fields: [validatedById], references: [id])
-  withdrawal    WithdrawalDetail?
-
-  @@index([userId, createdAt])
-  @@index([status, createdAt])
-  @@map("fiat_operations")
-}
-
-model DepositDetail {
-  id              String    @id @default(uuid())
-  operationId     String    @unique
-  expectedBOBH    Decimal   @db.Decimal(36, 18)
-  // Safe proposal (multisig)
-  safeTxHash      String?   @unique //identificador de la propuesta
-  safeProposedAt  DateTime?
-  mintTxHash      String?
-  mintedAt        DateTime?
-  proofUrl        String?
-  proofUploadedAt DateTime?
-  proofFileName   String?
-  proofMimeType   String?
-  reviewNote      String?
-  reviewedById    String?
-  reviewedAt      DateTime?
-
-  operation FiatOperation @relation(fields: [operationId], references: [id], onDelete: Cascade)
-
-  @@map("deposit_details")
-}
-
-model WithdrawalDetail {
-  id          String @id @default(uuid())
-  operationId String @unique
-
-  // Resultado económico
-  burnedBOBH Decimal @db.Decimal(36, 18) // BOBH descontado del usuario
-  fiatSent   Decimal @db.Decimal(36, 18) // fiat enviado al banco
-
-  bankAccountId      BigInt
-  bankAccount        BankAccount   @relation(fields: [bankAccountId], references: [id])
-  TxHash             String? // hash de la transacción en blockchain
-  burnedAt           DateTime? // cuando se ejecutó el burn
-  payoutTxRef        String? // referencia bancaria / lote / transferencia
-  paidAt             DateTime? // cuando se ejecutó el pago
-  logProofUrl        String? // url del comprobante de pago
-  proofUploadedAt    DateTime? //cuando se subio el comprobante
-  cloudinaryPublicId String? // id publico en cloudinary
-  createdAt          DateTime?     @default(now())
-  updatedAt          DateTime?     @updatedAt
-  operation          FiatOperation @relation(fields: [operationId], references: [id], onDelete: Cascade)
-
-  @@index([bankAccountId])
-  @@map("withdrawal_details")
-}
-
-model BankAccount {
-  id               BigInt             @id @default(autoincrement())
-  userId           String
-  bankId           Int
-  accountNumber    String             @db.VarChar(50)
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime?          @updatedAt
-  bank             Banks              @relation(fields: [bankId], references: [id])
-  user             User               @relation(fields: [userId], references: [id])
-  withdrawaldetail WithdrawalDetail[]
-
-  @@index([userId])
-  @@index([bankId])
-  @@index([accountNumber])
-  @@map("bank_accounts")
-}
-
-model Banks {
-  name         String
-  logo_url     String
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime?     @updatedAt
-  country      country_banks
-  id           Int           @id @default(autoincrement())
-  bankAccounts BankAccount[]
-}
-
-model verification_requests {
-  id                 String             @id @default(uuid())
-  userId             String
-  imageUrl           String
-  cloudinaryPublicId String?
-  status             VerificationStatus @default(PENDING)
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  users              User               @relation(fields: [userId], references: [id])
-
-  @@index([userId, status])
-}
-
-model EventLog {
-  id          String            @id @default(uuid())
-  eventType   ContractEventType // Tipo de evento (enum)
-  txHash      String // Hash de la transacción on-chain
-  blockNumber BigInt // Bloque en que ocurrió
-  logIndex    Int // Índice del log dentro de la tx
-  userAddress String? // Dirección del usuario involucrado (si aplica)
-  fromAddress String? // Dirección remitente (si aplica)
-  toAddress   String? // Dirección destinatario (si aplica)
-  amount      Decimal?          @db.Decimal(36, 18) // Monto involucrado (si aplica)
-  rawData     Json // Args completos del evento (JSON)
-  processedAt DateTime? // Cuando el backend lo procesó
-  createdAt   DateTime          @default(now()) // Cuando se capturó el evento
-
-  @@unique([txHash, logIndex]) // Evita duplicados si el app se reinicia en medio de un batch
-  @@index([eventType, createdAt])
-  @@index([txHash])
-  @@index([userAddress, createdAt])
-  @@index([blockNumber])
-  @@map("event_logs")
-}
-
-model BlacklistEntry {
-  id                 String          @id @default(uuid())
-  userId             String // Usuario afectado
-  user               User            @relation(fields: [userId], references: [id])
-  action             BlacklistAction // ADDED, REMOVED, CONFISCATED
-  reason             String? // Motivo obligatorio al agregar
-  actionBy           String // ID del admin que ejecutó
-  isCurrentlyBlocked Boolean         @default(true) // Estado actual rápido (evita queries complejas)
-
-  // Datos de confiscación (solo cuando action = CONFISCATED)
-  confiscatedWalletAmount  Decimal? @db.Decimal(36, 18) // BOBH confiscados de la wallet
-  confiscatedPendingAmount Decimal? @db.Decimal(36, 18) // BOBH confiscados de redenciones pendientes
-
-  // On-chain tracking
-  safeTxHash      String? @unique // Hash de la propuesta en Safe
-  executionTxHash String? // Hash de la tx de ejecución on-chain
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([userId, createdAt])
-  @@index([action, createdAt])
-  @@index([isCurrentlyBlocked])
-  @@map("blacklist_entries")
-}
-
-model CompanyBankAccount {
-  id            String       @id @default(uuid())
-  currency      FiatCurrency    // Moneda a la que aplica esta cuenta (BOB / PEN)
-  
-  bankName      String       //banco X
-  accountHolder String       //titular de la cuenta
-  accountNumber String       //numero de cuenta 
-  cci           String?      //útil para Perú cuenta interbancaria
-  qrImageUrl    String?     // QR estático 
-  qrPublicId    String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-
-  @@map("company_bank_accounts")
-  @@unique([currency])      // 1 cuenta por moneda 
-  @@index([currency])       // búsquedas rápidas por moneda
-  @@index([bankName])
-}
-
-enum ContractEventType {
-  MINTED
-  BURNED
-  REDEMPTION_REQUESTED
-  REDEMPTION_FINALIZED
-  REDEMPTION_REJECTED
-  CONFISCATED
-  SYSTEM_PAUSED
-  SYSTEM_UNPAUSED
-  ADDED_TO_BLACKLIST
-  REMOVED_FROM_BLACKLIST
-  TOKENS_RECOVERED
-  TRANSFER                // Transferencias P2P entre usuarios
-}
-
-// Acciones posibles en el historial de blacklist
-enum BlacklistAction {
-  ADDED
-  REMOVED
-  CONFISCATED
-}
-
-enum UserRole {
-  USER
-  ADMIN
-  OPERATOR_BO
-  OPERATOR_PE
-}
-
-enum KycStatus {
-  UNVERIFIED
-  PENDING
-  VERIFIED
-  REJECTED
-  NEED_CORRECTION
-  BLACKLISTED
-}
-
-enum KycDocumentType {
-  ID_FRONT
-  ID_BACK
-  LIVENESS_VIDEO
-}
-
-enum KycResourceType {
-  image
-  video
-  raw
-}
+/*
+|--------------------------------------------------------------------------
+| ENUMS
+|--------------------------------------------------------------------------
+*/
 
 enum Country {
   BOLIVIA
   PERU
+  ARGENTINA
+  CHILE
+  BRASIL
 }
 
-enum FiatOperationType {
-  DEPOSIT
-  WITHDRAW
+/*
+|--------------------------------------------------------------------------
+| MODELS
+|--------------------------------------------------------------------------
+*/
+
+model User {
+  id          String    @id @default(uuid())
+  email       String    @unique @db.VarChar(150)
+  password    String?   @db.VarChar(255)
+  firstName   String    @db.VarChar(100)
+  lastName    String    @db.VarChar(100)
+  phoneNumber String?   @db.VarChar(20)
+  country     Country   @default(BOLIVIA)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relaciones
+  vehicles    Vehicle[]
+
+  @@index([email])
+  @@map("users")
 }
 
-enum FiatOperationStatus {
-  PENDING
-  PROOF_SUBMITTED
-  NEED_CORRECTION
-  RATE_EXPIRED
-  APPROVED
-  REJECTED
-  PROCESSED
-  FAILED
-}
+model Vehicle {
+  id        String   @id @default(uuid())
+  plate     String   @unique @db.VarChar(15)
+  brand     String   @db.VarChar(100)
+  model     String   @db.VarChar(100)
+  year      Int
 
-enum FiatCurrency {
-  BOB
-  PEN
-}
+  ownerId   String
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
-enum TransactionType {
-  MINT
-  BURN
-  TRANSFER
-}
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-enum TransactionStatus {
-  PENDING
-  COMPLETED
-  FAILED
-}
-
-enum Network {
-  BNB_CHAIN_MAINNET
-  BNB_CHAIN_TESTNET
-}
-
-enum country_banks {
-  Bolivia
-  PERU
-}
-
-enum VerificationStatus {
-  PENDING
-  APPROVED
-  REJECTED
+  @@index([plate])
+  @@index([ownerId])
+  @@map("vehicles")
 }

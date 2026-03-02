@@ -57,9 +57,10 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document);
 
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
   logger.log(`🚀 Servidor corriendo papitos yijuu http://localhost:${port}`);
   logger.log(`🌐 Cors habilitado para este desgraciao: ${frontendUrl}`);
   logger.log(`📚 Documentación disponible en http://localhost:${port}/docs`);
+  logger.log(`📱 Para tu celular usa: http://192.168.100.9:${port}`);
 }
 void bootstrap();
