@@ -3,6 +3,8 @@ import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma.module';
 
 import { PackageModule } from './admin/package/package.module';
+import { ClientModule} from './admin/client/client.module';
+import { AnfitrionaModule } from './admin/anfitriona/anfitriona.module';
 
 @Module({
   imports: [
@@ -12,6 +14,8 @@ import { PackageModule } from './admin/package/package.module';
     }),
     PrismaModule,
     PackageModule,
+    ClientModule,
+    AnfitrionaModule,
   ],
   controllers: [],
   providers: [],

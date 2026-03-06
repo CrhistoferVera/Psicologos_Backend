@@ -1,49 +1,47 @@
-import { Controller, Post, Body, Get, Patch, Param, Delete } from '@nestjs/common';
-import { PackageService } from './package.service';
-import { CreatePackageDto } from './dto/create-package.dto';
-import { EditPackageDto } from './dto/edit-package.dto';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { Controller, Get, Patch, Param, Body, Query, ParseUUIDPipe } from '@nestjs/common';
+import { ClientService } from './client.service';
+import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { UpdateClientStatusDto } from './dto/update-client-status.dto';
 
+@ApiTags('Admin - Clientes') // Cambiado para organizar mejor tu Swagger
+@Controller('admin/clients') // Ruta profesional para el panel de administración
+export class ClientController {
+  constructor(private readonly clientService: ClientService) { }
 
-@ApiTags('Packages')
-@Controller('packages') // Define la ruta base para este controlador, por ejemplo: /packages
-export class PackageController {
-  constructor(private readonly packageService: PackageService) {}
-
-  //CREAR UN PAQUETE NUEVO
-  @Post('create')// Puedes ajustar la ruta si quieres, por ejemplo: /packages/create
-  @ApiOperation({ summary: 'Crear un nuevo paquete de suscripción' })
-  create(@Body() createPackageDto: CreatePackageDto) {
-    // Llama al servicio que valida el nombre único antes de crear
-    return this.packageService.create(createPackageDto);
-  }
-
-  //LISTA TODOS LOS PAQUETES ACTIVOS
+  /**
+   * LISTAR TODOS LOS CLIENTES (USUARIOS ROL USER)
+   */
   @Get()
-  @ApiOperation({ summary: 'Listar todos los paquetes activos' })
-  findAll() {
-    return this.packageService.findAll();
+  @ApiOperation({ summary: 'Listar clientes o buscar por nombre, email o teléfono' })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  findAll(
+    @Query('search') search?: string,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+  ) {
+    return this.clientService.findAll(search, Number(page), Number(limit));
   }
 
-  //OBTENER UN PAQUETE POR SU ID
+  /**
+   * OBTENER DETALLES DE UN CLIENTE ESPECÍFICO
+   */
   @Get(':id')
-  @ApiOperation({ summary: 'Obtener un paquete específico por ID' })
-  findOne(@Param('id') id: string) {
-    return this.packageService.findOne(id);
+  @ApiOperation({ summary: 'Obtener información detallada de un cliente' })
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.clientService.findOne(id);
   }
 
-  //EDITAR UN PAQUETE EXISTENTE
-  @Patch(':id')
-  @ApiOperation({ summary: 'Editar un paquete existente' })
-  update(@Param('id') id: string, @Body() editPackageDto: EditPackageDto) {
-    // Utiliza el DTO de edición donde los campos son opcionales
-    return this.packageService.update(id, editPackageDto);
-  }
-
-  //ELIMINAR UN PAQUETE (SOFT DELETE)
-  @Delete(':id')
-  @ApiOperation({ summary: 'Desactivar un paquete (Soft Delete)' })
-  remove(@Param('id') id: string) {
-    return this.packageService.remove(id);
+  /**
+   * ACTIVAR O SUSPENDER UN CLIENTE
+   */
+  @Patch(':id/status')
+  @ApiOperation({ summary: 'Cambiar estado del cliente (Activo/Suspendido)' })
+  updateStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateClientStatusDto: UpdateClientStatusDto
+  ) {
+    return this.clientService.updateStatus(id, updateClientStatusDto);
   }
 }

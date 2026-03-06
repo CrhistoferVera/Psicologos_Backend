@@ -1,6 +1,7 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { UpdateClientStatusDto } from './dto/update-client-status.dto';
+import { UserRole, Prisma } from "@prisma/client";
 
 
 @Injectable()
@@ -8,80 +9,89 @@ export class ClientService {
     constructor(private prisma: PrismaService) { }
 
     // ACTUALIZAR EL ESTADO DE UN CLIENTE (ACTIVAR/DESACTIVAR)
-    async update(updateClientStatusDto: UpdateClientStatusDto) {
-        const existingPackage = await this.prisma.package.findFirst({
-            where: { name: updateClientStatusDto.name },
-        });
+    async updateStatus(id: string, updateClientStatusDto: UpdateClientStatusDto) {
+        const user = await this.prisma.user.findFirst({
+            where: { id, role: UserRole.USER }
+        })
 
-        if (existingPackage) {
-            throw new ConflictException('Este nombre de paquete ya está registrado');
+        if (!user) {
+            throw new NotFoundException(`No se encontró un cliente con ID: ${id}`);
         }
 
-        return this.prisma.package.create({
-            data: createPackageDto,
+        return this.prisma.user.update({
+            where: { id },
+            data: { isActive: updateClientStatusDto.isActive }
         });
     }
-    //
 
-    // BUSCAR UN PAQUETE ESPESIFICO POR SU ID
+    // BUSCAR CLIENTE POR ID
     async findOne(id: string) {
-        const pkg = await this.prisma.package.findUnique({
-            where: { id }, // Aquí usamos el ID como criterio único
+        const client = await this.prisma.user.findFirst({
+            where: {
+                id,
+                role: UserRole.USER,
+            },
+            include: {
+                wallet: {
+                    select: {
+                        balance: true,
+                    },
+                },
+            },
         });
 
-        if (!pkg) {
-            throw new NotFoundException(`No se encontró el paquete con ID: ${id}`);
-        }
-        return pkg;
-    }
-
-    //
-    async findAll() {
-        return this.prisma.package.findMany({
-            where: { isActive: true }, // Opcional: solo traer los activos para el panel
-        });
-    }
-
-    // EDITAR UN PAQUETE
-    async update(id: string, editPackageDto: EditPackageDto) {
-        // 1. Verificar si el paquete existe
-        const pkg = await this.prisma.package.findUnique({
-            where: { id },
-        });
-
-        if (!pkg) {
-            throw new NotFoundException(`El paquete con ID ${id} no existe`);
+        if (!client) {
+            throw new NotFoundException(`No se encontró el cliente`);
         }
 
-        // 2. Si se intenta cambiar el nombre, verificar que el nuevo no esté duplicado
-        if (editPackageDto.name && editPackageDto.name !== pkg.name) {
-            const nameExists = await this.prisma.package.findFirst({
-                where: { name: editPackageDto.name },
-            });
-            if (nameExists) {
-                throw new ConflictException('El nuevo nombre ya está en uso por otro paquete');
-            }
-        }
-
-        // 3. Realizar la actualización en TablePlus
-        return this.prisma.package.update({
-            where: { id },
-            data: editPackageDto,
-        });
+        const { password, ...clientData } = client;
+        return clientData;
     }
 
-    // ELIMINAR UN PAQUETE (SOFT DELETE)
-    async remove(id: string) {
-        const pkg = await this.prisma.package.findUnique({
-            where: { id },
-        });
+    // LISTAR CLIENTES + BUSQUEDA
+    async findAll(search?: string, page: number = 1, limit: number = 10) {
 
-        if (!pkg) {
-            throw new NotFoundException(`No se puede eliminar: El paquete con ID ${id} no existe`);
+    const skip = (page - 1) * limit;
+
+    const whereCondition: Prisma.UserWhereInput = {
+        role: UserRole.USER,
+        ...(search && {
+            OR: [
+                { firstName: { contains: search, mode: 'insensitive' } },
+                { lastName: { contains: search, mode: 'insensitive' } },
+                { phoneNumber: { contains: search } },
+                { email: { contains: search, mode: 'insensitive' } },
+            ]
+        })
+    };
+    const [clients, total] = await Promise.all([
+        this.prisma.user.findMany({
+            where: whereCondition,
+            include: {
+                wallet: {
+                    select: { balance: true }
+                }
+            },
+            orderBy: { createdAt: 'desc' },
+            skip: skip,
+            take: limit
+        }),
+
+        this.prisma.user.count({
+            where: whereCondition
+        })
+    ]);
+
+    const sanitizedClients = clients.map(({ password, ...clientData }) => clientData);
+    return {
+        data: sanitizedClients,
+        meta: {
+            total,
+            page,
+            lastPage: Math.ceil(total / limit),
+            limit
         }
+    };
+}
 
-        return this.prisma.package.delete({
-            where: { id },
-        });
-    }
 }
