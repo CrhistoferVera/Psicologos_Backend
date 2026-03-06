@@ -13,7 +13,6 @@ model User {
   password            String?
   firstName           String?
   lastName            String?
-  isActive            Boolean   @default(true)
   isProfileComplete   Boolean   @default(false)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
@@ -21,21 +20,21 @@ model User {
   role                UserRole  @default(USER)
   resetPasswordExpiry DateTime?
   resetPasswordToken  String?
+  isActive            Boolean   @default(true)
 
   @@map("users")
 }
 
 model Package {
-  id      String  @id @default(uuid())
-  name    String  @db.VarChar(100)
-  credits Int
-  price   Decimal @db.Decimal(10, 2)
-
+  id        String   @id @default(uuid())
+  name      String   @db.VarChar(100)
+  credits   Int
+  price     Decimal  @db.Decimal(10, 2)
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@map("packages") // Nombre de la tabla en la base de datos
+  @@map("packages")
 }
 
 enum UserRole {
