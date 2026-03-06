@@ -1,0 +1,299 @@
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { v2 as cloudinary } from 'cloudinary';
+
+@Injectable()
+export class CloudinaryService {
+  constructor() {
+    const cloudinaryUrl = process.env.CLOUDINARY_URL;
+
+    if (cloudinaryUrl) {
+      try {
+        const u = new URL(cloudinaryUrl);
+        const cloudName = u.hostname;
+        const apiKey = decodeURIComponent(u.username);
+        const apiSecret = decodeURIComponent(u.password);
+
+        if (!cloudName || !apiKey || !apiSecret)
+          throw new Error('Invalid CLOUDINARY_URL');
+
+        cloudinary.config({
+          cloud_name: cloudName,
+          api_key: apiKey,
+          api_secret: apiSecret,
+          secure: true,
+        });
+
+        return;
+      } catch {
+        throw new InternalServerErrorException('CLOUDINARY_URL inválida.');
+      }
+    }
+
+    // Fallback por si se usa variables separadas
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const apiKey = process.env.CLOUDINARY_API_KEY;
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+
+    if (!cloudName || !apiKey || !apiSecret) {
+      throw new InternalServerErrorException(
+        'Faltan variables de Cloudinary. Usa CLOUDINARY_URL o CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET.',
+      );
+    }
+
+    cloudinary.config({
+      cloud_name: cloudName,
+      api_key: apiKey,
+      api_secret: apiSecret,
+      secure: true,
+    });
+  }
+
+  async uploadDepositProof(params: {
+    file: Express.Multer.File;
+    userId: string;
+    depositId: string;
+    referenceCode: string;
+    isPrivate?: boolean;
+  }): Promise<{ secureUrl: string; publicId: string }> {
+    const { file, userId, depositId, isPrivate } = params;
+
+    const isImage = file.mimetype.startsWith('image/');
+    const isPdf = file.mimetype === 'application/pdf';
+    if (!isImage && !isPdf) {
+      throw new InternalServerErrorException('Tipo de archivo no soportado.');
+    }
+
+    const resourceType: 'image' | 'raw' = isImage ? 'image' : 'raw';
+    const folder = `pachamama/users/${userId}/deposits/${depositId}`;
+    const publicId = `proof_${Date.now()}`;
+
+    if (isPrivate) {
+      const uploaded = await this.uploadPrivate({
+        file,
+        folder,
+        publicId,
+        resourceType,
+      });
+
+      const signedUrl = this.getSignedUrl({
+        publicId: uploaded.publicId,
+        resourceType: uploaded.resourceType,
+        expiresInSeconds: 10 * 60,
+      });
+
+      return { secureUrl: signedUrl, publicId: uploaded.publicId };
+    }
+
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder, public_id: publicId, resource_type: resourceType },
+        (error, result) => {
+          if (error || !result?.secure_url) {
+            return reject(
+              new InternalServerErrorException(
+                'No se pudo subir el comprobante a Cloudinary.',
+              ),
+            );
+          }
+          resolve({ secureUrl: result.secure_url, publicId: result.public_id });
+        },
+      );
+
+      uploadStream.end(file.buffer);
+    });
+  }
+
+  async uploadVerificationFile(params: {
+    file: Express.Multer.File;
+    userId: string;
+    isPrivate?: boolean;
+  }): Promise<{ secureUrl: string; publicId: string }> {
+    const { file, userId, isPrivate } = params;
+    const isImage = file.mimetype.startsWith('image/');
+    const isPdf = file.mimetype === 'application/pdf';
+    if (!isImage && !isPdf) {
+      throw new InternalServerErrorException('Tipo de archivo no soportado.');
+    }
+    const resourceType: 'image' | 'raw' = isImage ? 'image' : 'raw';
+    const folder = `pachamama/users/${userId}/verification`;
+    const publicId = `proof_${Date.now()}`;
+
+    if (isPrivate) {
+      const uploaded = await this.uploadPrivate({
+        file,
+        folder,
+        publicId,
+        resourceType,
+      });
+
+      const signedUrl = this.getSignedUrl({
+        publicId: uploaded.publicId,
+        resourceType: uploaded.resourceType,
+        expiresInSeconds: 10 * 60,
+      });
+
+      return { secureUrl: signedUrl, publicId: uploaded.publicId };
+    }
+
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder, public_id: publicId, resource_type: resourceType },
+        (error, result) => {
+          if (error || !result?.secure_url) {
+            return reject(
+              new InternalServerErrorException(
+                'No se pudo subir el comprobante a Cloudinary.',
+              ),
+            );
+          }
+          resolve({ secureUrl: result.secure_url, publicId: result.public_id });
+        },
+      );
+
+      uploadStream.end(file.buffer);
+    });
+  }
+
+  async uploadWithdrawalProof(params: {
+  file: Express.Multer.File;
+  userId: string;
+  withdrawalId: string;
+  isPrivate?: boolean;
+}): Promise<{ secureUrl: string; publicId: string }> {
+  const { file, userId, withdrawalId, isPrivate } = params;
+
+  // Validar tipo de archivo
+  const isImage = file.mimetype.startsWith('image/');
+  const isPdf = file.mimetype === 'application/pdf';
+  if (!isImage && !isPdf) {
+    throw new InternalServerErrorException('Tipo de archivo no soportado.');
+  }
+
+  const resourceType: 'image' | 'raw' = isImage ? 'image' : 'raw';
+  const folder = `pachamama/users/${userId}/withdrawals/${withdrawalId}`;
+  const publicId = `proof_${Date.now()}`;
+
+  if (isPrivate) {
+    const uploaded = await this.uploadPrivate({
+      file,
+      folder,
+      publicId,
+      resourceType,
+    });
+
+    const signedUrl = this.getSignedUrl({
+      publicId: uploaded.publicId,
+      resourceType: uploaded.resourceType,
+      expiresInSeconds: 10 * 60,
+    });
+
+    return { secureUrl: signedUrl, publicId: uploaded.publicId };
+  }
+
+  // Subida a Cloudinary
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      { folder, public_id: publicId, resource_type: resourceType },
+      (error, result) => {
+        if (error || !result?.secure_url) {
+          return reject(
+            new InternalServerErrorException(
+              'No se pudo subir el comprobante de retiro a Cloudinary.',
+            ),
+          );
+        }
+        resolve({ secureUrl: result.secure_url, publicId: result.public_id });
+      },
+    );
+
+    uploadStream.end(file.buffer);
+  });
+}
+
+  async uploadPrivate(params: {
+    file: Express.Multer.File;
+    folder: string;
+    publicId: string;
+    resourceType: 'image' | 'video' | 'raw';
+  }): Promise<{ publicId: string; resourceType: 'image' | 'video' | 'raw'; bytes: number; format?: string }> {
+    const { file, folder, publicId, resourceType } = params;
+
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder,
+          public_id: publicId,
+          resource_type: resourceType,
+          type: 'authenticated',
+          overwrite: true,
+          invalidate: true,
+        },
+        (error, result) => {
+          if (error || !result?.public_id) {
+            return reject(
+              new InternalServerErrorException(
+                'No se pudo subir el archivo a Cloudinary.',
+              ),
+            );
+          }
+
+          resolve({
+            publicId: result.public_id,
+            resourceType: resourceType,
+            bytes: result.bytes ?? 0,
+            format: result.format,
+          });
+        },
+      );
+
+      uploadStream.end(file.buffer);
+    });
+  }
+
+  getSignedUrl(params: {
+    publicId: string;
+    resourceType: 'image' | 'video' | 'raw';
+    expiresInSeconds: number;
+    version?: number;
+  }): string {
+    const { publicId, resourceType, expiresInSeconds, version } = params;
+    const expiresAt = Math.floor(Date.now() / 1000) + Math.max(1, expiresInSeconds);
+
+    return cloudinary.url(publicId, {
+      resource_type: resourceType,
+      type: 'authenticated',
+      sign_url: true,
+      expires_at: expiresAt,
+      secure: true,
+      ...(version ? { version } : {}),
+    });
+  }
+
+  async uploadAnfitrioneIdDoc(params: {
+    file: Express.Multer.File;
+    userId: string;
+  }): Promise<{ secureUrl: string; publicId: string }> {
+    const { file, userId } = params;
+
+    const isImage = file.mimetype.startsWith('image/');
+    const isPdf = file.mimetype === 'application/pdf';
+    if (!isImage && !isPdf) {
+      throw new InternalServerErrorException(
+        'Tipo de archivo no soportado. Solo imágenes o PDF.',
+      );
+    }
+
+    const resourceType: 'image' | 'raw' = isImage ? 'image' : 'raw';
+    const folder = `pachamama/anfitrionas/${userId}/identity`;
+    const publicId = `id_doc_${Date.now()}`;
+
+    const uploaded = await this.uploadPrivate({
+      file,
+      folder,
+      publicId,
+      resourceType,
+    });
+
+    return { secureUrl: uploaded.publicId, publicId: uploaded.publicId };
+  }
+}

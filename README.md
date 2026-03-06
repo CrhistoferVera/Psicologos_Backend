@@ -19,6 +19,13 @@ FRONTEND_URL=http://localhost:3000
 EVOLUTION_API_URL=http://tu-evolution-api-host
 EVOLUTION_API_INSTANCE=nombre_instancia
 EVOLUTION_API_KEY=tu_api_key
+
+# Cloudinary (subida de archivos)
+CLOUDINARY_URL=cloudinary://api_key:api_secret@cloud_name
+# O por separado:
+# CLOUDINARY_CLOUD_NAME=tu_cloud_name
+# CLOUDINARY_API_KEY=tu_api_key
+# CLOUDINARY_API_SECRET=tu_api_secret
 ```
 
 ## Correr el proyecto
@@ -272,12 +279,156 @@ PATCH /users/edit-password
 
 ---
 
+## Endpoints de Anfitrionas
+
+> Todos los endpoints de anfitrionas requieren:
+> ```
+> Authorization: Bearer <access_token_de_admin>
+> ```
+> Solo usuarios con `role: "ADMIN"` pueden acceder.
+
+### 9. 🔒 Registrar anfitriona (solo ADMIN)
+
+```
+POST /anfitrionas
+Content-Type: multipart/form-data
+```
+
+El admin registra a la anfitriona. La anfitriona **no puede registrarse a sí misma**.
+
+**Campos del form-data:**
+
+| Campo | Tipo | Requerido | Descripción |
+|-------|------|-----------|-------------|
+| `firstName` | texto | Sí | Nombres |
+| `lastName` | texto | Sí | Apellidos |
+| `phoneNumber` | texto | Sí | Teléfono con código de país (ej: `59171234567`) |
+| `dateOfBirth` | texto | Sí | Fecha de nacimiento en formato ISO: `1995-06-15` |
+| `cedula` | texto | Sí | Número de cédula de identidad |
+| `username` | texto | Sí | Nombre de usuario único |
+| `email` | texto | No | Email (opcional) |
+| `idDoc` | archivo | No | Documento de identidad (imagen JPG/PNG o PDF) |
+
+**Cómo configurar en Postman:**
+1. Método: `POST`, URL: `http://localhost:4000/anfitrionas`
+2. Tab **Authorization** → Bearer Token → pegar `access_token` de un admin
+3. Tab **Body** → seleccionar `form-data`
+4. Agregar cada campo como `Text`, y `idDoc` como `File`
+
+**Respuesta exitosa `201`:**
+```json
+{
+  "user": {
+    "id": "uuid",
+    "phoneNumber": "59171234567",
+    "email": null,
+    "firstName": "Camila",
+    "lastName": "Sanches Carrillo",
+    "isProfileComplete": true,
+    "role": "ANFITRIONA",
+    "createdAt": "2026-03-06T00:00:00.000Z",
+    "updatedAt": "2026-03-06T00:00:00.000Z",
+    "lastLogin": null
+  },
+  "profile": {
+    "id": "uuid",
+    "userId": "uuid",
+    "dateOfBirth": "1995-06-15T00:00:00.000Z",
+    "cedula": "34535355",
+    "username": "cristina_princ",
+    "idDocUrl": "pachamama/anfitrionas/uuid/identity/id_doc_...",
+    "idDocPublicId": "pachamama/anfitrionas/uuid/identity/id_doc_...",
+    "createdAt": "2026-03-06T00:00:00.000Z",
+    "updatedAt": "2026-03-06T00:00:00.000Z"
+  }
+}
+```
+
+---
+
+### 10. 🔒 Listar todas las anfitrionas (solo ADMIN)
+
+```
+GET /anfitrionas
+```
+
+**Respuesta exitosa `200`:**
+```json
+[
+  {
+    "id": "uuid",
+    "phoneNumber": "59171234567",
+    "firstName": "Camila",
+    "lastName": "Sanches Carrillo",
+    "email": null,
+    "isProfileComplete": true,
+    "createdAt": "2026-03-06T00:00:00.000Z",
+    "anfitrionaProfile": {
+      "id": "uuid",
+      "dateOfBirth": "1995-06-15T00:00:00.000Z",
+      "cedula": "34535355",
+      "username": "cristina_princ",
+      "idDocUrl": "...",
+      "idDocPublicId": "..."
+    }
+  }
+]
+```
+
+---
+
+### 11. 🔒 Obtener anfitriona por ID (solo ADMIN)
+
+```
+GET /anfitrionas/:id
+```
+
+> `:id` es el `userId` (UUID del usuario).
+
+**Respuesta exitosa `200`:**
+```json
+{
+  "id": "uuid",
+  "phoneNumber": "59171234567",
+  "firstName": "Camila",
+  "lastName": "Sanches Carrillo",
+  "email": null,
+  "isProfileComplete": true,
+  "createdAt": "2026-03-06T00:00:00.000Z",
+  "anfitrionaProfile": {
+    "id": "uuid",
+    "dateOfBirth": "1995-06-15T00:00:00.000Z",
+    "cedula": "34535355",
+    "username": "cristina_princ",
+    "idDocUrl": "...",
+    "idDocPublicId": "..."
+  }
+}
+```
+
+---
+
+## Migraciones de base de datos
+
+Después de cualquier cambio en `prisma/schema.prisma`, correr:
+
+```bash
+npx prisma migrate dev --name <nombre_descriptivo>
+```
+
+Migraciones aplicadas hasta ahora:
+- `init` — tablas iniciales (`users`)
+- `add-anfitrione-profile` — tabla `anfitrione_profiles` con relación a `users`
+
+---
+
 ## Errores comunes
 
 | Código | Causa |
 |--------|-------|
 | `400`  | OTP inválido o expirado / contraseñas no coinciden / `tempToken` expirado |
 | `401`  | Email o contraseña incorrectos / JWT inválido o ausente |
+| `403`  | Intentar acceder a endpoint de ADMIN sin serlo |
 | `404`  | Usuario no encontrado |
-| `409`  | El email ya está registrado |
-| `500`  | Error al enviar mensaje de WhatsApp (verificar config de Evolution API) |
+| `409`  | Teléfono, email, cédula o username ya registrado |
+| `500`  | Error al enviar WhatsApp o subir archivo a Cloudinary |
