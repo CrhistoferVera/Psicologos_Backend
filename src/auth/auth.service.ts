@@ -82,18 +82,21 @@ export class AuthService {
       throw new BadRequestException('Las contraseñas no coinciden');
     }
 
-    if (dto.email) {
-      const existing = await this.usersService.findOneByEmail(dto.email);
-      if (existing) {
-        throw new ConflictException('El email ya está registrado');
-      }
+    const email = dto.email?.trim().toLowerCase();
+    if (!email) {
+      throw new BadRequestException('El email es obligatorio');
+    }
+
+    const existing = await this.usersService.findOneByEmail(email);
+    if (existing) {
+      throw new ConflictException('El email ya está registrado');
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     const newUser = await this.usersService.create({
       phoneNumber: payload.sub,
-      email: dto.email,
+      email,
       firstName: dto.firstName,
       lastName: dto.lastName,
       password: hashedPassword,
@@ -141,3 +144,5 @@ export class AuthService {
     };
   }
 }
+
+

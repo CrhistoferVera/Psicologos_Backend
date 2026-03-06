@@ -14,12 +14,6 @@ async function bootstrap() {
     configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3000'
   ).replace(/\/$/, '');
 
-  // Request logger temporal (incluye 404/400)
-  app.use((req, _res, next) => {
-    console.log(`[REQ] ${req.method} ${req.originalUrl}`);
-    next();
-  });
-
   // Middleware de logging
   app.use((req, res, next) => {
     const { method, originalUrl } = req;
