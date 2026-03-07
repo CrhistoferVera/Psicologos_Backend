@@ -289,12 +289,51 @@ PATCH /users/edit-password
 
 ### 9. 🔒 Registrar anfitriona (solo ADMIN)
 
+La anfitriona **no puede registrarse a sí misma**. El flujo requiere 2 pasos:
+
+#### Paso 1 — El admin obtiene su token
+
 ```
-POST /anfitrionas
-Content-Type: multipart/form-data
+POST /auth/send-otp
+Content-Type: application/json
+
+{
+  "phoneNumber": "59171000001"
+}
 ```
 
-El admin registra a la anfitriona. La anfitriona **no puede registrarse a sí misma**.
+```
+POST /auth/verify-otp
+Content-Type: application/json
+
+{
+  "phoneNumber": "59171000001",
+  "code": "482910"
+}
+```
+
+Respuesta:
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": { "role": "ADMIN", ... }
+}
+```
+
+> El usuario admin debe existir en la DB con `role = 'ADMIN'`. Para asignarlo en desarrollo:
+> ```sql
+> UPDATE users SET role = 'ADMIN' WHERE phone_number = '59171000001';
+> ```
+
+---
+
+#### Paso 2 — El admin crea la anfitriona
+
+```
+POST /anfitrionas
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: multipart/form-data
+```
 
 **Campos del form-data:**
 
@@ -303,17 +342,30 @@ El admin registra a la anfitriona. La anfitriona **no puede registrarse a sí mi
 | `firstName` | texto | Sí | Nombres |
 | `lastName` | texto | Sí | Apellidos |
 | `phoneNumber` | texto | Sí | Teléfono con código de país (ej: `59171234567`) |
-| `dateOfBirth` | texto | Sí | Fecha de nacimiento en formato ISO: `1995-06-15` |
+| `dateOfBirth` | texto | Sí | Fecha de nacimiento ISO: `1995-06-15` |
 | `cedula` | texto | Sí | Número de cédula de identidad |
 | `username` | texto | Sí | Nombre de usuario único |
 | `email` | texto | No | Email (opcional) |
-| `idDoc` | archivo | No | Documento de identidad (imagen JPG/PNG o PDF) |
+| `idDoc` | archivo | No | Documento de identidad (JPG, PNG o PDF) |
 
-**Cómo configurar en Postman:**
-1. Método: `POST`, URL: `http://localhost:4000/anfitrionas`
-2. Tab **Authorization** → Bearer Token → pegar `access_token` de un admin
+**Cómo configurarlo en Postman:**
+1. Método `POST`, URL: `http://localhost:4000/anfitrionas`
+2. Tab **Auth** → Type: `Bearer Token` → pegar el `access_token` del admin
 3. Tab **Body** → seleccionar `form-data`
-4. Agregar cada campo como `Text`, y `idDoc` como `File`
+4. Agregar cada campo con tipo `Text`, y `idDoc` con tipo `File`
+
+**Ejemplo de valores:**
+
+| Key | Value |
+|-----|-------|
+| `firstName` | `Camila` |
+| `lastName` | `Sanches Carrillo` |
+| `phoneNumber` | `59175555555` |
+| `dateOfBirth` | `1995-06-15` |
+| `cedula` | `34535355` |
+| `username` | `cristina_princ` |
+| `email` | `camila@gmail.com` |
+| `idDoc` | _(seleccionar archivo)_ |
 
 **Respuesta exitosa `201`:**
 ```json
