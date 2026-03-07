@@ -20,8 +20,8 @@ export class AnfitrioneService {
     const [existingPhone, existingCedula, existingUsername, existingEmail] =
       await Promise.all([
         this.prisma.user.findUnique({ where: { phoneNumber: dto.phoneNumber } }),
-        this.prisma.anfitrionaProfile.findUnique({ where: { cedula: dto.cedula } }),
-        this.prisma.anfitrionaProfile.findUnique({ where: { username: dto.username } }),
+        this.prisma.anfitrioneProfile.findUnique({ where: { cedula: dto.cedula } }),
+        this.prisma.anfitrioneProfile.findUnique({ where: { username: dto.username } }),
         dto.email
           ? this.prisma.user.findUnique({ where: { email: dto.email } })
           : Promise.resolve(null),
@@ -78,7 +78,7 @@ export class AnfitrioneService {
     }
 
     // Crear perfil de anfitriona
-    const profile = await this.prisma.anfitrionaProfile.create({
+    const profile = await this.prisma.anfitrioneProfile.create({
       data: {
         userId: user.id,
         dateOfBirth: new Date(dto.dateOfBirth),
