@@ -49,9 +49,7 @@ export class AnfitrionaService {
     }
 
     // LISTAR CLIENTES + BUSQUEDA
-    async findAll(search?: string, page: number = 1, limit: number = 10) {
-
-        const skip = (page - 1) * limit;
+    async findAll(search?: string, cursor?: string, limit: number = 10) {
 
         const whereCondition: Prisma.UserWhereInput = {
             role: UserRole.ANFITRIONA,
@@ -64,33 +62,37 @@ export class AnfitrionaService {
                 ]
             })
         };
-        const [anfitriona, total] = await Promise.all([
-            this.prisma.user.findMany({
-                where: whereCondition,
-                include: {
-                    wallet: {
-                        select: { balance: true }
-                    }
-                },
-                orderBy: { createdAt: 'desc' },
-                skip: skip,
-                take: limit
-            }),
 
-            this.prisma.user.count({
-                where: whereCondition
+        const anfitriona = await this.prisma.user.findMany({
+            where: whereCondition,
+            include: {
+                wallet: {
+                    select: { balance: true }
+                }
+            },
+            orderBy: [
+                { isActive: 'desc' },
+                { createdAt: 'desc' }
+            ],
+            take: limit + 1, // para saber si hay más datos
+            ...(cursor && {
+                skip: 1,
+                cursor: { id: cursor }
             })
-        ]);
+        });
 
-        const sanitizedAnfitriona = anfitriona.map(({ password, ...anfitrionaData }) => anfitrionaData);
+        let nextCursor: string | null = null;
+
+        if (anfitriona.length > limit) {
+            const nextItem = anfitriona.pop();
+            nextCursor = nextItem!.id;
+        }
+
+        const sanitized = anfitriona.map(({ password, ...data }) => data);
+
         return {
-            data: sanitizedAnfitriona,
-            meta: {
-                total,
-                page,
-                lastPage: Math.ceil(total / limit),
-                limit
-            }
+            data: sanitized,
+            nextCursor
         };
     }
 
