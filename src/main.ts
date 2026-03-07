@@ -61,6 +61,6 @@ async function bootstrap() {
   logger.log(`🚀 Servidor corriendo papitos yijuu http://localhost:${port}`);
   logger.log(`🌐 Cors habilitado para este desgraciao: ${frontendUrl}`);
   logger.log(`📚 Documentación disponible en http://localhost:${port}/docs`);
-  logger.log(`📱 Para tu celular usa: https://paginas-pachamama-backend.pk1ooa.easypanel.host${port}`);
+  logger.log(`📱 Para tu celular usa: https://paginas-pachamama-backend.pk1ooa.easypanel.host:${port}`);
 }
 void bootstrap();
