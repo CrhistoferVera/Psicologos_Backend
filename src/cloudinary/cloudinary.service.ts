@@ -155,60 +155,60 @@ export class CloudinaryService {
   }
 
   async uploadWithdrawalProof(params: {
-  file: Express.Multer.File;
-  userId: string;
-  withdrawalId: string;
-  isPrivate?: boolean;
-}): Promise<{ secureUrl: string; publicId: string }> {
-  const { file, userId, withdrawalId, isPrivate } = params;
+    file: Express.Multer.File;
+    userId: string;
+    withdrawalId: string;
+    isPrivate?: boolean;
+  }): Promise<{ secureUrl: string; publicId: string }> {
+    const { file, userId, withdrawalId, isPrivate } = params;
 
-  // Validar tipo de archivo
-  const isImage = file.mimetype.startsWith('image/');
-  const isPdf = file.mimetype === 'application/pdf';
-  if (!isImage && !isPdf) {
-    throw new InternalServerErrorException('Tipo de archivo no soportado.');
-  }
+    // Validar tipo de archivo
+    const isImage = file.mimetype.startsWith('image/');
+    const isPdf = file.mimetype === 'application/pdf';
+    if (!isImage && !isPdf) {
+      throw new InternalServerErrorException('Tipo de archivo no soportado.');
+    }
 
-  const resourceType: 'image' | 'raw' = isImage ? 'image' : 'raw';
-  const folder = `pachamama/users/${userId}/withdrawals/${withdrawalId}`;
-  const publicId = `proof_${Date.now()}`;
+    const resourceType: 'image' | 'raw' = isImage ? 'image' : 'raw';
+    const folder = `pachamama/users/${userId}/withdrawals/${withdrawalId}`;
+    const publicId = `proof_${Date.now()}`;
 
-  if (isPrivate) {
-    const uploaded = await this.uploadPrivate({
-      file,
-      folder,
-      publicId,
-      resourceType,
+    if (isPrivate) {
+      const uploaded = await this.uploadPrivate({
+        file,
+        folder,
+        publicId,
+        resourceType,
+      });
+
+      const signedUrl = this.getSignedUrl({
+        publicId: uploaded.publicId,
+        resourceType: uploaded.resourceType,
+        expiresInSeconds: 10 * 60,
+      });
+
+      return { secureUrl: signedUrl, publicId: uploaded.publicId };
+    }
+
+    // Subida a Cloudinary
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder, public_id: publicId, resource_type: resourceType },
+        (error, result) => {
+          if (error || !result?.secure_url) {
+            return reject(
+              new InternalServerErrorException(
+                'No se pudo subir el comprobante de retiro a Cloudinary.',
+              ),
+            );
+          }
+          resolve({ secureUrl: result.secure_url, publicId: result.public_id });
+        },
+      );
+
+      uploadStream.end(file.buffer);
     });
-
-    const signedUrl = this.getSignedUrl({
-      publicId: uploaded.publicId,
-      resourceType: uploaded.resourceType,
-      expiresInSeconds: 10 * 60,
-    });
-
-    return { secureUrl: signedUrl, publicId: uploaded.publicId };
   }
-
-  // Subida a Cloudinary
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      { folder, public_id: publicId, resource_type: resourceType },
-      (error, result) => {
-        if (error || !result?.secure_url) {
-          return reject(
-            new InternalServerErrorException(
-              'No se pudo subir el comprobante de retiro a Cloudinary.',
-            ),
-          );
-        }
-        resolve({ secureUrl: result.secure_url, publicId: result.public_id });
-      },
-    );
-
-    uploadStream.end(file.buffer);
-  });
-}
 
   async uploadPrivate(params: {
     file: Express.Multer.File;
@@ -295,5 +295,59 @@ export class CloudinaryService {
     });
 
     return { secureUrl: uploaded.publicId, publicId: uploaded.publicId };
+  }
+
+
+
+  async uploadHistoryMedia(params: {
+    file: Express.Multer.File;
+    userId: string;
+  }): Promise<{ secureUrl: string; publicId: string; resourceType: 'image' | 'video' }> {
+    const { file, userId } = params;
+
+    // 1. Detectar si es imagen o video
+    const isImage = file.mimetype.startsWith('image/');
+    const isVideo = file.mimetype.startsWith('video/');
+
+    if (!isImage && !isVideo) {
+      throw new InternalServerErrorException('Formato no permitido. Solo imágenes o videos.');
+    }
+
+    const resourceType = isImage ? 'image' : 'video';
+    const folder = `pachamama/users/${userId}/histories`;
+    const publicId = `history_${Date.now()}`;
+
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder,
+          public_id: publicId,
+          resource_type: resourceType,
+
+        },
+        (error, result) => {
+          if (error || !result?.secure_url) {
+            return reject(new InternalServerErrorException('Error al subir media a Cloudinary.'));
+          }
+          resolve({
+            secureUrl: result.secure_url,
+            publicId: result.public_id,
+            resourceType: resourceType
+          });
+        },
+      );
+
+      uploadStream.end(file.buffer);
+    });
+  }
+
+  //ELIMINAR UNA HISTORIA DE UNA ANFITRIONA
+  async deleteHistoryMedia(publicId: string, type: 'image' | 'video') {
+    try {
+      await cloudinary.uploader.destroy(publicId, { invalidate: true, resource_type: type });
+
+    } catch (error) {
+      throw new InternalServerErrorException('Error al eliminar el archivo de cloudinary.');
+    }
   }
 }

@@ -2,6 +2,7 @@ import { Controller, Get, Patch, Param, Body, Query, ParseUUIDPipe } from '@nest
 import { AnfitrionaService } from './anfitriona.service';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { UpdateAnfitrionaDto } from './dto/update-anfitriona.dto';
+import { CreateHistoryDto } from '../../anfitrionas/dto/create-history.dto';
 
 @ApiTags('Admin - Anfitrionas') // Cambiado para organizar mejor tu Swagger
 @Controller('admin/anfitrionas') // Ruta profesional para el panel de administración

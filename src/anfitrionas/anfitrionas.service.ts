@@ -2,18 +2,21 @@ import {
   ConflictException,
   Injectable,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole, MediaType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { CreateAnfitrioneDto } from './dto/create-anfitriona.dto';
+import { CreateHistoryDto } from './dto/create-history.dto';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class AnfitrioneService {
   constructor(
     private prisma: PrismaService,
     private cloudinary: CloudinaryService,
-  ) {}
+  ) { }
 
   async create(dto: CreateAnfitrioneDto, idDocFile?: Express.Multer.File) {
     // Verificar unicidad antes de crear
@@ -125,4 +128,107 @@ export class AnfitrioneService {
       },
     });
   }
+
+  //CREAR UNA HISTORIA PARA UNA ANFITRIONA
+  async createHistory(userId: string, createHistoryDto: CreateHistoryDto, file: Express.Multer.File,) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    })
+
+    if (!user) {
+      throw new NotFoundException(`Anfitriona con ID ${userId} no encontrada`);
+    }
+
+    if (user.role !== UserRole.ANFITRIONA) {
+      throw new NotFoundException('solo las anfitrionas pueden tener historias');
+    }
+
+    const upload = await this.cloudinary.uploadHistoryMedia({
+      file,
+      userId,
+    });
+
+    return this.prisma.history.create({
+      data: {
+        userId: user.id,
+        mediaUrl: upload.secureUrl,
+        publicId: upload.publicId,
+        mediaType: upload.resourceType.toUpperCase() as MediaType,
+        priceCredits: createHistoryDto.priceCredits,
+        publishedAt: new Date(),
+      },
+    });
+  }
+
+  //ELIMINAR UNA HISTORIA DE UNA ANFITRIONA
+  async deleteHistory(userId: string, historyId: string) {
+    // Verificar que la historia exista y pertenezca a la anfitriona que solicita
+    const history = await this.prisma.history.findUnique({
+      where: {
+        id: historyId,
+        userId: userId,
+      },
+    });
+
+    if (!history) {
+      throw new NotFoundException(
+        `No se encontró la historia o no tienes permiso para eliminarla.`,
+      );
+    }
+
+    const resourceType = history.mediaType.toLowerCase() as 'image' | 'video';
+    const publicId = history.publicId;
+
+    // Eliminar archivo físico de Cloudinary
+    if (publicId) {
+      await this.cloudinary.deleteHistoryMedia(publicId, resourceType);
+
+    }
+    // Eliminar registro de la base de datos Prisma
+    return this.prisma.history.delete({
+      where: { id: historyId },
+    });
+  }
+
+  //24 HORAS DESPUES DE PUBLICADA, LA HISTORIA SE ELIMINA AUTOMATICAMENTE (TAREA PROGRAMADA)
+  @Cron(CronExpression.EVERY_30_MINUTES) 
+  async handleCron() {
+
+    const expirationDate = new Date();
+    expirationDate.setHours(expirationDate.getHours() - 24);
+
+    const expiredHistories = await this.prisma.history.findMany({
+      where: {
+        publishedAt: {
+          lt: expirationDate, // lt = Less Than (menor que la fecha de expiración)
+        },
+      },
+      select: {
+        id:true,
+        mediaType: true,
+        publicId: true,
+      }
+    });
+
+    if (expiredHistories.length === 0) return;
+
+    for (const history of expiredHistories) {
+      try {
+        const resourceType = history.mediaType.toLowerCase() as 'image' | 'video';
+
+        if (history.publicId) {
+          await this.cloudinary.deleteHistoryMedia(history.publicId, resourceType);
+        }
+
+        await this.prisma.history.delete({
+          where: { id: history.id },
+        });
+
+        console.log(`Historia ${history.id} eliminada automáticamente por expiración.`);
+      } catch (error) {
+        console.error(`Error al eliminar historia expirada ${history.id}:`, error);
+      }
+    }
+  }
+
 }

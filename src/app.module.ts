@@ -9,6 +9,7 @@ import { AnfitrioneModule } from './anfitrionas/anfitrionas.module';
 import { PackageModule } from './admin/package/package.module';
 import { ClientModule} from './admin/client/client.module';
 import { AnfitrionaModule } from './admin/anfitriona/anfitriona.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { AnfitrionaModule } from './admin/anfitriona/anfitriona.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     PackageModule,
     ClientModule,
