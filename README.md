@@ -484,3 +484,164 @@ Migraciones aplicadas hasta ahora:
 | `404`  | Usuario no encontrado |
 | `409`  | Teléfono, email, cédula o username ya registrado |
 | `500`  | Error al enviar WhatsApp o subir archivo a Cloudinary |
+
+---
+
+## Endpoints Públicos — Área Cliente
+
+> Estos endpoints **no requieren autenticación**. Cualquier cliente puede llamarlos sin `Authorization` header.
+> Son los únicos endpoints que consume el frontend en la zona del cliente por ahora.
+
+---
+
+### Listado de anfitrionas (feed del cliente)
+
+```
+GET /anfitrionas/public
+```
+
+Sin parámetros. Devuelve todas las anfitrionas con `isActive: true` e `isProfileComplete: true`.
+
+**Respuesta `200`:**
+```json
+{
+  "data": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Maria Lopez",
+      "avatar": "https://res.cloudinary.com/.../avatar.jpg",
+      "shortDescription": "Conversaciones alegres 🌸✨",
+      "rateCredits": 10,
+      "mainImage": "https://res.cloudinary.com/.../main.jpg",
+      "images": [
+        "https://res.cloudinary.com/.../img1.jpg",
+        "https://res.cloudinary.com/.../img2.jpg"
+      ],
+      "isOnline": true
+    }
+  ]
+}
+```
+
+**Campos de la respuesta:**
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `id` | `string` (UUID) | ID del usuario anfitriona — se usa para navegar al detalle |
+| `name` | `string` | Nombre completo (`firstName + lastName`) |
+| `avatar` | `string \| null` | URL de imagen circular del perfil (Cloudinary) |
+| `shortDescription` | `string \| null` | Texto corto del campo `bio` en el perfil |
+| `rateCredits` | `number \| null` | Créditos por conversación. `null` si no fue configurado |
+| `mainImage` | `string \| null` | Primera imagen del perfil. Es `images[0]` |
+| `images` | `string[]` | Todas las imágenes del perfil, ordenadas por `sortOrder` |
+| `isOnline` | `boolean` | Estado de disponibilidad (actualizado manualmente por ahora) |
+
+**Cómo lo usa el frontend:**
+- Función: `src/services/hostesses.ts` → `getPublicHostesses()`
+- Pantalla: `app/(cliente)/index.tsx` — llama `getPublicHostesses()` en el `useEffect` inicial
+
+**Campos UI pendientes de backend** (el mapper los rellena con defaults hasta que estén):
+
+| Campo UI | Default actual | Qué agregar al backend cuando esté listo |
+|----------|---------------|------------------------------------------|
+| `likesCount` | `0` | Campo `likesCount` en `AnfitrioneProfile` o tabla de likes |
+| `isPopular` | `false` | Lógica de popularidad (likes, actividad, etc.) |
+| `isFavorite` | `false` | Requiere autenticación: consultar favoritos por `userId` del cliente |
+| `solPrice` | `undefined` | Campo `solPrice` en `AnfitrioneProfile` si se maneja precio en soles |
+
+---
+
+### Perfil público de una anfitriona
+
+```
+GET /anfitrionas/public/:id
+```
+
+**Parámetro:** `:id` es el UUID del usuario anfitriona.
+
+**Respuesta `200`:**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "Maria Lopez",
+  "username": "maria_lopez",
+  "age": 28,
+  "bio": "Conversaciones alegres, siempre disponible 🌸",
+  "avatar": "https://res.cloudinary.com/.../avatar.jpg",
+  "coverImage": "https://res.cloudinary.com/.../img1.jpg",
+  "images": [
+    "https://res.cloudinary.com/.../img1.jpg",
+    "https://res.cloudinary.com/.../img2.jpg"
+  ],
+  "rateCredits": 10,
+  "isOnline": true
+}
+```
+
+**Campos de la respuesta:**
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `id` | `string` (UUID) | ID de la anfitriona |
+| `name` | `string` | Nombre completo |
+| `username` | `string` | Nombre de usuario único |
+| `age` | `number \| null` | Edad calculada automáticamente desde `dateOfBirth`. `null` si no tiene fecha |
+| `bio` | `string \| null` | Descripción larga del perfil |
+| `avatar` | `string \| null` | URL del avatar (Cloudinary) |
+| `coverImage` | `string \| null` | Imagen de portada. Por ahora deriva de `images[0]` |
+| `images` | `string[]` | Galería completa ordenada por `sortOrder` |
+| `rateCredits` | `number \| null` | Créditos por conversación |
+| `isOnline` | `boolean` | Estado de disponibilidad |
+
+**Error `404`** si el id no corresponde a una anfitriona activa:
+```json
+{
+  "message": "Anfitriona no encontrada.",
+  "statusCode": 404
+}
+```
+
+**Cómo lo usa el frontend:**
+- Función: `src/services/hostesses.ts` → `getPublicHostessProfile(id)`
+- Pantalla: `app/(cliente)/anfitrionas/[id].tsx` — recibe `id` por parámetro de ruta
+
+**Secciones del perfil UI y su origen en backend:**
+
+| Sección UI | Componente | Origen |
+|------------|-----------|--------|
+| Header (foto + nombre + online) | `ProfileHeader` | `avatar`, `coverImage`, `name`, `isOnline` |
+| Galería de imágenes | `GallerySection` | `images[]` |
+| Mensaje introductorio | `IntroCard` | `bio` |
+| Ítems de confianza | `TrustSection` | Hardcoded en mapper — pendiente de backend |
+| Historias destacadas | `HighlightStoriesRow` | Array vacío `[]` — pendiente de backend |
+
+**Campos pendientes de backend para completar HU2:**
+
+| Sección UI | Qué agregar al backend |
+|------------|----------------------|
+| `highlightedStories` | Nuevo modelo en `AnfitrioneProfile`: `id`, `title`, `emoji`, `locked` |
+| `trustItems` | Campo calculado o hardcoded con `emoji`, `label`, `value` |
+
+---
+
+### Flujo completo frontend → backend
+
+```
+[Cliente abre el app]
+       │
+       ▼
+app/(cliente)/index.tsx
+  └─ getPublicHostesses()
+     └─ GET /anfitrionas/public
+        └─ mapListItemToAnfitriona() → Anfitriona[]
+           └─ renderiza PostCard por cada anfitriona
+                  │
+                  │  [Toca una anfitriona / "Ver perfil"]
+                  ▼
+       app/(cliente)/anfitrionas/[id].tsx
+         └─ getPublicHostessProfile(id)
+            └─ GET /anfitrionas/public/:id
+               └─ mapDetailToProfile() → AnfitrioneProfileDetail
+                  └─ renderiza ProfileHeader + GallerySection
+                              + IntroCard + TrustSection
+```
