@@ -25,6 +25,8 @@ model User {
   anfitrionaProfile   AnfitrioneProfile?
   histories           History[]
   @@map("users")
+
+  historyViews HistoryView[]
 }
 
 model AnfitrioneProfile {
@@ -100,8 +102,22 @@ model History {
   updatedAt     DateTime @updatedAt
 
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  historyViews HistoryView[]
 
   @@map("histories")
+}
+
+model HistoryView {
+  id         String   @id @default(uuid())
+  userId     String   
+  historyId  String   
+  viewedAt   DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id])
+  history    History  @relation(fields: [historyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, historyId]) // Evita duplicados: un usuario ve una historia una vez
+  @@map("history_views")
 }
 
 enum MediaType {

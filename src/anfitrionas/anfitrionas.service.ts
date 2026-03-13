@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   InternalServerErrorException,
@@ -15,6 +16,7 @@ import {
   AnfitrionePublicListResponseDto,
 } from './dto/anfitriona-public-list.dto';
 import { AnfitrionePublicDetailDto } from './dto/anfitriona-public-detail.dto';
+import { HistoryFeedResponseDto } from './dto/history-feed.dto';
 
 @Injectable()
 export class AnfitrioneService {
@@ -196,7 +198,7 @@ export class AnfitrioneService {
   }
 
   //24 HORAS DESPUES DE PUBLICADA, LA HISTORIA SE ELIMINA AUTOMATICAMENTE (TAREA PROGRAMADA)
-  @Cron(CronExpression.EVERY_30_MINUTES) 
+  @Cron(CronExpression.EVERY_30_MINUTES)
   async handleCron() {
 
     const expirationDate = new Date();
@@ -209,7 +211,7 @@ export class AnfitrioneService {
         },
       },
       select: {
-        id:true,
+        id: true,
         mediaType: true,
         publicId: true,
       }
@@ -234,6 +236,152 @@ export class AnfitrioneService {
         console.error(`Error al eliminar historia expirada ${history.id}:`, error);
       }
     }
+  }
+
+  //OBTENER TODAS LAS HISTORIAS DE UNA ANFITRIONA
+  async findAllStories(userId: string) {
+
+    if (!userId) {
+      throw new BadRequestException('No se proporcionó un ID de usuario válido');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    // Buscamos sus historias ordenadas por fecha de publicación (descendente)
+    return this.prisma.history.findMany({
+      where: { userId: userId },
+      orderBy: {
+        publishedAt: 'desc',
+      },
+      select: {
+        id: true,
+        mediaUrl: true,
+        mediaType: true,
+        priceCredits: true,
+        publishedAt: true,
+      },
+    });
+  }
+
+  //OBTENER LAS HISTORIAS (SOLO ACTIVAS DENTRO DE LAS 24 HRS) DE LAS ANFITRIONAS TIPO WHASAT 
+  async findAllActiveStories() {
+    const twentyFourHoursAgo = new Date();
+    twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+
+    const anfitrionasWithStories = await this.prisma.user.findMany({
+      where: {
+        role: 'ANFITRIONA',
+        isActive: true,
+        histories: {
+          some: {
+            publishedAt: { gte: twentyFourHoursAgo }
+          }
+        }
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        anfitrionaProfile: {
+          select: { avatarUrl: true }
+        },
+        histories: {
+          where: {
+            publishedAt: { gte: twentyFourHoursAgo }
+          },
+          orderBy: { publishedAt: 'asc' },
+          select: {
+            id: true,
+            mediaUrl: true,
+            mediaType: true,
+            priceCredits: true,
+          }
+        }
+      }
+    });
+
+    return anfitrionasWithStories.map(u => ({
+      userId: u.id,
+      name: u.firstName,
+      avatar: u.anfitrionaProfile?.avatarUrl,
+      stories: u.histories
+    }));
+  }
+
+  //SERVICIO PARA MARCAR COMO VISTO UNA HISTORIA PARA UN USUARIO
+  async markAsViewed(userId: string, historyId: string) {
+    try {
+      const view = await this.prisma.historyView.upsert({
+        where: { userId_historyId: { userId, historyId } },
+        update: {},
+        create: { userId, historyId }
+      });
+      console.log(`[DB] Vista registrada con éxito: User ${userId} -> History ${historyId}`);
+      return view;
+    } catch (error) {
+      console.error(`[DB Error] No se pudo marcar la vista:`, error.message);
+      throw new InternalServerErrorException('Error al registrar la visualización');
+    }
+  }
+
+  //SERVICIO PARA MARCAR CON UN CIRCULO ROJO SI NO VIO LA HISTORIA SI Y VIO ENTONCES CON BLANCO
+  async getStoriesFeed(currentUserId: string): Promise<HistoryFeedResponseDto> {
+    const twentyFourHoursAgo = new Date();
+    twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+
+    const feeds = await this.prisma.user.findMany({
+      where: {
+        role: 'ANFITRIONA',
+        isActive: true,
+        histories: {
+          some: { publishedAt: { gte: twentyFourHoursAgo } }
+        }
+      },
+      select: {
+        id: true,
+        firstName: true,
+        anfitrionaProfile: { select: { avatarUrl: true } },
+        histories: {
+          where: { publishedAt: { gte: twentyFourHoursAgo } },
+          orderBy: { publishedAt: 'asc' }, // Orden para que el visor las pase en orden
+          select: {
+            id: true,
+            mediaUrl: true,  
+            mediaType: true, 
+            priceCredits: true,
+            publishedAt: true,
+            historyViews: {
+              where: { userId: currentUserId }
+            }
+          }
+        }
+      }
+    });
+
+    const data = feeds.map(anf => {
+      const hasUnseen = anf.histories.some(h => h.historyViews.length === 0);
+
+      return {
+        userId: anf.id,
+        name: anf.firstName || 'Anfitriona',
+        avatar: anf.anfitrionaProfile?.avatarUrl ?? null,
+        hasUnseen,
+        totalStories: anf.histories.length,
+
+        stories: anf.histories.map(h => ({
+          id: h.id,
+          mediaUrl: h.mediaUrl,
+          mediaType: h.mediaType,
+          priceCredits: h.priceCredits,
+          publishedAt: h.publishedAt.toISOString(),
+          isViewed: h.historyViews.length > 0
+        }))
+      };
+    });
+
+    return { data };
   }
 
   // ─── Public endpoints (cliente-facing) ────────────────────────────────────
