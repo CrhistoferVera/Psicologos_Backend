@@ -35,6 +35,9 @@ export class AnfitrionePublicListItemDto {
 
   @ApiProperty({ example: true })
   isOnline: boolean;
+
+  @ApiProperty({ example: 42, description: 'Total de likes recibidos' })
+  likesCount: number;
 }
 
 export class AnfitrionePublicListResponseDto {

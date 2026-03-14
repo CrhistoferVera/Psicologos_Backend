@@ -397,6 +397,7 @@ export class AnfitrioneService {
         id: true,
         firstName: true,
         lastName: true,
+        _count: { select: { receivedLikes: true } },
         anfitrionaProfile: {
           select: {
             avatarUrl: true,
@@ -425,13 +426,14 @@ export class AnfitrioneService {
         mainImage: imageUrls[0] ?? null,
         images: imageUrls,
         isOnline: profile?.isOnline ?? false,
+        likesCount: u._count.receivedLikes,
       };
     });
 
     return { data };
   }
 
-  async findOnePublic(id: string): Promise<AnfitrionePublicDetailDto> {
+  async findOnePublic(id: string, currentUserId?: string): Promise<AnfitrionePublicDetailDto> {
     const user = await this.prisma.user.findFirst({
       where: {
         id,
@@ -443,6 +445,7 @@ export class AnfitrioneService {
         id: true,
         firstName: true,
         lastName: true,
+        _count: { select: { receivedLikes: true } },
         anfitrionaProfile: {
           select: {
             username: true,
@@ -470,6 +473,14 @@ export class AnfitrioneService {
       : null;
     const imageUrls = profile?.images.map((img) => img.url) ?? [];
 
+    let isLiked = false;
+    if (currentUserId) {
+      const existing = await this.prisma.like.findUnique({
+        where: { userId_anfitrionaId: { userId: currentUserId, anfitrionaId: id } },
+      });
+      isLiked = !!existing;
+    }
+
     return {
       id: user.id,
       name: [user.firstName, user.lastName].filter(Boolean).join(' '),
@@ -481,7 +492,38 @@ export class AnfitrioneService {
       images: imageUrls,
       rateCredits: profile?.rateCredits ?? null,
       isOnline: profile?.isOnline ?? false,
+      likesCount: user._count.receivedLikes,
+      isLiked,
     };
+  }
+
+  // ─── Likes ─────────────────────────────────────────────────────────────────
+
+  async toggleLike(userId: string, anfitrionaId: string): Promise<{ liked: boolean; likesCount: number }> {
+    // Verify the target is an active anfitriona
+    const anfitriona = await this.prisma.user.findFirst({
+      where: { id: anfitrionaId, role: 'ANFITRIONA', isActive: true },
+    });
+    if (!anfitriona) {
+      throw new NotFoundException('Anfitriona no encontrada.');
+    }
+
+    const existing = await this.prisma.like.findUnique({
+      where: { userId_anfitrionaId: { userId, anfitrionaId } },
+    });
+
+    if (existing) {
+      await this.prisma.like.delete({
+        where: { userId_anfitrionaId: { userId, anfitrionaId } },
+      });
+    } else {
+      await this.prisma.like.create({
+        data: { userId, anfitrionaId },
+      });
+    }
+
+    const likesCount = await this.prisma.like.count({ where: { anfitrionaId } });
+    return { liked: !existing, likesCount };
   }
 
   private calculateAge(dateOfBirth: Date): number {

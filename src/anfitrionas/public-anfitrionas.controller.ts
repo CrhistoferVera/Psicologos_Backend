@@ -1,5 +1,9 @@
-import { Controller, Get, Param, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Post, Request, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { AnfitrioneService } from './anfitrionas.service';
 import {
   AnfitrionePublicListResponseDto,
@@ -83,5 +87,24 @@ export class PublicAnfitrioneController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<AnfitrionePublicDetailDto> {
     return this.service.findOnePublic(id);
+  }
+
+  /**
+   * POST /anfitrionas/public/:id/like
+   * Alterna el like de un cliente a una anfitriona.
+   * Requiere autenticación con rol USER.
+   */
+  @Post(':id/like')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER)
+  @ApiOperation({ summary: 'Dar/quitar like a una anfitriona' })
+  @ApiParam({ name: 'id', description: 'UUID del usuario anfitriona' })
+  @ApiResponse({ status: 201, description: '{ liked: boolean, likesCount: number }' })
+  toggleLike(
+    @Param('id', ParseUUIDPipe) anfitrionaId: string,
+    @Request() req,
+  ): Promise<{ liked: boolean; likesCount: number }> {
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.service.toggleLike(userId, anfitrionaId);
   }
 }

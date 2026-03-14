@@ -24,9 +24,24 @@ model User {
   wallet              Wallet?
   anfitrionaProfile   AnfitrioneProfile?
   histories           History[]
-  @@map("users")
+  historyViews        HistoryView[]
+  givenLikes          Like[]             @relation("GivenLikes")
+  receivedLikes       Like[]             @relation("ReceivedLikes")
 
-  historyViews HistoryView[]
+  @@map("users")
+}
+
+model Like {
+  id           String   @id @default(uuid())
+  userId       String
+  anfitrionaId String
+  createdAt    DateTime @default(now())
+
+  user       User @relation("GivenLikes", fields: [userId], references: [id], onDelete: Cascade)
+  anfitriona User @relation("ReceivedLikes", fields: [anfitrionaId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, anfitrionaId])
+  @@map("likes")
 }
 
 model AnfitrioneProfile {
