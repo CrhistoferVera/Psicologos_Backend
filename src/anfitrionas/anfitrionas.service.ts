@@ -10,6 +10,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { CreateAnfitrioneDto } from './dto/create-anfitriona.dto';
 import { CreateHistoryDto } from './dto/create-history.dto';
+import { UpdateAnfitrioneProfileDto } from './dto/update-anfitriona-profile.dto';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   AnfitrionePublicListItemDto,
@@ -495,6 +496,97 @@ export class AnfitrioneService {
       likesCount: user._count.receivedLikes,
       isLiked,
     };
+  }
+
+  // ─── Own profile (anfitriona-facing) ──────────────────────────────────────
+
+  async getMyProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        anfitrionaProfile: {
+          select: {
+            username: true,
+            bio: true,
+            rateCredits: true,
+            isOnline: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+
+    if (!user) throw new NotFoundException('Usuario no encontrado.');
+
+    return {
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      username: user.anfitrionaProfile?.username ?? '',
+      bio: user.anfitrionaProfile?.bio ?? '',
+      rateCredits: user.anfitrionaProfile?.rateCredits ?? 0,
+      isOnline: user.anfitrionaProfile?.isOnline ?? false,
+      avatarUrl: user.anfitrionaProfile?.avatarUrl ?? null,
+    };
+  }
+
+  async updateMyProfile(
+    userId: string,
+    dto: UpdateAnfitrioneProfileDto,
+    avatarFile?: Express.Multer.File,
+  ) {
+    // Check username uniqueness if changing it
+    if (dto.username) {
+      const conflict = await this.prisma.anfitrioneProfile.findFirst({
+        where: { username: dto.username, NOT: { userId } },
+      });
+      if (conflict) throw new ConflictException('El nombre de usuario ya está en uso.');
+    }
+
+    // Upload avatar if provided
+    let avatarUpdate: { avatarUrl: string; avatarPublicId: string } | undefined;
+    if (avatarFile) {
+      const uploaded = await this.cloudinary.uploadAnfitrioneAvatar({
+        file: avatarFile,
+        userId,
+      });
+      avatarUpdate = { avatarUrl: uploaded.secureUrl, avatarPublicId: uploaded.publicId };
+    }
+
+    // Update user fields
+    const { firstName, lastName, ...profileFields } = dto;
+
+    if (firstName !== undefined || lastName !== undefined) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          ...(firstName !== undefined && { firstName }),
+          ...(lastName !== undefined && { lastName }),
+        },
+      });
+    }
+
+    // Update profile fields
+    const profileData: any = {};
+    if (profileFields.username !== undefined) profileData.username = profileFields.username;
+    if (profileFields.bio !== undefined) profileData.bio = profileFields.bio;
+    if (profileFields.rateCredits !== undefined) profileData.rateCredits = profileFields.rateCredits;
+    if (avatarUpdate) {
+      profileData.avatarUrl = avatarUpdate.avatarUrl;
+      profileData.avatarPublicId = avatarUpdate.avatarPublicId;
+    }
+
+    if (Object.keys(profileData).length > 0) {
+      await this.prisma.anfitrioneProfile.update({
+        where: { userId },
+        data: profileData,
+      });
+    }
+
+    return this.getMyProfile(userId);
   }
 
   // ─── Likes ─────────────────────────────────────────────────────────────────

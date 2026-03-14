@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   UploadedFile,
   UseGuards,
@@ -22,6 +23,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { AnfitrioneService } from './anfitrionas.service';
 import { CreateAnfitrioneDto } from './dto/create-anfitriona.dto';
 import { CreateHistoryDto } from './dto/create-history.dto';
+import { UpdateAnfitrioneProfileDto } from './dto/update-anfitriona-profile.dto';
 import { DeleteHistoryDto } from './dto/delete-history.dto';
 import { HistoryFeedResponseDto } from './dto/history-feed.dto';
 
@@ -66,6 +68,36 @@ export class AnfitrioneController {
   @Roles(UserRole.ADMIN)
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
+  }
+
+  // ─── Own profile ──────────────────────────────────────────────────────────
+
+  /**
+   * GET /anfitrionas/me/profile
+   * Devuelve el perfil propio de la anfitriona autenticada.
+   */
+  @Get('me/profile')
+  @Roles(UserRole.ANFITRIONA)
+  getMyProfile(@Request() req) {
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.service.getMyProfile(userId);
+  }
+
+  /**
+   * PATCH /anfitrionas/me/profile
+   * Actualiza el perfil de la anfitriona autenticada.
+   * Acepta un avatar opcional via multipart/form-data (campo: avatar).
+   */
+  @Patch('me/profile')
+  @Roles(UserRole.ANFITRIONA)
+  @UseInterceptors(FileInterceptor('avatar', { storage: memoryStorage() }))
+  updateMyProfile(
+    @Request() req,
+    @Body() dto: UpdateAnfitrioneProfileDto,
+    @UploadedFile() avatar?: Express.Multer.File,
+  ) {
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.service.updateMyProfile(userId, dto, avatar);
   }
 
   //CREAR UNA HISTORIA PARA UNA ANFITRIONA
