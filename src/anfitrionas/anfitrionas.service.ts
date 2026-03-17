@@ -583,7 +583,7 @@ export class AnfitrioneService {
       });
     }
 
-    // Update profile fields
+    // Build profile data patch
     const profileData: any = {};
     if (profileFields.username !== undefined) profileData.username = profileFields.username;
     if (profileFields.bio !== undefined) profileData.bio = profileFields.bio;
@@ -594,9 +594,18 @@ export class AnfitrioneService {
     }
 
     if (Object.keys(profileData).length > 0) {
-      await this.prisma.anfitrioneProfile.update({
+      // upsert: si el perfil no existe aún (usuario creado sin perfil) lo crea al vuelo
+      const usernameForCreate = profileData.username ?? `user_${userId.slice(0, 8)}`;
+      await this.prisma.anfitrioneProfile.upsert({
         where: { userId },
-        data: profileData,
+        update: profileData,
+        create: {
+          userId,
+          username: usernameForCreate,
+          dateOfBirth: new Date('2000-01-01'),
+          cedula: `auto_${userId}`,
+          ...profileData,
+        },
       });
     }
 
