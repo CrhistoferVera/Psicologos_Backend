@@ -2,8 +2,8 @@ import {
   IsDateString,
   IsEmail,
   IsNotEmpty,
-  IsOptional,
   IsString,
+  MinLength,
 } from 'class-validator';
 
 export class CreateAnfitrioneDto {
@@ -31,6 +31,11 @@ export class CreateAnfitrioneDto {
   username: string;
 
   @IsEmail()
-  @IsOptional()
-  email?: string;
+  @IsNotEmpty()
+  email: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(6)
+  password: string;
 }

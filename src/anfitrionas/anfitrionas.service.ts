@@ -5,6 +5,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
 import { Prisma, UserRole, MediaType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
@@ -48,6 +49,8 @@ export class AnfitrioneService {
       throw new ConflictException('El email ya está registrado.');
 
     // Crear usuario con role ANFITRIONA
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+
     let user: Awaited<ReturnType<typeof this.prisma.user.create>>;
     try {
       user = await this.prisma.user.create({
@@ -56,6 +59,7 @@ export class AnfitrioneService {
           email: dto.email,
           firstName: dto.firstName,
           lastName: dto.lastName,
+          password: hashedPassword,
           role: 'ANFITRIONA',
           isProfileComplete: true,
         },
