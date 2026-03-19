@@ -40,6 +40,24 @@ export class UsersController {
     return new UserEntity(found);
   }
 
+   //OBTENER LA WALLET DEL USER, ANFITRIONA Y ADMIN
+  @UseGuards(JwtAuthGuard)
+  @Get('wallet') //Ruta insegura: GET /users/wallet/:id -> Cualquiera con el ID de otro usuario podría ver cuánto dinero tiene (si no pones validaciones extra).
+  async getMyWallet(@CurrentUser() user: JwtUser) {
+    const wallet = await this.usersService.findWalletByUserId(user.userId)
+
+    if(!wallet){
+      throw new NotFoundException('billetera no encontrada');
+    }
+
+    return {
+      success: true,
+      balance: Number(wallet.balance),
+      userId: wallet.userId,
+      updatedAt: wallet.updatedAt
+    }
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string): Promise<UserEntity> {
     const user = await this.usersService.findOneById(id);
@@ -85,4 +103,6 @@ export class UsersController {
 
     return { success: true, message: 'Contraseña actualizada correctamente' };
   }
+
+ 
 }

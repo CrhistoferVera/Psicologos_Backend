@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, UserRole, MediaType } from '@prisma/client';
@@ -18,9 +19,13 @@ import {
 } from './dto/anfitriona-public-list.dto';
 import { AnfitrionePublicDetailDto } from './dto/anfitriona-public-detail.dto';
 import { HistoryFeedResponseDto } from './dto/history-feed.dto';
+import { CreateWalletDto } from './dto/create-wallet.dto';
 
 @Injectable()
 export class AnfitrioneService {
+
+  private readonly logger = new Logger(AnfitrioneService.name);
+
   constructor(
     private prisma: PrismaService,
     private cloudinary: CloudinaryService,
@@ -58,8 +63,21 @@ export class AnfitrioneService {
           lastName: dto.lastName,
           role: 'ANFITRIONA',
           isProfileComplete: true,
+
+          wallet: {
+            create: {
+              balance: 0,
+            }
+          }
         },
+
+        include: {
+          wallet: true,
+        }
       });
+
+      this.logger.log(`✅ Anfitriona creada con ID: ${user.id} y Wallet vinculada.`);
+
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictException('Ya existe un usuario con esos datos.');
@@ -349,8 +367,8 @@ export class AnfitrioneService {
           orderBy: { publishedAt: 'asc' }, // Orden para que el visor las pase en orden
           select: {
             id: true,
-            mediaUrl: true,  
-            mediaType: true, 
+            mediaUrl: true,
+            mediaType: true,
             priceCredits: true,
             publishedAt: true,
             historyViews: {

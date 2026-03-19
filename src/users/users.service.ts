@@ -9,11 +9,27 @@ import { User, Prisma } from '@prisma/client';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async create(data: CreateUserDto): Promise<User> {
+
     try {
-      return await this.prisma.user.create({ data });
+      return await this.prisma.user.create({
+        data: {
+          ...data,
+
+          wallet: {
+            create: {
+              balance: 0,
+            }
+          }
+        },
+        include:
+        {
+          wallet: true,
+        },
+      });
+
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
@@ -47,5 +63,13 @@ export class UsersService {
       where: { id },
       data: { lastLogin: new Date() },
     });
+  }
+
+  //OBTENER LA WALLET DEL USUARIO, ANFITRIONA O ADMIN
+  async findWalletByUserId(userId: string) {
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { userId }
+    });
+    return wallet;
   }
 }

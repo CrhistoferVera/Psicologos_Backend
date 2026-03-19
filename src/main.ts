@@ -41,7 +41,7 @@ async function bootstrap() {
   });
 
   // Validación global mejorada
-  app.useGlobalPipes(
+  app.useGlobalPipes( 
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
