@@ -17,6 +17,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { UserRole } from '@prisma/client';
+import { ApiBody, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -26,7 +27,10 @@ import { CreateHistoryDto } from './dto/create-history.dto';
 import { UpdateAnfitrioneProfileDto } from './dto/update-anfitriona-profile.dto';
 import { DeleteHistoryDto } from './dto/delete-history.dto';
 import { HistoryFeedResponseDto } from './dto/history-feed.dto';
+import { CreateGalleryImageDto } from './dto/create-gallery-image.dto';
+import { GalleryImageDto } from './dto/gallery-image.dto';
 
+@ApiTags('Anfitrionas - Privado')
 @Controller('anfitrionas')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AnfitrioneController {
@@ -170,6 +174,111 @@ export class AnfitrioneController {
     console.log('---------------------------------');
 
     return this.service.markAsViewed(userId, historyId);
+  }
+
+  // ─── Galería permanente (HU: bloqueo de imágenes premium) ────────────────
+
+  /**
+   * POST /anfitrionas/me/gallery
+   * Publica una imagen permanente en la galería de la anfitriona autenticada.
+   * Acepta multipart/form-data con el archivo en el campo "file".
+   */
+  @Post('me/gallery')
+  @Roles(UserRole.ANFITRIONA)
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  @ApiOperation({
+    summary: 'Publicar imagen en galería permanente',
+    description:
+      'Sube una imagen a Cloudinary y la registra en la galería permanente del perfil. ' +
+      'Si isPremium es true, unlockCredits debe ser mayor a 0.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file', 'isPremium'],
+      properties: {
+        file: { type: 'string', format: 'binary', description: 'Imagen (jpg, png, webp…)' },
+        isPremium: {
+          type: 'boolean',
+          example: false,
+          description: 'true = imagen exclusiva bloqueada por créditos',
+        },
+        unlockCredits: {
+          type: 'integer',
+          example: 30,
+          description: 'Requerido y > 0 si isPremium es true',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Imagen publicada correctamente',
+    type: GalleryImageDto,
+    example: {
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      imageUrl: 'https://res.cloudinary.com/demo/image/upload/v1/gallery_1.jpg',
+      isPremium: true,
+      unlockCredits: 30,
+      isVisible: true,
+      createdAt: '2026-03-19T10:00:00.000Z',
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Archivo faltante o imagen premium sin créditos válidos' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 404, description: 'Perfil de anfitriona no encontrado' })
+  async publishGalleryImage(
+    @Request() req,
+    @Body() dto: CreateGalleryImageDto,
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<GalleryImageDto> {
+    if (!file) {
+      throw new BadRequestException('Debes subir una imagen para la galería.');
+    }
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.service.publishGalleryImage(userId, dto, file);
+  }
+
+  /**
+   * GET /anfitrionas/me/gallery
+   * Devuelve la galería completa de la anfitriona autenticada con toda la metadata.
+   */
+  @Get('me/gallery')
+  @Roles(UserRole.ANFITRIONA)
+  @ApiOperation({
+    summary: 'Obtener galería propia',
+    description:
+      'Devuelve todas las imágenes de la galería de la anfitriona autenticada ' +
+      'incluyendo metadata de gestión (isPremium, unlockCredits, isVisible).',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Galería de la anfitriona',
+    type: [GalleryImageDto],
+    example: [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440000',
+        imageUrl: 'https://res.cloudinary.com/demo/image/upload/v1/gallery_1.jpg',
+        isPremium: false,
+        unlockCredits: null,
+        isVisible: true,
+        createdAt: '2026-03-19T10:00:00.000Z',
+      },
+      {
+        id: '660e8400-e29b-41d4-a716-446655440111',
+        imageUrl: 'https://res.cloudinary.com/demo/image/upload/v1/gallery_2.jpg',
+        isPremium: true,
+        unlockCredits: 30,
+        isVisible: true,
+        createdAt: '2026-03-19T11:00:00.000Z',
+      },
+    ],
+  })
+  @ApiResponse({ status: 404, description: 'Perfil de anfitriona no encontrado' })
+  getMyGallery(@Request() req): Promise<GalleryImageDto[]> {
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.service.getMyGallery(userId);
   }
 
   /**

@@ -19,6 +19,8 @@ import {
 } from './dto/anfitriona-public-list.dto';
 import { AnfitrionePublicDetailDto } from './dto/anfitriona-public-detail.dto';
 import { HistoryFeedResponseDto } from './dto/history-feed.dto';
+import { CreateGalleryImageDto } from './dto/create-gallery-image.dto';
+import { GalleryImageDto, GalleryImagePublicDto } from './dto/gallery-image.dto';
 
 @Injectable()
 export class AnfitrioneService {
@@ -420,6 +422,7 @@ export class AnfitrioneService {
               rateCredits: true,
               isOnline: true,
               images: {
+                where: { isVisible: true },
                 select: { url: true },
                 orderBy: { sortOrder: 'asc' },
               },
@@ -490,7 +493,8 @@ export class AnfitrioneService {
             rateCredits: true,
             isOnline: true,
             images: {
-              select: { url: true },
+              where: { isVisible: true },
+              select: { id: true, url: true, isPremium: true, unlockCredits: true },
               orderBy: { sortOrder: 'asc' },
             },
           },
@@ -506,7 +510,13 @@ export class AnfitrioneService {
     const age = profile?.dateOfBirth
       ? this.calculateAge(profile.dateOfBirth)
       : null;
-    const imageUrls = profile?.images.map((img) => img.url) ?? [];
+
+    const galleryImages: GalleryImagePublicDto[] = (profile?.images ?? []).map((img) => ({
+      id: img.id,
+      imageUrl: img.url,
+      isPremium: img.isPremium,
+      unlockCredits: img.isPremium ? img.unlockCredits : null,
+    }));
 
     let isLiked = false;
     if (currentUserId) {
@@ -523,8 +533,9 @@ export class AnfitrioneService {
       age,
       bio: profile?.bio ?? null,
       avatar: profile?.avatarUrl ?? null,
-      coverImage: imageUrls[0] ?? null,
-      images: imageUrls,
+      coverImage: galleryImages[0]?.imageUrl ?? null,
+      images: galleryImages.map((img) => img.imageUrl),
+      galleryImages,
       rateCredits: profile?.rateCredits ?? null,
       isOnline: profile?.isOnline ?? false,
       likesCount: user._count.receivedLikes,
@@ -663,6 +674,92 @@ export class AnfitrioneService {
 
     const likesCount = await this.prisma.like.count({ where: { anfitrionaId } });
     return { liked, likesCount };
+  }
+
+  // ─── Galería permanente (HU: bloqueo de imágenes premium) ────────────────
+
+  /**
+   * Publica una imagen permanente en la galería de la anfitriona autenticada.
+   * Sube el archivo a Cloudinary y crea el registro en AnfitrioneImage.
+   */
+  async publishGalleryImage(
+    userId: string,
+    dto: CreateGalleryImageDto,
+    file: Express.Multer.File,
+  ): Promise<GalleryImageDto> {
+    const profile = await this.prisma.anfitrioneProfile.findUnique({
+      where: { userId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Perfil de anfitriona no encontrado.');
+    }
+
+    if (dto.isPremium && (!dto.unlockCredits || dto.unlockCredits <= 0)) {
+      throw new BadRequestException(
+        'Las imágenes premium requieren unlockCredits mayor a 0.',
+      );
+    }
+
+    const upload = await this.cloudinary.uploadGalleryImage({ file, userId });
+
+    const image = await this.prisma.anfitrioneImage.create({
+      data: {
+        profileId: profile.id,
+        url: upload.secureUrl,
+        publicId: upload.publicId,
+        isPremium: dto.isPremium,
+        unlockCredits: dto.isPremium ? dto.unlockCredits! : null,
+        isVisible: true,
+        sortOrder: 0,
+      },
+    });
+
+    return {
+      id: image.id,
+      imageUrl: image.url,
+      isPremium: image.isPremium,
+      unlockCredits: image.unlockCredits,
+      isVisible: image.isVisible,
+      createdAt: image.createdAt.toISOString(),
+    };
+  }
+
+  /**
+   * Devuelve la galería completa de la anfitriona autenticada
+   * (con toda la metadata de gestión).
+   */
+  async getMyGallery(userId: string): Promise<GalleryImageDto[]> {
+    const profile = await this.prisma.anfitrioneProfile.findUnique({
+      where: { userId },
+      select: {
+        id: true,
+        images: {
+          orderBy: { sortOrder: 'asc' },
+          select: {
+            id: true,
+            url: true,
+            isPremium: true,
+            unlockCredits: true,
+            isVisible: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Perfil de anfitriona no encontrado.');
+    }
+
+    return profile.images.map((img) => ({
+      id: img.id,
+      imageUrl: img.url,
+      isPremium: img.isPremium,
+      unlockCredits: img.unlockCredits,
+      isVisible: img.isVisible,
+      createdAt: img.createdAt.toISOString(),
+    }));
   }
 
   private calculateAge(dateOfBirth: Date): number {

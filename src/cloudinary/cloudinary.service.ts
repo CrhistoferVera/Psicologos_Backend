@@ -377,4 +377,43 @@ export class CloudinaryService {
       throw new InternalServerErrorException('Error al eliminar el archivo de cloudinary.');
     }
   }
+
+  // ─── Galería permanente de anfitriona ─────────────────────────────────────
+
+  async uploadGalleryImage(params: {
+    file: Express.Multer.File;
+    userId: string;
+  }): Promise<{ secureUrl: string; publicId: string }> {
+    const { file, userId } = params;
+
+    if (!file.mimetype.startsWith('image/')) {
+      throw new InternalServerErrorException('Solo se permiten imágenes para la galería.');
+    }
+
+    const folder = `pachamama/anfitrionas/${userId}/gallery`;
+    const publicId = `gallery_${Date.now()}`;
+
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder, public_id: publicId, resource_type: 'image' },
+        (error, result) => {
+          if (error || !result?.secure_url) {
+            return reject(
+              new InternalServerErrorException('Error al subir imagen de galería a Cloudinary.'),
+            );
+          }
+          resolve({ secureUrl: result.secure_url, publicId: result.public_id });
+        },
+      );
+      uploadStream.end(file.buffer);
+    });
+  }
+
+  async deleteGalleryImage(publicId: string): Promise<void> {
+    try {
+      await cloudinary.uploader.destroy(publicId, { invalidate: true, resource_type: 'image' });
+    } catch {
+      throw new InternalServerErrorException('Error al eliminar la imagen de galería de Cloudinary.');
+    }
+  }
 }

@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { GalleryImagePublicDto } from './gallery-image.dto';
 
 export class AnfitrionePublicDetailDto {
   @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
@@ -39,9 +40,31 @@ export class AnfitrionePublicDetailDto {
       'https://res.cloudinary.com/demo/image/upload/v1/img1.jpg',
       'https://res.cloudinary.com/demo/image/upload/v1/img2.jpg',
     ],
-    description: 'Galería de imágenes del perfil ordenadas por sortOrder',
+    description: 'URLs planas de las imágenes visibles (compatibilidad hacia atrás).',
   })
   images: string[];
+
+  @ApiProperty({
+    type: [GalleryImagePublicDto],
+    description:
+      'Galería completa con metadata de premium. ' +
+      'Usar este campo para renderizar imágenes normales vs bloqueadas.',
+    example: [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440000',
+        imageUrl: 'https://res.cloudinary.com/demo/image/upload/v1/img1.jpg',
+        isPremium: false,
+        unlockCredits: null,
+      },
+      {
+        id: '660e8400-e29b-41d4-a716-446655440111',
+        imageUrl: 'https://res.cloudinary.com/demo/image/upload/v1/img2.jpg',
+        isPremium: true,
+        unlockCredits: 30,
+      },
+    ],
+  })
+  galleryImages: GalleryImagePublicDto[];
 
   @ApiProperty({ example: 10, nullable: true, description: 'Créditos por conversación' })
   rateCredits: number | null;

@@ -100,12 +100,15 @@ model AnfitrioneProfile {
 }
 
 model AnfitrioneImage {
-  id        String   @id @default(uuid())
-  profileId String
-  url       String
-  publicId  String?
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
+  id            String   @id @default(uuid())
+  profileId     String
+  url           String
+  publicId      String?
+  sortOrder     Int      @default(0)
+  isPremium     Boolean  @default(false)
+  unlockCredits Int?     // null = gratuita; > 0 = créditos requeridos para desbloquear
+  isVisible     Boolean  @default(true)
+  createdAt     DateTime @default(now())
 
   profile AnfitrioneProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
