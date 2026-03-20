@@ -297,7 +297,50 @@ export class CloudinaryService {
     return { secureUrl: uploaded.publicId, publicId: uploaded.publicId };
   }
 
+// SERVICIO PARA SUBIR COMPROBANTES DE DEPÓSITO
+  async uploadDepositPaymentProof(params: {
+    file: Express.Multer.File;
+    userId: string;
+  }): Promise<{ secureUrl: string; publicId: string }> {
+    const { file, userId } = params;
 
+    // 1. Validar que sea imagen o PDF
+    const isImage = file.mimetype.startsWith('image/');
+    const isPdf = file.mimetype === 'application/pdf';
+
+    if (!isImage && !isPdf) {
+      throw new InternalServerErrorException('Tipo de archivo no soportado. Solo imágenes o PDF.');
+    }
+
+    // 2. Definir carpeta y nombre (pachamama/users/ID_USUARIO/deposits)
+    const resourceType: 'image' | 'raw' = isImage ? 'image' : 'raw';
+    const folder = `pachamama/users/${userId}/deposits`;
+    const publicId = `proof_${Date.now()}`;
+
+    // 3. Subir a Cloudinary mediante Stream
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { 
+          folder, 
+          public_id: publicId, 
+          resource_type: resourceType 
+        },
+        (error, result) => {
+          if (error || !result?.secure_url) {
+            return reject(
+              new InternalServerErrorException('Error al subir el comprobante a Cloudinary.'),
+            );
+          }
+          resolve({ 
+            secureUrl: result.secure_url, 
+            publicId: result.public_id 
+          });
+        },
+      );
+
+      uploadStream.end(file.buffer);
+    });
+  }
 
   async uploadHistoryMedia(params: {
     file: Express.Multer.File;
