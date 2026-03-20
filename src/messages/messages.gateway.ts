@@ -33,13 +33,14 @@ export class MessagesGateway {
   //osea lo manda al cliente y si todo sale sale bien confirma con otro evento llamado message sent 
   @SubscribeMessage('send_message')
   async handleMessage(
-    @MessageBody() data: { senderId: string; receiverId: string; text: string },
+    @MessageBody() data: { senderId: string; receiverId: string; text: string; isLocked?: boolean },
     @ConnectedSocket() client: Socket,
   ) {
     const message = await this.messagesService.createMessage(
       data.senderId,
       data.receiverId,
       data.text,
+      data.isLocked ?? false,
     );
 
     // Emite al receptor
