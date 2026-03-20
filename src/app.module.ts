@@ -15,6 +15,7 @@ import { MessagesModule } from './messages/messages.module';
 import { ServicePricesModule } from './service-prices/service-prices.module';
 import { RechargeRequestModule } from './admin/rechargeRequest/recharge-request.module';
 import { DepositsModule } from './deposits/deposits.module';
+import { WalletModule } from './wallet/wallet.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { DepositsModule } from './deposits/deposits.module';
     ServicePricesModule,
     RechargeRequestModule,
     DepositsModule,
+    WalletModule,
   ],
   controllers: [],
   providers: [],

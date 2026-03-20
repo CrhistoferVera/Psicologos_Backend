@@ -326,6 +326,7 @@ enum TransactionType {
   DEPOSIT // Entrada de dinero (Recarga)
   WITHDRAWAL // Salida (Pago a anfitriona, suscripción, etc.)
   MESSAGE_UNLOCK // Pago para desbloquear un mensaje
+  EARNING // Crédito recibido por la anfitriona
 }
 
 enum ServiceType {
