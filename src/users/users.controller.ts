@@ -30,7 +30,7 @@ interface JwtUser {
 @Controller('users')
 @UseInterceptors(ClassSerializerInterceptor)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(private readonly usersService: UsersService) { }
 
   @UseGuards(JwtAuthGuard)
   @Get('profile')
@@ -40,13 +40,20 @@ export class UsersController {
     return new UserEntity(found);
   }
 
-   //OBTENER LA WALLET DEL USER, ANFITRIONA Y ADMIN
+  //OBTENER TODOS LOS METODOS DE PAGO
+  @UseGuards(JwtAuthGuard)
+  @Get('payment-methods')
+  async getMethods() {
+    return await this.usersService.findAllActive();
+  }
+
+  //OBTENER LA WALLET DEL USER, ANFITRIONA Y ADMIN
   @UseGuards(JwtAuthGuard)
   @Get('wallet') //Ruta insegura: GET /users/wallet/:id -> Cualquiera con el ID de otro usuario podría ver cuánto dinero tiene (si no pones validaciones extra).
   async getMyWallet(@CurrentUser() user: JwtUser) {
     const wallet = await this.usersService.findWalletByUserId(user.userId)
 
-    if(!wallet){
+    if (!wallet) {
       throw new NotFoundException('billetera no encontrada');
     }
 
@@ -104,5 +111,5 @@ export class UsersController {
     return { success: true, message: 'Contraseña actualizada correctamente' };
   }
 
- 
+
 }

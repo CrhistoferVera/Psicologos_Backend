@@ -72,4 +72,24 @@ export class UsersService {
     });
     return wallet;
   }
+
+  //OBTENER LOS MEOTODOS DE PAGO
+  async findAllActive() {
+    try {
+      return await this.prisma.paymentMethod.findMany({
+        where: { isActive: true },
+        select: {
+          id: true,
+          type: true,
+          bankName: true,
+          accountName: true,
+          accountNumber: true,
+          qrImageUrl: true,
+          logoUrl: true,
+        },
+      });
+    } catch (error) {
+      throw new InternalServerErrorException('Error al obtener métodos de pago');
+    }
+  }
 }
