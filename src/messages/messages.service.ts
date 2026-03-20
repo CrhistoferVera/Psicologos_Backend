@@ -6,7 +6,6 @@ export class MessagesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async createMessage(senderId: string, receiverId: string, text: string) {
-    // Normalizar el orden para garantizar el @@unique([user1Id, user2Id])
     const [user1Id, user2Id] = [senderId, receiverId].sort();
 
     const conversation = await this.prisma.conversation.upsert({
@@ -43,13 +42,29 @@ export class MessagesService {
           orderBy: { createdAt: 'desc' },
           take: 1,
         },
+        user1: {
+          select: {
+            firstName: true,
+            lastName: true,
+            anfitrionaProfile: { select: { avatarUrl: true, username: true } },
+          },
+        },
+        user2: {
+          select: {
+            firstName: true,
+            lastName: true,
+            anfitrionaProfile: { select: { avatarUrl: true, username: true } },
+          },
+        },
       },
       orderBy: { updatedAt: 'desc' },
     });
 
     const chats = await Promise.all(
       conversations.map(async (conv) => {
-        const otherUserId = conv.user1Id === userId ? conv.user2Id : conv.user1Id;
+        const isUser1 = conv.user1Id === userId;
+        const otherUserId = isUser1 ? conv.user2Id : conv.user1Id;
+        const otherUser = isUser1 ? conv.user2 : conv.user1;
         const lastMessage = conv.messages[0] ?? null;
 
         const unreadCount = await this.prisma.message.count({
@@ -60,9 +75,14 @@ export class MessagesService {
           },
         });
 
+        const fullName = [otherUser.firstName, otherUser.lastName].filter(Boolean).join(' ');
+        const otherUserName = otherUser.anfitrionaProfile?.username ?? (fullName || 'Usuario');
+
         return {
           conversationId: conv.id,
           otherUserId,
+          otherUserName,
+          otherUserAvatar: otherUser.anfitrionaProfile?.avatarUrl ?? null,
           lastMessage: lastMessage?.text ?? null,
           lastMessageAt: lastMessage?.createdAt ?? conv.createdAt,
           unreadCount,
@@ -73,7 +93,7 @@ export class MessagesService {
     return chats.sort((a, b) => {
       if (a.unreadCount > 0 && b.unreadCount === 0) return -1;
       if (a.unreadCount === 0 && b.unreadCount > 0) return 1;
-      return b.lastMessageAt.getTime() - a.lastMessageAt.getTime();
+      return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime();
     });
   }
 
