@@ -7,6 +7,7 @@ import { DepositStatus } from '@prisma/client';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
 import { Roles } from 'src/auth/decorators/roles.decorator';
+import { MailService } from 'src/mail/mail.service';
 
 @ApiTags('Admin - deposits') // Cambiado para organizar mejor tu Swagger
 @Controller('admin/deposits') // Ruta profesional para el panel de administración
@@ -14,7 +15,9 @@ export class RechargeRequestController {
 
     private readonly logger = new Logger(RechargeRequestController.name);
 
-    constructor(private readonly rechargeRequestService: RechargeRequestService) { }
+    constructor(
+        private readonly mailService: MailService,
+        private readonly rechargeRequestService: RechargeRequestService) { }
 
     /**
      * LISTAR TODAS LAS SOLICITUDES DE RECARGA
@@ -79,5 +82,18 @@ export class RechargeRequestController {
         }
     }
 
+
+   // Endpoint de prueba para RECHAZO
+    @Get('test-email-rejected')
+    async testRejected() {
+        await this.mailService.sendDepositStatusNotification(
+            'paredespavajhoel@gmail.com',
+            'Tester Reject',
+            'REJECTED',
+            0, 
+            'El comprobante de pago no es legible o está alterado.' 
+        );
+        return { message: 'Correo de rechazo enviado, revisa tu bandeja' };
+    }
 
 }

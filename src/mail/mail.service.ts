@@ -1,0 +1,45 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { MailerService } from '@nestjs-modules/mailer';
+
+@Injectable()
+export class MailService {
+    private readonly logger = new Logger(MailService.name);
+
+    constructor(private readonly mailerService: MailerService) { }
+
+    //METODO PARA ENVIAR NOTIFICACION DE ESTADO DE DEPÓSITO
+    async sendDepositStatusNotification(
+        email: string,
+        firstName: string,
+        status: 'APPROVED' | 'REJECTED',
+        credits: number,
+        reason?: string | null
+    ) {
+        try {
+            const subject = status === 'APPROVED'
+                ? 'Tu recarga ha sido aprobada'
+                : 'Tu recarga ha sido rechazada';
+
+            await this.mailerService.sendMail({
+                to: email,
+                subject: subject,
+                template: 'deposit-status', // nombre del archivo .hbs
+                context: {
+                    firstName,
+                    status,
+                    credits,
+                    reason,
+                    date: new Date().toLocaleDateString('es-BO', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
+                    }),
+                },
+            });
+
+            this.logger.log(`📧 Email enviado a ${email} - Estado: ${status}`);
+        } catch (error) {
+            this.logger.error(`Error enviando email a ${email}:`, error);
+        }
+    }
+}

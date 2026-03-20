@@ -53,13 +53,17 @@ export class DepositsService {
             userId
         })
 
-        //crear la solicitud de depósito en estado PENDING y usando el precio del paquete (pkg.price)
+        //crear la solicitud(no SNAPSHOT de datos) de depósito en estado PENDING y usando el precio del paquete (pkg.price)
         return await this.prisma.depositRequest.create({
             data: {
                 userId,
                 packageId: createDepositDto.packageId,
                 paymentMethodId: createDepositDto.paymentMethodId,
+
+                packageNameAtMoment: pkg.name,
                 amount: pkg.price,
+                creditsToDeliver: pkg.credits,
+
                 status: DepositStatus.PENDING,
                 receiptUrl: uploadResult.secureUrl,
                 receiptPublicId: uploadResult.publicId,

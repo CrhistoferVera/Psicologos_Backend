@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { RechargeRequestService } from './recharge-request.service';
 import { RechargeRequestController } from './recharge-request.controller';
-import { PrismaModule } from '../../../prisma/prisma.module'; // Importante para usar la DB
+import { PrismaModule } from '../../../prisma/prisma.module'; 
+import { MailModule } from 'src/mail/mail.module';
 
 @Module({
-    imports: [PrismaModule],
+    imports: [PrismaModule, MailModule],
     controllers: [RechargeRequestController],
     providers: [RechargeRequestService],
 })

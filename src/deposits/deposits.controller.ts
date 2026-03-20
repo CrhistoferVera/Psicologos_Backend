@@ -15,8 +15,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { DepositsService } from './deposits.service';
 import { CreateDepositRequestDto } from './dto/create-depositRequest.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'; // Ajusta la ruta a tu Guard
-import { CurrentUser } from '../auth/decorators/current-user.decorator';// Ajusta la ruta a tu decorador
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @ApiTags('Deposits')
 @Controller('deposits')
@@ -46,7 +46,7 @@ export class DepositsController {
         },
     })
 
-    @UseInterceptors(FileInterceptor('file')) // El nombre del campo que viene del frontend
+    @UseInterceptors(FileInterceptor('file')) 
     async createDeposit(
         @CurrentUser('id') userId: string, // Extraemos el ID del Token JWT (usuario logeado)
         @Body() createDepositDto: CreateDepositRequestDto,

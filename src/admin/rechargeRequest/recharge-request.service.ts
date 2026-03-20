@@ -2,11 +2,14 @@ import { Injectable, NotFoundException, BadRequestException, InternalServerError
 import { PrismaService } from '../../../prisma/prisma.service'; // Ajusta la ruta a tu PrismaService
 import { DepositStatus, Prisma, UserRole, TransactionType } from '@prisma/client';
 import { UpdateDepositStatusDto } from './dto/update-depositsRequest.dto';
+import { MailService } from 'src/mail/mail.service';
 
 @Injectable()
 export class RechargeRequestService {
     constructor(
-        private prisma: PrismaService) { }
+        private prisma: PrismaService,
+        private mailService: MailService
+    ) { }
 
     //OBTENER TODAS LAS SOLICITUDES DE RECARGA (depositRequest)
     async getAllRechargeRequests(search?: string, cursor?: string, limit: number = 10) {
@@ -63,8 +66,8 @@ export class RechargeRequestService {
             let nextCursor: string | null = null;
 
             if (solicitudesRecharge.length > limit) {
-                solicitudesRecharge.pop(); // quitamos el extra
-                nextCursor = solicitudesRecharge[solicitudesRecharge.length - 1].id; // último que enviamos
+                solicitudesRecharge.pop(); 
+                nextCursor = solicitudesRecharge[solicitudesRecharge.length - 1].id;
             }
 
             return {
@@ -80,56 +83,73 @@ export class RechargeRequestService {
 
     /**
      * ACTUALIZAR ESTADO DE SOLICITUD (APROBAR O RECHAZAR)
-     * Este método maneja la lógica contable y de billetera
      */
     async updateDepositStatus(id: string, updateDto: UpdateDepositStatusDto) {
         const { status, rejectionReason } = updateDto;
 
-        // 1. Verificar que la solicitud existe y está pendiente
+        // Verificar que la solicitud existe y está pendiente
         const depositRequest = await this.prisma.depositRequest.findUnique({
             where: { id },
-            include: { package: true } // Necesitamos los créditos del paquete
+            include: {
+                user: {
+                    select: {
+                        email: true,
+                        firstName: true
+                    }
+                }
+            } 
         });
 
         if (!depositRequest) {
             throw new NotFoundException('La solicitud de recarga no existe.');
         }
 
-        if (!depositRequest.package) {
-            throw new InternalServerErrorException('El paquete asociado a la solicitud no existe.');
-        }
-
         if (depositRequest.status !== DepositStatus.PENDING) {
             throw new BadRequestException(`Esta solicitud ya fue procesada y tiene estado: ${depositRequest.status}`);
         }
 
-        // --- CASO: RECHAZO ---
+        if (!depositRequest.user.email || !depositRequest.user.firstName) {
+            throw new InternalServerErrorException('Los datos del usuario están incompletos para enviar la notificación.');
+        }
+
+        // RECHAZO
         if (status === DepositStatus.REJECTED) {
-            return await this.prisma.depositRequest.update({
+            const updated = await this.prisma.depositRequest.update({
                 where: { id },
                 data: {
                     status: DepositStatus.REJECTED,
                     rejectionReason: rejectionReason,
                 }
             });
+
+            //enviar correo de rechazo
+            this.mailService.sendDepositStatusNotification(
+                depositRequest.user.email,
+                depositRequest.user.firstName,
+                'REJECTED',
+                0,
+                rejectionReason
+            );
+
+            return updated;
         }
 
-        // --- CASO: APROBACIÓN (Transacción Atómica) ---
-        const creditsToSum = depositRequest.package.credits || 0;
+        // APROBACIÓN (Transacción Atómica) 
+        const creditsToSum = depositRequest.creditsToDeliver || 0;
+        const packageName = depositRequest.packageNameAtMoment || 'Paquete de Credito';
 
         try {
-            return await this.prisma.$transaction(async (tx) => {
+            const result = await this.prisma.$transaction(async (tx) => {
                 // Actualizar el estado de la solicitud
                 const updatedRequest = await tx.depositRequest.update({
                     where: { id },
-                    data: { 
+                    data: {
                         status: DepositStatus.APPROVED,
                         rejectionReason: null // Limpiar campo de rechazo 
                     }
                 });
 
                 // Incrementar el saldo en la billetera (Wallet)
-                // Usamos increment para evitar condiciones de carrera (Race Conditions)
                 const updatedWallet = await tx.wallet.update({
                     where: { userId: depositRequest.userId },
                     data: {
@@ -146,7 +166,7 @@ export class RechargeRequestService {
                         depositRequestId: depositRequest.id,
                         amount: new Prisma.Decimal(creditsToSum),
                         type: TransactionType.DEPOSIT,
-                        description: `Recarga aprobada: ${creditsToSum} créditos - Paquete ${depositRequest.package?.name}`
+                        description: `Recarga aprobada: ${creditsToSum} créditos - Paquete ${packageName}`
                     }
                 });
 
@@ -155,6 +175,18 @@ export class RechargeRequestService {
                     request: updatedRequest
                 };
             });
+
+            //enviar correo de aprobacion
+            this.mailService.sendDepositStatusNotification(
+                depositRequest.user.email,
+                depositRequest.user.firstName,
+                'APPROVED',
+                creditsToSum,
+                null
+            );
+
+            return result;
+
         } catch (error) {
             console.error('Error en transacción de aprobación:', error);
             throw new InternalServerErrorException('No se pudo procesar la aprobación. Intente de nuevo.');

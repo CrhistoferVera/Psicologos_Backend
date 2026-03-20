@@ -53,15 +53,15 @@ model Conversation {
 }
 
 model Message {
-  id             String   @id @default(uuid())
+  id             String  @id @default(uuid())
   conversationId String
   senderId       String
   text           String
-  read           Boolean  @default(false)
-  isLocked       Boolean  @default(false) // la anfitriona activa el candado antes de enviar
-  price          Int?                    // snapshot del precio al momento de enviar
+  read           Boolean @default(false)
+  isLocked       Boolean @default(false) // la anfitriona activa el candado antes de enviar
+  price          Int? // snapshot del precio al momento de enviar
 
-  createdAt      DateTime @default(now())
+  createdAt DateTime @default(now())
 
   conversation   Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender         User            @relation("SentMessages", fields: [senderId], references: [id])
@@ -186,14 +186,15 @@ model HistoryView {
 model DepositRequest {
   id              String  @id @default(uuid())
   userId          String
-  packageId       String? // Opcional, por si eligió un paquete específico
+  packageId       String?
   paymentMethodId String?
 
-  amount Decimal @db.Decimal(10, 2)
+  packageNameAtMoment String?
+  amount              Decimal @db.Decimal(10, 2)
+  creditsToDeliver    Int     @default(0) //los creditos que el usuario recibira
 
-  receiptUrl      String // URL de la imagen del comprobante (Cloudinary)
-  receiptPublicId String? //id interno de cloudinary
-
+  receiptUrl      String 
+  receiptPublicId String? 
   status          DepositStatus @default(PENDING)
   rejectionReason String? // Por si el admin rechaza el pago (ej. "Foto borrosa")
 
@@ -211,25 +212,22 @@ model DepositRequest {
 }
 
 //MODELO QUE ALMACENA EL DETALLE DEL REEMBOLSO
-/**model RefundDetail {
-  id               String @id @default(uuid())
-  depositRequestId String @unique
-
-  //datos del cliente
-  clientAccount    String?
-  clientQrUrl      String?
-  clientQrPublicId String?
-
-  //datos que provee el admin al pagar
-  adminReceiptUrl      String?
-  adminReceiptPublicId String?
-
-  createdAt DateTime @default(now())
-
-  depositRequest DepositRequest @relation(fields: [depositRequestId], references: [id], onDelete: Cascade)
-
-  @@map("refund_details")
-}*/
+/**
+ * model RefundDetail {
+ * id               String @id @default(uuid())
+ * depositRequestId String @unique
+ * //datos del cliente
+ * clientAccount    String?
+ * clientQrUrl      String?
+ * clientQrPublicId String?
+ * //datos que provee el admin al pagar
+ * adminReceiptUrl      String?
+ * adminReceiptPublicId String?
+ * createdAt DateTime @default(now())
+ * depositRequest DepositRequest @relation(fields: [depositRequestId], references: [id], onDelete: Cascade)
+ * @@map("refund_details")
+ * }
+ */
 
 // MODELO PARA ALMACENAR EL METODO DE PAGO
 model PaymentMethod {
@@ -245,39 +243,38 @@ model PaymentMethod {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Relación: Una solicitud de depósito se hizo usando ESTE método
   depositRequests DepositRequest[]
 
   @@map("payment_methods")
 }
 
 // MODELO PARA ENVIAR NOTIFICACIONES AL CLIENTE O ADMIN
-/**model Notification {
-  id               String           @id @default(uuid())
-  userId           String
-  depositRequestId String?
-  title            String
-  message          String
-  read             Boolean          @default(false)
-  type             NotificationType
-  createdAt        DateTime         @default(now())
-
-  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  depositRequest DepositRequest? @relation(fields: [depositRequestId], references: [id])
-
-  @@map("notifications")
-}*/
+/**
+ * model Notification {
+ * id               String           @id @default(uuid())
+ * userId           String
+ * depositRequestId String?
+ * title            String
+ * message          String
+ * read             Boolean          @default(false)
+ * type             NotificationType
+ * createdAt        DateTime         @default(now())
+ * user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+ * depositRequest DepositRequest? @relation(fields: [depositRequestId], references: [id])
+ * @@map("notifications")
+ * }
+ */
 
 // MODELO QUE ACTUA COMO UN LIBRO CONTABLE (DETALLE DE MOVIMIENTO)
 model Transaction {
   id               String  @id @default(uuid())
   walletId         String
   depositRequestId String? @unique
-  amount           Decimal @db.Decimal(10, 2) //la cantidad de dinero que entro o salio
+  amount           Decimal @db.Decimal(10, 2) 
 
   type TransactionType
 
-  description String? // Ej: "Recarga por QR - Aprobado por Admin jhoel"
+  description String?
 
   createdAt DateTime @default(now())
 
@@ -293,7 +290,7 @@ model ServicePrice {
   id          String      @id @default(uuid())
   profileId   String
   serviceType ServiceType
-  price       Int         // cuántos créditos cuesta este servicio
+  price       Int // cuántos créditos cuesta este servicio
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
@@ -307,7 +304,7 @@ model ServicePrice {
 model MessageUnlock {
   id            String   @id @default(uuid())
   messageId     String
-  userId        String   // el usuario que pagó para ver el mensaje
+  userId        String // el usuario que pagó para ver el mensaje
   creditsSpent  Int
   transactionId String?  @unique
   unlockedAt    DateTime @default(now())
@@ -321,14 +318,14 @@ model MessageUnlock {
 }
 
 enum TransactionType {
-  DEPOSIT        // Entrada de dinero (Recarga)
-  WITHDRAWAL     // Salida (Pago a anfitriona, suscripción, etc.)
+  DEPOSIT // Entrada de dinero (Recarga)
+  WITHDRAWAL // Salida (Pago a anfitriona, suscripción, etc.)
   MESSAGE_UNLOCK // Pago para desbloquear un mensaje
 }
 
 enum ServiceType {
-  MESSAGE    // Mensaje de chat
-  CALL       // Llamada de voz (futuro)
+  MESSAGE // Mensaje de chat
+  CALL // Llamada de voz (futuro)
   VIDEO_CALL // Video llamada (futuro)
 }
 
@@ -338,14 +335,16 @@ enum PaymentType {
 }
 
 //rechazado
-/**enum NotificationType {
-  DEPOSIT_APPROVED //notifica al cliente con deposito aprobado
-  DEPOSIT_REJECTED //notifica al cliente con deposito recahzado
-  NEW_MESSAGE
-  PROFILE_VERIFIED
-  REFUND_REQUESTED //notifica al admin
-  REFUND_PROCESSED //notifica al cliente
-}*/
+/**
+ * enum NotificationType {
+ * DEPOSIT_APPROVED //notifica al cliente con deposito aprobado
+ * DEPOSIT_REJECTED //notifica al cliente con deposito recahzado
+ * NEW_MESSAGE
+ * PROFILE_VERIFIED
+ * REFUND_REQUESTED //notifica al admin
+ * REFUND_PROCESSED //notifica al cliente
+ * }
+ */
 
 enum DepositStatus {
   PENDING // Esperando aprobación

@@ -13,6 +13,8 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ChatsModule } from './chats/chats.module';
 import { MessagesModule } from './messages/messages.module';
 import { ServicePricesModule } from './service-prices/service-prices.module';
+import { RechargeRequestModule } from './admin/rechargeRequest/recharge-request.module';
+import { DepositsModule } from './deposits/deposits.module';
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { ServicePricesModule } from './service-prices/service-prices.module';
     ChatsModule,
     MessagesModule,
     ServicePricesModule,
+    RechargeRequestModule,
+    DepositsModule,
   ],
   controllers: [],
   providers: [],
