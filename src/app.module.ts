@@ -12,6 +12,7 @@ import { AnfitrionaModule } from './admin/anfitriona/anfitriona.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ChatsModule } from './chats/chats.module';
 import { MessagesModule } from './messages/messages.module';
+import { ServicePricesModule } from './service-prices/service-prices.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { MessagesModule } from './messages/messages.module';
     AnfitrioneModule,
     ChatsModule,
     MessagesModule,
+    ServicePricesModule,
   ],
   controllers: [],
   providers: [],

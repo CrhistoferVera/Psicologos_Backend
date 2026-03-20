@@ -31,6 +31,7 @@ model User {
   conversationsAsUser2 Conversation[]     @relation("ConversationUser2")
   sentMessages         Message[]          @relation("SentMessages")
   depositRequests      DepositRequest[]
+  messageUnlocks       MessageUnlock[]
   //notifications        Notification[]
 
   @@map("users")
@@ -57,10 +58,14 @@ model Message {
   senderId       String
   text           String
   read           Boolean  @default(false)
+  isLocked       Boolean  @default(false) // la anfitriona activa el candado antes de enviar
+  price          Int?                    // snapshot del precio al momento de enviar
+
   createdAt      DateTime @default(now())
 
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender       User         @relation("SentMessages", fields: [senderId], references: [id])
+  conversation   Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User            @relation("SentMessages", fields: [senderId], references: [id])
+  messageUnlocks MessageUnlock[]
 
   @@map("messages")
 }
@@ -95,8 +100,9 @@ model AnfitrioneProfile {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  user   User              @relation(fields: [userId], references: [id])
-  images AnfitrioneImage[]
+  user          User              @relation(fields: [userId], references: [id])
+  images        AnfitrioneImage[]
+  servicePrices ServicePrice[]
 
   @@map("anfitrione_profiles")
 }
@@ -277,13 +283,53 @@ model Transaction {
 
   wallet         Wallet          @relation(fields: [walletId], references: [id], onDelete: Cascade)
   depositRequest DepositRequest? @relation(fields: [depositRequestId], references: [id])
+  messageUnlock  MessageUnlock?
 
   @@map("transactions")
 }
 
+// PRECIOSJ DE SERVICIOS DE LA ANFITRJIONA (configurados en su perfil)
+model ServicePrice {
+  id          String      @id @default(uuid())
+  profileId   String
+  serviceType ServiceType
+  price       Int         // cuántos créditos cuesta este servicio
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  profile AnfitrioneProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, serviceType]) // una anfitriona, un precio por tipo de servicio
+  @@map("service_prices")
+}
+
+// REGISTRO DE MENSAJES DESBLOQUEADOS POR USUARIOS
+model MessageUnlock {
+  id            String   @id @default(uuid())
+  messageId     String
+  userId        String   // el usuario que pagó para ver el mensaje
+  creditsSpent  Int
+  transactionId String?  @unique
+  unlockedAt    DateTime @default(now())
+
+  message     Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id])
+  transaction Transaction? @relation(fields: [transactionId], references: [id])
+
+  @@unique([messageId, userId]) // un usuario desbloquea cada mensaje solo 1 vez
+  @@map("message_unlocks")
+}
+
 enum TransactionType {
-  DEPOSIT // Entrada de dinero (Recarga)
-  WITHDRAWAL // Salida (Pago a anfitriona, suscripción, etc.)
+  DEPOSIT        // Entrada de dinero (Recarga)
+  WITHDRAWAL     // Salida (Pago a anfitriona, suscripción, etc.)
+  MESSAGE_UNLOCK // Pago para desbloquear un mensaje
+}
+
+enum ServiceType {
+  MESSAGE    // Mensaje de chat
+  CALL       // Llamada de voz (futuro)
+  VIDEO_CALL // Video llamada (futuro)
 }
 
 enum PaymentType {
