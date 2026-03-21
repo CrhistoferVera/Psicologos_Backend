@@ -24,7 +24,7 @@ export class UsersService {
               balance: 0,
             }
           },
-          UserProfile: {
+          userProfile: {
             create: {
               userName: data.firstName ?? `user_${Math.floor(Math.random() * 10000)}`,
             }
@@ -68,7 +68,7 @@ export class UsersService {
       where: { id: userId, role: UserRole.USER },
       include: {
         wallet: true,
-        UserProfile: true,
+        userProfile: true,
       },
     });
 

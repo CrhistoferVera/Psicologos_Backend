@@ -16,7 +16,7 @@ export class UserEntity implements User {
   isActive: boolean;
 
   wallet?: Wallet | null;
-  profile?: UserProfile | null;
+  userProfile?: UserProfile | null;
 
   @Exclude()
   password: string | null;
