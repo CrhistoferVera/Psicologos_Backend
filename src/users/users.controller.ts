@@ -32,6 +32,7 @@ interface JwtUser {
 export class UsersController {
   constructor(private readonly usersService: UsersService) { }
 
+  //OBTENER DATOS PARA EL PERFIL
   @UseGuards(JwtAuthGuard)
   @Get('profile')
   async getProfile(@CurrentUser() user: JwtUser) {
@@ -45,6 +46,15 @@ export class UsersController {
   @Get('payment-methods')
   async getMethods() {
     return await this.usersService.findAllActive();
+  }
+
+  //OBTENER DATOS USER, USERPROFILE Y WALLET  
+  @UseGuards(JwtAuthGuard)
+  @Get('my/profile')
+  async getMyProfileData(@CurrentUser() user: JwtUser) {
+    const profile = await this.usersService.getUserFullProfile(user.userId)
+
+    return new UserEntity(profile);
   }
 
   //OBTENER LA WALLET DEL USER, ANFITRIONA Y ADMIN

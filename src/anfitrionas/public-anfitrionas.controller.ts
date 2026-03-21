@@ -1,4 +1,4 @@
-import { Controller, Get, Param, ParseUUIDPipe, Post, Query, Request, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query, Request, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -97,6 +97,49 @@ export class PublicAnfitrioneController {
     const currentUserId: string | undefined =
       req.user?.id ?? req.user?.userId ?? req.user?.sub;
     return this.service.findOnePublic(id, currentUserId);
+  }
+
+  /**
+   * POST /anfitrionas/public/:id/gallery/:imageId/unlock
+   * Desbloquea una imagen premium de la galería de una anfitriona.
+   * Requiere autenticación con rol USER y saldo suficiente en la wallet.
+   */
+  @Post(':id/gallery/:imageId/unlock')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Desbloquear imagen premium',
+    description:
+      'Descuenta créditos del cliente y desbloquea la imagen premium de la galería. ' +
+      'Si ya fue desbloqueada previamente devuelve alreadyUnlocked: true sin cobrar.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID del usuario anfitriona' })
+  @ApiParam({ name: 'imageId', description: 'UUID de la imagen a desbloquear' })
+  @ApiResponse({
+    status: 200,
+    description: 'Imagen desbloqueada (o ya estaba desbloqueada)',
+    schema: {
+      example: {
+        alreadyUnlocked: false,
+        creditsSpent: 30,
+        imageUrl: 'https://res.cloudinary.com/demo/image/upload/v1/img2.jpg',
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Imagen no es premium / saldo insuficiente' })
+  @ApiResponse({ status: 404, description: 'Anfitriona o imagen no encontrada' })
+  unlockGalleryImage(
+    @Param('id', ParseUUIDPipe) anfitrionaId: string,
+    @Param('imageId', ParseUUIDPipe) imageId: string,
+    @Request() req,
+  ): Promise<{ alreadyUnlocked: boolean; creditsSpent: number; imageUrl: string }> {
+    const userId: string | undefined =
+      req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('No se pudo identificar al usuario.');
+    }
+    return this.service.unlockGalleryImage(userId, anfitrionaId, imageId);
   }
 
   /**

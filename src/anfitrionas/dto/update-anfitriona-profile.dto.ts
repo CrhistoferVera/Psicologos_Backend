@@ -1,5 +1,5 @@
-import { IsInt, IsOptional, IsString, Min } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsBoolean, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateAnfitrioneProfileDto {
@@ -29,4 +29,14 @@ export class UpdateAnfitrioneProfileDto {
   @Min(0)
   @IsOptional()
   rateCredits?: number;
+
+  @ApiPropertyOptional({ example: true, description: 'Estado de disponibilidad visible en el feed' })
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  @IsBoolean()
+  @IsOptional()
+  isOnline?: boolean;
 }

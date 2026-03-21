@@ -323,7 +323,7 @@ export class CloudinaryService {
         {
           folder,
           public_id: publicId,
-          resource_type: resourceType
+          resource_type: 'auto',
         },
         (error, result) => {
           if (error || !result?.secure_url) {
@@ -403,6 +403,33 @@ export class CloudinaryService {
         (error, result) => {
           if (error || !result?.secure_url) {
             return reject(new InternalServerErrorException('Error al subir el avatar a Cloudinary.'));
+          }
+          resolve({ secureUrl: result.secure_url, publicId: result.public_id });
+        },
+      );
+      uploadStream.end(file.buffer);
+    });
+  }
+
+  async uploadCoverImage(params: {
+    file: Express.Multer.File;
+    userId: string;
+  }): Promise<{ secureUrl: string; publicId: string }> {
+    const { file, userId } = params;
+
+    if (!file.mimetype.startsWith('image/')) {
+      throw new InternalServerErrorException('Solo se permiten imágenes para el banner.');
+    }
+
+    const folder = `pachamama/anfitrionas/${userId}/cover`;
+    const publicId = `cover_${Date.now()}`;
+
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder, public_id: publicId, resource_type: 'image' },
+        (error, result) => {
+          if (error || !result?.secure_url) {
+            return reject(new InternalServerErrorException('Error al subir el banner a Cloudinary.'));
           }
           resolve({ secureUrl: result.secure_url, publicId: result.public_id });
         },

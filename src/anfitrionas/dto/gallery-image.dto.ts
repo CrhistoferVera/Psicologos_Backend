@@ -67,4 +67,13 @@ export class GalleryImagePublicDto {
       'Usar este valor para mostrar el badge de créditos en el overlay.',
   })
   unlockCredits: number | null;
+
+  @ApiProperty({
+    example: false,
+    description:
+      'Indica si el usuario autenticado ya desbloqueó esta imagen. ' +
+      'Siempre false si la imagen no es premium o si la consulta es pública sin sesión. ' +
+      'El frontend usa este campo para decidir si mostrar el overlay de lock o la imagen libre.',
+  })
+  isUnlockedByViewer: boolean;
 }

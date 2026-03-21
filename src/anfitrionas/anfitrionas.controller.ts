@@ -2,10 +2,12 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
   UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
   Request,
@@ -14,7 +16,7 @@ import {
   Query,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { UserRole } from '@prisma/client';
 import { ApiBody, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -28,6 +30,7 @@ import { UpdateAnfitrioneProfileDto } from './dto/update-anfitriona-profile.dto'
 import { DeleteHistoryDto } from './dto/delete-history.dto';
 import { HistoryFeedResponseDto } from './dto/history-feed.dto';
 import { CreateGalleryImageDto } from './dto/create-gallery-image.dto';
+import { UpdateGalleryImageDto } from './dto/update-gallery-image.dto';
 import { GalleryImageDto } from './dto/gallery-image.dto';
 
 @ApiTags('Anfitrionas - Privado')
@@ -64,7 +67,7 @@ export class AnfitrioneController {
     return this.service.findAll();
   }
 
-  
+
   // 1. OBTENER EL FEED DE HISTORIAS PARA CLIENTES (Círculos rojos/blancos)
   @Get('feed/stories')
   @Roles(UserRole.USER, UserRole.ADMIN, UserRole.ANFITRIONA) // Todos pueden ver el feed
@@ -96,14 +99,27 @@ export class AnfitrioneController {
    */
   @Patch('me/profile')
   @Roles(UserRole.ANFITRIONA)
-  @UseInterceptors(FileInterceptor('avatar', { storage: memoryStorage() }))
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'avatar', maxCount: 1 },
+        { name: 'cover', maxCount: 1 },
+      ],
+      { storage: memoryStorage() },
+    ),
+  )
   updateMyProfile(
     @Request() req,
     @Body() dto: UpdateAnfitrioneProfileDto,
-    @UploadedFile() avatar?: Express.Multer.File,
+    @UploadedFiles() files?: { avatar?: Express.Multer.File[]; cover?: Express.Multer.File[] },
   ) {
     const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
-    return this.service.updateMyProfile(userId, dto, avatar);
+    return this.service.updateMyProfile(
+      userId,
+      dto,
+      files?.avatar?.[0],
+      files?.cover?.[0],
+    );
   }
 
   //CREAR UNA HISTORIA PARA UNA ANFITRIONA
@@ -279,6 +295,51 @@ export class AnfitrioneController {
   getMyGallery(@Request() req): Promise<GalleryImageDto[]> {
     const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
     return this.service.getMyGallery(userId);
+  }
+
+  /**
+   * POST /anfitrionas/me/gallery/:id/set-featured
+   * Marca una imagen como la destacada del feed (sortOrder = 0, resto = 1).
+   */
+  @Post('me/gallery/:id/set-featured')
+  @Roles(UserRole.ANFITRIONA)
+  async setFeaturedGalleryImage(
+    @Request() req,
+    @Param('id') imageId: string,
+  ): Promise<GalleryImageDto> {
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.service.setFeaturedGalleryImage(userId, imageId);
+  }
+
+  /**
+   * DELETE /anfitrionas/me/gallery/:id
+   * Elimina una imagen de la galería de la anfitriona autenticada.
+   * Borra el archivo en Cloudinary y el registro en la BD.
+   */
+  @Delete('me/gallery/:id')
+  @Roles(UserRole.ANFITRIONA)
+  @HttpCode(204)
+  async deleteMyGalleryImage(
+    @Request() req,
+    @Param('id') imageId: string,
+  ): Promise<void> {
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.service.deleteMyGalleryImage(userId, imageId);
+  }
+
+  /**
+   * PATCH /anfitrionas/me/gallery/:id
+   * Actualiza los metadatos de una imagen de la galería (isPremium, unlockCredits, isVisible, sortOrder).
+   */
+  @Patch('me/gallery/:id')
+  @Roles(UserRole.ANFITRIONA)
+  async updateMyGalleryImage(
+    @Request() req,
+    @Param('id') imageId: string,
+    @Body() dto: UpdateGalleryImageDto,
+  ): Promise<GalleryImageDto> {
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.service.updateMyGalleryImage(userId, imageId, dto);
   }
 
   /**

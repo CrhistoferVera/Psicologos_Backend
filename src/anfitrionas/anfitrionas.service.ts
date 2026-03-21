@@ -22,6 +22,7 @@ import { AnfitrionePublicDetailDto } from './dto/anfitriona-public-detail.dto';
 import { HistoryFeedResponseDto } from './dto/history-feed.dto';
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { CreateGalleryImageDto } from './dto/create-gallery-image.dto';
+import { UpdateGalleryImageDto } from './dto/update-gallery-image.dto';
 import { GalleryImageDto, GalleryImagePublicDto } from './dto/gallery-image.dto';
 
 @Injectable()
@@ -507,6 +508,7 @@ export class AnfitrioneService {
             username: true,
             dateOfBirth: true,
             avatarUrl: true,
+            coverUrl: true,
             bio: true,
             rateCredits: true,
             isOnline: true,
@@ -529,11 +531,26 @@ export class AnfitrioneService {
       ? this.calculateAge(profile.dateOfBirth)
       : null;
 
-    const galleryImages: GalleryImagePublicDto[] = (profile?.images ?? []).map((img) => ({
+    const rawImages = profile?.images ?? [];
+
+    // Si hay usuario autenticado, averiguar qué imágenes ya desbloqueó — un solo query
+    let unlockedImageIds = new Set<string>();
+    if (currentUserId && rawImages.length > 0) {
+      const imageIds = rawImages.map((img) => img.id);
+      const unlocks = await this.prisma.imageUnlock.findMany({
+        where: { userId: currentUserId, imageId: { in: imageIds } },
+        select: { imageId: true },
+      });
+      unlockedImageIds = new Set(unlocks.map((u) => u.imageId));
+    }
+
+    const galleryImages: GalleryImagePublicDto[] = rawImages.map((img) => ({
       id: img.id,
       imageUrl: img.url,
       isPremium: img.isPremium,
       unlockCredits: img.isPremium ? img.unlockCredits : null,
+      // true solo cuando la imagen es premium Y el viewer ya la pagó
+      isUnlockedByViewer: img.isPremium ? unlockedImageIds.has(img.id) : false,
     }));
 
     let isLiked = false;
@@ -551,7 +568,7 @@ export class AnfitrioneService {
       age,
       bio: profile?.bio ?? null,
       avatar: profile?.avatarUrl ?? null,
-      coverImage: galleryImages[0]?.imageUrl ?? null,
+      coverImage: profile?.coverUrl ?? galleryImages[0]?.imageUrl ?? null,
       images: galleryImages.map((img) => img.imageUrl),
       galleryImages,
       rateCredits: profile?.rateCredits ?? null,
@@ -561,26 +578,139 @@ export class AnfitrioneService {
     };
   }
 
+  // ─── Desbloqueo de imagen premium (HU: desbloquear imagen premium) ─────────
+
+  /**
+   * Permite a un cliente (USER) desbloquear una imagen premium.
+   * Sigue el mismo patrón atómico que unlockMessage():
+   *   1. Verifica imagen y anfitriona
+   *   2. Idempotencia: si ya fue desbloqueada devuelve confirmación sin cobrar
+   *   3. Verifica wallets y saldo
+   *   4. Transacción atómica: débito cliente + crédito anfitriona + registros
+   *   5. Crea ImageUnlock
+   */
+  async unlockGalleryImage(
+    clientUserId: string,
+    anfitrionaId: string,
+    imageId: string,
+  ): Promise<{ alreadyUnlocked: boolean; creditsSpent: number; imageUrl: string }> {
+    // 1. Verificar que la anfitriona exista y esté activa
+    const anfitriona = await this.prisma.user.findFirst({
+      where: { id: anfitrionaId, role: 'ANFITRIONA', isActive: true },
+    });
+    if (!anfitriona) throw new NotFoundException('Anfitriona no encontrada.');
+
+    // 2. Verificar que la imagen exista, sea visible y pertenezca a esa anfitriona
+    const image = await this.prisma.anfitrioneImage.findFirst({
+      where: {
+        id: imageId,
+        isVisible: true,
+        profile: { userId: anfitrionaId },
+      },
+    });
+    if (!image) throw new NotFoundException('Imagen no encontrada.');
+
+    // 3. Verificar que la imagen sea premium
+    if (!image.isPremium || !image.unlockCredits) {
+      throw new BadRequestException('Esta imagen no es premium y no requiere desbloqueo.');
+    }
+
+    // 4. Idempotencia: si ya está desbloqueada, no cobrar de nuevo
+    const existing = await this.prisma.imageUnlock.findUnique({
+      where: { imageId_userId: { imageId, userId: clientUserId } },
+    });
+    if (existing) {
+      return { alreadyUnlocked: true, creditsSpent: 0, imageUrl: image.url };
+    }
+
+    const creditsRequired = image.unlockCredits;
+
+    // 5. Wallet del cliente
+    const clientWallet = await this.prisma.wallet.findUnique({
+      where: { userId: clientUserId },
+    });
+    if (!clientWallet) throw new NotFoundException('Wallet del cliente no encontrada.');
+    if (Number(clientWallet.balance) < creditsRequired) {
+      throw new BadRequestException('Créditos insuficientes para desbloquear esta imagen.');
+    }
+
+    // 6. Wallet de la anfitriona
+    const anfitrionaWallet = await this.prisma.wallet.findUnique({
+      where: { userId: anfitrionaId },
+    });
+    if (!anfitrionaWallet) {
+      throw new NotFoundException('Wallet de la anfitriona no encontrada.');
+    }
+
+    // 7. Transacción atómica: débito cliente + crédito anfitriona
+    const [, clientTx] = await this.prisma.$transaction([
+      // Débito al cliente
+      this.prisma.wallet.update({
+        where: { userId: clientUserId },
+        data: { balance: { decrement: creditsRequired } },
+      }),
+      // Registro de movimiento del cliente
+      this.prisma.transaction.create({
+        data: {
+          walletId: clientWallet.id,
+          type: 'IMAGE_UNLOCK',
+          amount: creditsRequired,
+          description: `Desbloqueo de imagen premium`,
+        },
+      }),
+      // Crédito a la anfitriona
+      this.prisma.wallet.update({
+        where: { userId: anfitrionaId },
+        data: { balance: { increment: creditsRequired } },
+      }),
+      // Registro de ganancia de la anfitriona
+      this.prisma.transaction.create({
+        data: {
+          walletId: anfitrionaWallet.id,
+          type: 'EARNING',
+          amount: creditsRequired,
+          description: JSON.stringify({ service: 'Imagen Premium', clientUserId }),
+        },
+      }),
+    ]);
+
+    // 8. Registrar el unlock (garantiza idempotencia futura)
+    await this.prisma.imageUnlock.create({
+      data: {
+        imageId,
+        userId: clientUserId,
+        creditsSpent: creditsRequired,
+        transactionId: clientTx.id,
+      },
+    });
+
+    return { alreadyUnlocked: false, creditsSpent: creditsRequired, imageUrl: image.url };
+  }
+
   // ─── Own profile (anfitriona-facing) ──────────────────────────────────────
 
   async getMyProfile(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        anfitrionaProfile: {
-          select: {
-            username: true,
-            bio: true,
-            rateCredits: true,
-            isOnline: true,
-            avatarUrl: true,
+    const [user, likesCount] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          anfitrionaProfile: {
+            select: {
+              username: true,
+              bio: true,
+              rateCredits: true,
+              isOnline: true,
+              avatarUrl: true,
+              coverUrl: true,
+            },
           },
         },
-      },
-    });
+      }),
+      this.prisma.like.count({ where: { anfitrionaId: userId } }),
+    ]);
 
     if (!user) throw new NotFoundException('Usuario no encontrado.');
 
@@ -593,6 +723,8 @@ export class AnfitrioneService {
       rateCredits: user.anfitrionaProfile?.rateCredits ?? 0,
       isOnline: user.anfitrionaProfile?.isOnline ?? false,
       avatarUrl: user.anfitrionaProfile?.avatarUrl ?? null,
+      coverUrl: user.anfitrionaProfile?.coverUrl ?? null,
+      likesCount,
     };
   }
 
@@ -600,6 +732,7 @@ export class AnfitrioneService {
     userId: string,
     dto: UpdateAnfitrioneProfileDto,
     avatarFile?: Express.Multer.File,
+    coverFile?: Express.Multer.File,
   ) {
     // Check username uniqueness if changing it
     if (dto.username) {
@@ -617,6 +750,13 @@ export class AnfitrioneService {
         userId,
       });
       avatarUpdate = { avatarUrl: uploaded.secureUrl, avatarPublicId: uploaded.publicId };
+    }
+
+    // Upload cover/banner if provided
+    let coverUpdate: { coverUrl: string; coverPublicId: string } | undefined;
+    if (coverFile) {
+      const uploaded = await this.cloudinary.uploadCoverImage({ file: coverFile, userId });
+      coverUpdate = { coverUrl: uploaded.secureUrl, coverPublicId: uploaded.publicId };
     }
 
     // Update user fields
@@ -637,9 +777,14 @@ export class AnfitrioneService {
     if (profileFields.username !== undefined) profileData.username = profileFields.username;
     if (profileFields.bio !== undefined) profileData.bio = profileFields.bio;
     if (profileFields.rateCredits !== undefined) profileData.rateCredits = profileFields.rateCredits;
+    if (profileFields.isOnline !== undefined) profileData.isOnline = profileFields.isOnline;
     if (avatarUpdate) {
       profileData.avatarUrl = avatarUpdate.avatarUrl;
       profileData.avatarPublicId = avatarUpdate.avatarPublicId;
+    }
+    if (coverUpdate) {
+      profileData.coverUrl = coverUpdate.coverUrl;
+      profileData.coverPublicId = coverUpdate.coverPublicId;
     }
 
     if (Object.keys(profileData).length > 0) {
@@ -778,6 +923,115 @@ export class AnfitrioneService {
       isVisible: img.isVisible,
       createdAt: img.createdAt.toISOString(),
     }));
+  }
+
+  /**
+   * Marca una imagen como la imagen destacada del feed (sortOrder = 0).
+   * El resto de imágenes de la galería pasan a sortOrder = 1.
+   */
+  async setFeaturedGalleryImage(userId: string, imageId: string): Promise<GalleryImageDto> {
+    const profile = await this.prisma.anfitrioneProfile.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Perfil de anfitriona no encontrado.');
+    }
+
+    const image = await this.prisma.anfitrioneImage.findFirst({
+      where: { id: imageId, profileId: profile.id },
+    });
+
+    if (!image) {
+      throw new NotFoundException('Imagen no encontrada o no pertenece a tu galería.');
+    }
+
+    // Transacción: todas a sortOrder=1, la elegida a sortOrder=0
+    const [, updated] = await this.prisma.$transaction([
+      this.prisma.anfitrioneImage.updateMany({
+        where: { profileId: profile.id },
+        data: { sortOrder: 1 },
+      }),
+      this.prisma.anfitrioneImage.update({
+        where: { id: imageId },
+        data: { sortOrder: 0 },
+      }),
+    ]);
+
+    return {
+      id: updated.id,
+      imageUrl: updated.url,
+      isPremium: updated.isPremium,
+      unlockCredits: updated.unlockCredits,
+      isVisible: updated.isVisible,
+      createdAt: updated.createdAt.toISOString(),
+    };
+  }
+
+  /**
+   * Elimina una imagen de la galería de la anfitriona autenticada.
+   * Borra el archivo en Cloudinary y el registro en la base de datos.
+   */
+  async deleteMyGalleryImage(userId: string, imageId: string): Promise<void> {
+    const image = await this.prisma.anfitrioneImage.findFirst({
+      where: { id: imageId, profile: { userId } },
+      select: { id: true, publicId: true },
+    });
+
+    if (!image) {
+      throw new NotFoundException('Imagen no encontrada o no tienes permiso para eliminarla.');
+    }
+
+    if (image.publicId) {
+      await this.cloudinary.deleteGalleryImage(image.publicId);
+    }
+
+    await this.prisma.anfitrioneImage.delete({ where: { id: imageId } });
+  }
+
+  /**
+   * Actualiza los metadatos de una imagen de la galería.
+   * Permite cambiar isPremium, unlockCredits, isVisible y sortOrder.
+   */
+  async updateMyGalleryImage(
+    userId: string,
+    imageId: string,
+    dto: UpdateGalleryImageDto,
+  ): Promise<GalleryImageDto> {
+    const image = await this.prisma.anfitrioneImage.findFirst({
+      where: { id: imageId, profile: { userId } },
+    });
+
+    if (!image) {
+      throw new NotFoundException('Imagen no encontrada o no tienes permiso para editarla.');
+    }
+
+    if (dto.isPremium && dto.unlockCredits !== undefined && dto.unlockCredits <= 0) {
+      throw new BadRequestException('Las imágenes premium requieren unlockCredits mayor a 0.');
+    }
+
+    const data: Prisma.AnfitrioneImageUpdateInput = {};
+    if (dto.isPremium !== undefined) data.isPremium = dto.isPremium;
+    if (dto.unlockCredits !== undefined) data.unlockCredits = dto.unlockCredits;
+    if (dto.isVisible !== undefined) data.isVisible = dto.isVisible;
+    if (dto.sortOrder !== undefined) data.sortOrder = dto.sortOrder;
+    // Si se desactiva premium, limpiar unlockCredits
+    if (dto.isPremium === false) data.unlockCredits = null;
+
+    const updated = await this.prisma.anfitrioneImage.update({
+      where: { id: imageId },
+      data,
+    });
+
+    return {
+      id: updated.id,
+      imageUrl: updated.url,
+      isPremium: updated.isPremium,
+      unlockCredits: updated.unlockCredits,
+      isVisible: updated.isVisible,
+      createdAt: updated.createdAt.toISOString(),
+    };
   }
 
   private calculateAge(dateOfBirth: Date): number {
