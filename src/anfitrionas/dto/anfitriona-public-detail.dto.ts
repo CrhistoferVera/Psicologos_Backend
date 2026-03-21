@@ -55,12 +55,14 @@ export class AnfitrionePublicDetailDto {
         imageUrl: 'https://res.cloudinary.com/demo/image/upload/v1/img1.jpg',
         isPremium: false,
         unlockCredits: null,
+        isUnlockedByViewer: false,
       },
       {
         id: '660e8400-e29b-41d4-a716-446655440111',
         imageUrl: 'https://res.cloudinary.com/demo/image/upload/v1/img2.jpg',
         isPremium: true,
         unlockCredits: 30,
+        isUnlockedByViewer: false,
       },
     ],
   })

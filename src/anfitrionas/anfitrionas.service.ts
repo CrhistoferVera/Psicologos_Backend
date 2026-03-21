@@ -529,11 +529,26 @@ export class AnfitrioneService {
       ? this.calculateAge(profile.dateOfBirth)
       : null;
 
-    const galleryImages: GalleryImagePublicDto[] = (profile?.images ?? []).map((img) => ({
+    const rawImages = profile?.images ?? [];
+
+    // Si hay usuario autenticado, averiguar qué imágenes ya desbloqueó — un solo query
+    let unlockedImageIds = new Set<string>();
+    if (currentUserId && rawImages.length > 0) {
+      const imageIds = rawImages.map((img) => img.id);
+      const unlocks = await this.prisma.imageUnlock.findMany({
+        where: { userId: currentUserId, imageId: { in: imageIds } },
+        select: { imageId: true },
+      });
+      unlockedImageIds = new Set(unlocks.map((u) => u.imageId));
+    }
+
+    const galleryImages: GalleryImagePublicDto[] = rawImages.map((img) => ({
       id: img.id,
       imageUrl: img.url,
       isPremium: img.isPremium,
       unlockCredits: img.isPremium ? img.unlockCredits : null,
+      // true solo cuando la imagen es premium Y el viewer ya la pagó
+      isUnlockedByViewer: img.isPremium ? unlockedImageIds.has(img.id) : false,
     }));
 
     let isLiked = false;
@@ -559,6 +574,115 @@ export class AnfitrioneService {
       likesCount: user._count.receivedLikes,
       isLiked,
     };
+  }
+
+  // ─── Desbloqueo de imagen premium (HU: desbloquear imagen premium) ─────────
+
+  /**
+   * Permite a un cliente (USER) desbloquear una imagen premium.
+   * Sigue el mismo patrón atómico que unlockMessage():
+   *   1. Verifica imagen y anfitriona
+   *   2. Idempotencia: si ya fue desbloqueada devuelve confirmación sin cobrar
+   *   3. Verifica wallets y saldo
+   *   4. Transacción atómica: débito cliente + crédito anfitriona + registros
+   *   5. Crea ImageUnlock
+   */
+  async unlockGalleryImage(
+    clientUserId: string,
+    anfitrionaId: string,
+    imageId: string,
+  ): Promise<{ alreadyUnlocked: boolean; creditsSpent: number; imageUrl: string }> {
+    // 1. Verificar que la anfitriona exista y esté activa
+    const anfitriona = await this.prisma.user.findFirst({
+      where: { id: anfitrionaId, role: 'ANFITRIONA', isActive: true },
+    });
+    if (!anfitriona) throw new NotFoundException('Anfitriona no encontrada.');
+
+    // 2. Verificar que la imagen exista, sea visible y pertenezca a esa anfitriona
+    const image = await this.prisma.anfitrioneImage.findFirst({
+      where: {
+        id: imageId,
+        isVisible: true,
+        profile: { userId: anfitrionaId },
+      },
+    });
+    if (!image) throw new NotFoundException('Imagen no encontrada.');
+
+    // 3. Verificar que la imagen sea premium
+    if (!image.isPremium || !image.unlockCredits) {
+      throw new BadRequestException('Esta imagen no es premium y no requiere desbloqueo.');
+    }
+
+    // 4. Idempotencia: si ya está desbloqueada, no cobrar de nuevo
+    const existing = await this.prisma.imageUnlock.findUnique({
+      where: { imageId_userId: { imageId, userId: clientUserId } },
+    });
+    if (existing) {
+      return { alreadyUnlocked: true, creditsSpent: 0, imageUrl: image.url };
+    }
+
+    const creditsRequired = image.unlockCredits;
+
+    // 5. Wallet del cliente
+    const clientWallet = await this.prisma.wallet.findUnique({
+      where: { userId: clientUserId },
+    });
+    if (!clientWallet) throw new NotFoundException('Wallet del cliente no encontrada.');
+    if (Number(clientWallet.balance) < creditsRequired) {
+      throw new BadRequestException('Créditos insuficientes para desbloquear esta imagen.');
+    }
+
+    // 6. Wallet de la anfitriona
+    const anfitrionaWallet = await this.prisma.wallet.findUnique({
+      where: { userId: anfitrionaId },
+    });
+    if (!anfitrionaWallet) {
+      throw new NotFoundException('Wallet de la anfitriona no encontrada.');
+    }
+
+    // 7. Transacción atómica: débito cliente + crédito anfitriona
+    const [, clientTx] = await this.prisma.$transaction([
+      // Débito al cliente
+      this.prisma.wallet.update({
+        where: { userId: clientUserId },
+        data: { balance: { decrement: creditsRequired } },
+      }),
+      // Registro de movimiento del cliente
+      this.prisma.transaction.create({
+        data: {
+          walletId: clientWallet.id,
+          type: 'IMAGE_UNLOCK',
+          amount: creditsRequired,
+          description: `Desbloqueo de imagen premium`,
+        },
+      }),
+      // Crédito a la anfitriona
+      this.prisma.wallet.update({
+        where: { userId: anfitrionaId },
+        data: { balance: { increment: creditsRequired } },
+      }),
+      // Registro de ganancia de la anfitriona
+      this.prisma.transaction.create({
+        data: {
+          walletId: anfitrionaWallet.id,
+          type: 'EARNING',
+          amount: creditsRequired,
+          description: JSON.stringify({ service: 'Imagen Premium', clientUserId }),
+        },
+      }),
+    ]);
+
+    // 8. Registrar el unlock (garantiza idempotencia futura)
+    await this.prisma.imageUnlock.create({
+      data: {
+        imageId,
+        userId: clientUserId,
+        creditsSpent: creditsRequired,
+        transactionId: clientTx.id,
+      },
+    });
+
+    return { alreadyUnlocked: false, creditsSpent: creditsRequired, imageUrl: image.url };
   }
 
   // ─── Own profile (anfitriona-facing) ──────────────────────────────────────

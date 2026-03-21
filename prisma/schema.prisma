@@ -27,12 +27,14 @@ model User {
   depositRequests      DepositRequest[]
   histories            History[]
   historyViews         HistoryView[]
-  image_unlocks        image_unlocks[]
   receivedLikes        Like[]             @relation("ReceivedLikes")
   givenLikes           Like[]             @relation("GivenLikes")
   messageUnlocks       MessageUnlock[]
   sentMessages         Message[]          @relation("SentMessages")
   wallet               Wallet?
+  imageUnlocks         ImageUnlock[]
+  //notifications        Notification[]
+
 
   @@map("users")
 }
@@ -93,11 +95,12 @@ model AnfitrioneProfile {
   avatarPublicId String?
   bio            String?
   rateCredits    Int?
-  isOnline       Boolean           @default(false)
-  images         AnfitrioneImage[]
-  user           User              @relation(fields: [userId], references: [id])
-  bank_accounts  bank_accounts[]
-  servicePrices  ServicePrice[]
+  isOnline       Boolean  @default(false)
+
+  user          User              @relation(fields: [userId], references: [id])
+  images        AnfitrioneImage[]
+  servicePrices ServicePrice[]
+  bankAccounts  BankAccount[]
 
   @@map("anfitrione_profiles")
 }
@@ -107,26 +110,27 @@ model AnfitrioneImage {
   profileId     String
   url           String
   publicId      String?
-  sortOrder     Int               @default(0)
-  createdAt     DateTime          @default(now())
-  isPremium     Boolean           @default(false)
-  isVisible     Boolean           @default(true)
-  unlockCredits Int?
-  profile       AnfitrioneProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
-  image_unlocks image_unlocks[]
+  sortOrder     Int      @default(0)
+  isPremium     Boolean  @default(false)
+  unlockCredits Int? // null = gratuita; > 0 = créditos requeridos para desbloquear
+  isVisible     Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  profile      AnfitrioneProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  imageUnlocks ImageUnlock[]
 
   @@map("anfitrione_images")
 }
 
 model Wallet {
-  id                  String                @id @default(uuid())
-  balance             Decimal               @default(0.00) @db.Decimal(10, 2)
-  userId              String                @unique
-  createdAt           DateTime              @default(now())
-  updatedAt           DateTime              @updatedAt
+  id                  String              @id @default(uuid())
+  balance             Decimal             @default(0.00) @db.Decimal(10, 2)
+  userId              String              @unique
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions        Transaction[]
-  user                User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  withdrawal_requests withdrawal_requests[]
+  withdrawalRequests  WithdrawalRequest[]
 
   @@map("wallets")
 }
@@ -215,15 +219,19 @@ model PaymentMethod {
 model Transaction {
   id               String          @id @default(uuid())
   walletId         String
-  depositRequestId String?         @unique
-  amount           Decimal         @db.Decimal(10, 2)
-  type             TransactionType
-  description      String?
-  createdAt        DateTime        @default(now())
-  image_unlocks    image_unlocks?
-  messageUnlock    MessageUnlock?
-  depositRequest   DepositRequest? @relation(fields: [depositRequestId], references: [id])
-  wallet           Wallet          @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  depositRequestId String? @unique
+  amount           Decimal @db.Decimal(10, 2)
+
+  type TransactionType
+
+  description String?
+
+  createdAt DateTime @default(now())
+
+  wallet         Wallet          @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  depositRequest DepositRequest? @relation(fields: [depositRequestId], references: [id])
+  messageUnlock  MessageUnlock?
+  imageUnlock    ImageUnlock?
 
   @@map("transactions")
 }
@@ -255,50 +263,56 @@ model MessageUnlock {
   @@unique([messageId, userId])
   @@map("message_unlocks")
 }
+// REGISTRO DE IMÁGENES DESBLOQUEADAS POR USUARIOS (patrón idéntico a MessageUnlock)
+model ImageUnlock {
+  id            String   @id @default(uuid())
+  imageId       String
+  userId        String   // el cliente que pagó
+  creditsSpent  Int
+  transactionId String?  @unique
+  unlockedAt    DateTime @default(now())
 
-model Banks {
-  name          String
-  logo_url      String
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime?
-  id            Int             @id @default(autoincrement())
-  bank_accounts bank_accounts[]
+  image       AnfitrioneImage @relation(fields: [imageId], references: [id], onDelete: Cascade)
+  user        User            @relation(fields: [userId], references: [id])
+  transaction Transaction?    @relation(fields: [transactionId], references: [id])
+
+  @@unique([imageId, userId]) // un cliente desbloquea cada imagen solo 1 vez
+  @@map("image_unlocks")
 }
 
-model bank_accounts {
-  id                  BigInt                @id @default(autoincrement())
+
+model Banks {
+  name         String
+  logo_url     String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime?     @updatedAt
+  id           Int           @id @default(autoincrement())
+  bankAccounts BankAccount[]
+}
+
+model BankAccount {
+  id                  BigInt    @id @default(autoincrement())
   userId              String
   bankId              Int
   anfitrionaProfileId String
-  accountNumber       String                @db.VarChar(50)
-  createdAt           DateTime              @default(now())
-  updatedAt           DateTime?
-  accountHolderName   String?               @db.VarChar(100)
-  anfitrione_profiles AnfitrioneProfile     @relation(fields: [anfitrionaProfileId], references: [id], onDelete: Cascade)
-  Banks               Banks                 @relation(fields: [bankId], references: [id])
-  withdrawal_requests withdrawal_requests[]
+  accountNumber       String    @db.VarChar(50)
+  accountHolderName   String?   @db.VarChar(100)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime? @updatedAt
 
-  @@index([accountNumber])
-  @@index([bankId])
+  bank               Banks               @relation(fields: [bankId], references: [id])
+  anfitrionaProfile  AnfitrioneProfile   @relation(fields: [anfitrionaProfileId], references: [id], onDelete: Cascade)
+  withdrawalRequests WithdrawalRequest[]
+
   @@index([userId])
+  @@index([bankId])
+  @@index([accountNumber])
+  @@map("bank_accounts")
 }
 
-model image_unlocks {
-  id                String          @id
-  imageId           String
-  userId            String
-  creditsSpent      Int
-  transactionId     String?         @unique
-  unlockedAt        DateTime        @default(now())
-  anfitrione_images AnfitrioneImage @relation(fields: [imageId], references: [id], onDelete: Cascade)
-  transactions      Transaction?    @relation(fields: [transactionId], references: [id])
-  users             User            @relation(fields: [userId], references: [id])
 
-  @@unique([imageId, userId])
-}
-
-model withdrawal_requests {
-  id            String           @id
+model WithdrawalRequest {
+  id            String           @id @default(uuid())
   walletId      String
   bankAccountId BigInt
   credits       Decimal          @db.Decimal(10, 2)
@@ -306,17 +320,20 @@ model withdrawal_requests {
   status        WithdrawalStatus @default(PENDING)
   notes         String?
   createdAt     DateTime         @default(now())
-  updatedAt     DateTime
-  bank_accounts bank_accounts    @relation(fields: [bankAccountId], references: [id])
-  wallets       Wallet           @relation(fields: [walletId], references: [id])
+  updatedAt     DateTime         @updatedAt
+
+  wallet      Wallet      @relation(fields: [walletId], references: [id])
+  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id])
+
+  @@map("withdrawal_requests")
 }
 
 enum TransactionType {
-  DEPOSIT
-  WITHDRAWAL
-  MESSAGE_UNLOCK
-  EARNING
-  IMAGE_UNLOCK
+  DEPOSIT        // Entrada de dinero (Recarga)
+  WITHDRAWAL     // Salida (retiro de anfitriona)
+  MESSAGE_UNLOCK // Pago para desbloquear un mensaje
+  IMAGE_UNLOCK   // Pago para desbloquear una imagen premium
+  EARNING        // Crédito recibido por la anfitriona
 }
 
 enum ServiceType {

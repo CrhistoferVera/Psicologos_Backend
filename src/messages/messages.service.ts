@@ -90,13 +90,15 @@ export class MessagesService {
   async unlockMessage(messageId: string, userId: string) {
     const message = await this.prisma.message.findUnique({
       where: { id: messageId },
+      include: {
+        sender: { select: { firstName: true, lastName: true } },
+      },
     });
 
     if (!message) throw new NotFoundException('Mensaje no encontrado');
     if (!message.isLocked) throw new BadRequestException('Este mensaje no está bloqueado');
     if (message.senderId === userId) throw new BadRequestException('No puedes desbloquear tu propio mensaje');
 
-    // Verificar si ya lo desbloqueó
     const existing = await this.prisma.messageUnlock.findUnique({
       where: { messageId_userId: { messageId, userId } },
     });
@@ -104,25 +106,50 @@ export class MessagesService {
 
     const creditsRequired = message.price!;
 
-    // Verificar saldo en wallet
-    const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
-    if (!wallet) throw new NotFoundException('Wallet no encontrada');
-    if (Number(wallet.balance) < creditsRequired) {
+    // Wallet del cliente que paga
+    const clientWallet = await this.prisma.wallet.findUnique({ where: { userId } });
+    if (!clientWallet) throw new NotFoundException('Wallet no encontrada');
+    if (Number(clientWallet.balance) < creditsRequired) {
       throw new BadRequestException('Créditos insuficientes');
     }
 
-    // Ejecutar todo en una transacción atómica
-    const [, transaction] = await this.prisma.$transaction([
+    // Wallet de la anfitriona que cobra
+    const anfitrionaWallet = await this.prisma.wallet.findUnique({
+      where: { userId: message.senderId },
+    });
+    if (!anfitrionaWallet) throw new NotFoundException('Wallet de anfitriona no encontrada');
+
+    // Get client name for description
+    const client = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { firstName: true, lastName: true },
+    });
+    const clientName = [client?.firstName, client?.lastName].filter(Boolean).join(' ') || 'Cliente';
+
+    // Transacción atómica: débito al cliente + crédito a la anfitriona
+    const [, clientTx] = await this.prisma.$transaction([
       this.prisma.wallet.update({
         where: { userId },
         data: { balance: { decrement: creditsRequired } },
       }),
       this.prisma.transaction.create({
         data: {
-          walletId: wallet.id,
+          walletId: clientWallet.id,
           type: 'MESSAGE_UNLOCK',
           amount: creditsRequired,
           description: `Desbloqueo de mensaje`,
+        },
+      }),
+      this.prisma.wallet.update({
+        where: { userId: message.senderId },
+        data: { balance: { increment: creditsRequired } },
+      }),
+      this.prisma.transaction.create({
+        data: {
+          walletId: anfitrionaWallet.id,
+          type: 'EARNING',
+          amount: creditsRequired,
+          description: JSON.stringify({ service: 'Mensaje Bloqueado', clientName }),
         },
       }),
     ]);
@@ -132,7 +159,7 @@ export class MessagesService {
         messageId,
         userId,
         creditsSpent: creditsRequired,
-        transactionId: transaction.id,
+        transactionId: clientTx.id,
       },
     });
 
