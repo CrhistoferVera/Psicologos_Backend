@@ -2,10 +2,11 @@ import {
   Injectable,
   ConflictException,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
-import { User, Prisma } from '@prisma/client';
+import { User, Prisma, UserRole } from '@prisma/client';
 
 @Injectable()
 export class UsersService {
@@ -22,7 +23,14 @@ export class UsersService {
             create: {
               balance: 0,
             }
+          },
+          userProfile: {
+            create: {
+              userName: data.firstName ?? `user_${Math.floor(Math.random() * 10000)}`,
+            }
           }
+
+
         },
         include:
         {
@@ -52,6 +60,23 @@ export class UsersService {
 
   async findOneById(id: string): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { id } });
+  }
+
+  //OBTENER DATOS DE PERFIL DE USUARIO USER, USERPROFILE Y SU WALLET
+  async getUserFullProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, role: UserRole.USER },
+      include: {
+        wallet: true,
+        userProfile: true,
+      },
+    });
+
+    if(!user){
+      throw new NotFoundException('Perfil de usuario no encontrado');
+    }
+
+    return user;
   }
 
   async update(id: string, data: Prisma.UserUpdateInput): Promise<User> {

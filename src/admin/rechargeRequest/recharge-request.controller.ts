@@ -22,6 +22,8 @@ export class RechargeRequestController {
     /**
      * LISTAR TODAS LAS SOLICITUDES DE RECARGA
      */
+    @UseGuards(JwtAuthGuard, RolesGuard)//JwtAuthGuard: valida que el usuario este logeado
+    @Roles('ADMIN') //RolesGuard: valida que el usuario tenga el rol de administrador
     @Get()
     @ApiOperation({ summary: 'Listar solicitudes de recarga (paginacion por cursor)' })
 
@@ -83,15 +85,15 @@ export class RechargeRequestController {
     }
 
 
-   // Endpoint de prueba para RECHAZO
+    // Endpoint de prueba para RECHAZO
     @Get('test-email-rejected')
     async testRejected() {
         await this.mailService.sendDepositStatusNotification(
             'paredespavajhoel@gmail.com',
             'Tester Reject',
             'REJECTED',
-            0, 
-            'El comprobante de pago no es legible o está alterado.' 
+            0,
+            'El comprobante de pago no es legible o está alterado.'
         );
         return { message: 'Correo de rechazo enviado, revisa tu bandeja' };
     }

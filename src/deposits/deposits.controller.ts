@@ -46,32 +46,38 @@ export class DepositsController {
         },
     })
 
-    @UseInterceptors(FileInterceptor('file')) 
+    @UseInterceptors(FileInterceptor('file'))
     async createDeposit(
-        @CurrentUser('id') userId: string, // Extraemos el ID del Token JWT (usuario logeado)
+       @CurrentUser() user: any, //cuando es objeto
         @Body() createDepositDto: CreateDepositRequestDto,
-        @UploadedFile(
-            new ParseFilePipe({
-                validators: [
-                    new MaxFileSizeValidator({ maxSize: 1024 * 1024 * 5 }), // Máximo 5MB
-                    new FileTypeValidator({ fileType: /(png|jpeg|jpg|pdf)$/ }),
-                ],
-            }),
-        ) file: Express.Multer.File,
+        @UploadedFile() file: Express.Multer.File,
     ) {
+      
+        const userId = user?.userId || user?.id || user?.sub;
 
         this.logger.log(`📥 POST /deposits/request - userId: ${userId}`);
         this.logger.debug(`DTO → ${JSON.stringify(createDepositDto)}`);
+
+        if (!userId) {
+            this.logger.error('❌ No se pudo obtener el userId del token. Revisa JwtStrategy.');
+            throw new BadRequestException('Usuario no identificado en el sistema.');
+        }
 
         if (!file) {
             this.logger.warn(`⚠️ Usuario ${userId} no envió comprobante`);
             throw new BadRequestException('Debe subir un comprobante de pago');
         }
 
-        const result = await this.depositsService.createDepositRequest(userId, createDepositDto, file);
 
-        this.logger.log(`✅ Depósito creado correctamente para usuario ${userId}`);
+        try {
+            const result = await this.depositsService.createDepositRequest(userId, createDepositDto, file);
 
-        return result;
+            this.logger.log(`✅ Depósito creado correctamente para usuario ${userId}`);
+            return result;
+
+        } catch (error) {
+            this.logger.error(`❌ Error creando depósito: ${error.message}`);
+            throw error;
+        }
     }
 }

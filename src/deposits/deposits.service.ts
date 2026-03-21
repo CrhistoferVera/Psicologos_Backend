@@ -18,8 +18,11 @@ export class DepositsService {
     ) {
 
         //validar que el paquete exista y este activo
-        const pkg = await this.prisma.package.findUnique({
-            where: { id: createDepositDto.packageId, isActive: true } //Ese packageId viene del body de la request
+        const pkg = await this.prisma.package.findFirst({
+            where: {
+                id: createDepositDto.packageId,
+                isActive: true
+            }
         });
 
         if (!pkg || !pkg.isActive) {
@@ -27,7 +30,7 @@ export class DepositsService {
         }
 
         //validar que el metodo de pago exista y este activo
-        const paymentMethod = await this.prisma.paymentMethod.findUnique({
+        const paymentMethod = await this.prisma.paymentMethod.findFirst({
             where: {
                 id: createDepositDto.paymentMethodId,
                 isActive: true

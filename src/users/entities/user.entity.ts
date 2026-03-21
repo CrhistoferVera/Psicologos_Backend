@@ -1,4 +1,4 @@
-import { User, UserRole } from '@prisma/client';
+import { User, UserRole, Wallet, UserProfile } from '@prisma/client';
 import { Exclude } from 'class-transformer';
 
 export class UserEntity implements User {
@@ -14,6 +14,9 @@ export class UserEntity implements User {
   lastLogin: Date | null;
 
   isActive: boolean;
+
+  wallet?: Wallet | null;
+  userProfile?: UserProfile | null;
 
   @Exclude()
   password: string | null;

@@ -323,7 +323,7 @@ export class CloudinaryService {
         {
           folder,
           public_id: publicId,
-          resource_type: resourceType
+          resource_type: 'auto',
         },
         (error, result) => {
           if (error || !result?.secure_url) {

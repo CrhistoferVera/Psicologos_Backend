@@ -67,7 +67,7 @@ export class AnfitrioneController {
     return this.service.findAll();
   }
 
-  
+
   // 1. OBTENER EL FEED DE HISTORIAS PARA CLIENTES (Círculos rojos/blancos)
   @Get('feed/stories')
   @Roles(UserRole.USER, UserRole.ADMIN, UserRole.ANFITRIONA) // Todos pueden ver el feed
