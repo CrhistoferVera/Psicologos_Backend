@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Put, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ServicePricesService } from './service-prices.service';
@@ -13,6 +13,12 @@ interface JwtUser {
 @Controller('service-prices')
 export class ServicePricesController {
   constructor(private readonly servicePricesService: ServicePricesService) {}
+
+  // GET /service-prices/public/:userId — precios públicos de cualquier anfitriona (sin auth)
+  @Get('public/:userId')
+  getPublicPrices(@Param('userId') userId: string) {
+    return this.servicePricesService.getPublicPrices(userId);
+  }
 
   // GET /service-prices — anfitriona consulta sus precios
   @Get()

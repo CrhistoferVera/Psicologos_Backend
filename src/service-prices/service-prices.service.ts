@@ -45,6 +45,15 @@ export class ServicePricesService {
     });
   }
 
+  // Precios públicos de una anfitriona (para que el cliente los vea antes de llamar)
+  async getPublicPrices(anfitrionaUserId: string) {
+    const profile = await this.prisma.anfitrioneProfile.findUnique({
+      where: { userId: anfitrionaUserId },
+      include: { servicePrices: true },
+    });
+    return profile?.servicePrices ?? [];
+  }
+
   // Obtiene el precio activo de un servicio para una anfitriona (usado al enviar mensaje)
   async getPriceForUser(anfitrionaUserId: string, serviceType: ServiceType) {
     const profile = await this.prisma.anfitrioneProfile.findUnique({
