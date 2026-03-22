@@ -7,7 +7,6 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { User, Prisma, UserRole, TransactionType } from '@prisma/client';
-import { Roles } from 'src/auth/decorators/roles.decorator';
 
 @Injectable()
 export class UsersService {
@@ -181,6 +180,79 @@ export class UsersService {
       where: { userId }
     });
     return wallet;
+  }
+
+  // TOGGLE GUARDAR / QUITAR ANFITRIONA
+  async toggleSavedAnfitriona(userId: string, anfitrionaId: string) {
+    const anfitriona = await this.prisma.user.findFirst({
+      where: { id: anfitrionaId, role: UserRole.ANFITRIONA, isActive: true },
+    });
+
+    if (!anfitriona) throw new NotFoundException('Anfitriona no encontrada.');
+
+    const existing = await this.prisma.savedAnfitriona.findUnique({
+      where: { userId_anfitrionaId: { userId, anfitrionaId } },
+    });
+
+    if (existing) {
+      await this.prisma.savedAnfitriona.delete({
+        where: { userId_anfitrionaId: { userId, anfitrionaId } },
+      });
+      return { saved: false };
+    }
+
+    await this.prisma.savedAnfitriona.create({ data: { userId, anfitrionaId } });
+    return { saved: true };
+  }
+
+  // LISTAR ANFITRIONAS GUARDADAS DEL CLIENTE
+  async getSavedAnfitrionas(userId: string, cursor?: string, limit: number = 10) {
+    const saved = await this.prisma.savedAnfitriona.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: limit + 1,
+      ...(cursor && {
+        skip: 1,
+        cursor: { id: cursor },
+      }),
+      include: {
+        anfitriona: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            anfitrionaProfile: {
+              select: {
+                username: true,
+                avatarUrl: true,
+                isOnline: true,
+                rateCredits: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    let nextCursor: string | null = null;
+
+    if (saved.length > limit) {
+      saved.pop();
+      nextCursor = saved[saved.length - 1].id;
+    }
+
+    return {
+      data: saved.map(s => ({
+        id: s.anfitriona.id,
+        name: `${s.anfitriona.firstName} ${s.anfitriona.lastName}`,
+        username: s.anfitriona.anfitrionaProfile?.username,
+        avatar: s.anfitriona.anfitrionaProfile?.avatarUrl,
+        isOnline: s.anfitriona.anfitrionaProfile?.isOnline,
+        rateCredits: s.anfitriona.anfitrionaProfile?.rateCredits,
+        savedAt: s.createdAt,
+      })),
+      nextCursor,
+    };
   }
 
   //OBTENER LOS MEOTODOS DE PAGO

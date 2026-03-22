@@ -30,6 +30,8 @@ model User {
   imageUnlocks         ImageUnlock[]
   receivedLikes        Like[]             @relation("ReceivedLikes")
   givenLikes           Like[]             @relation("GivenLikes")
+  savedAnfitrionas     SavedAnfitriona[]  @relation("SavedByUser")
+  savedByUsers         SavedAnfitriona[]  @relation("SavedAnfitriona")
   messageUnlocks       MessageUnlock[]
   sentMessages         Message[]          @relation("SentMessages")
   wallet               Wallet?
@@ -97,6 +99,19 @@ model Like {
 
   @@unique([userId, anfitrionaId])
   @@map("likes")
+}
+
+model SavedAnfitriona {
+  id           String   @id @default(uuid())
+  userId       String
+  anfitrionaId String
+  createdAt    DateTime @default(now())
+
+  user       User @relation("SavedByUser", fields: [userId], references: [id], onDelete: Cascade)
+  anfitriona User @relation("SavedAnfitriona", fields: [anfitrionaId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, anfitrionaId])
+  @@map("saved_anfitrionas")
 }
 
 model AnfitrioneProfile {
