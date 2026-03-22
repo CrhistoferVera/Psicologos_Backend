@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
-import { User, Prisma, UserRole } from '@prisma/client';
+import { User, Prisma, UserRole, TransactionType } from '@prisma/client';
+import { Roles } from 'src/auth/decorators/roles.decorator';
 
 @Injectable()
 export class UsersService {
@@ -48,6 +49,90 @@ export class UsersService {
     }
   }
 
+  //HISTORIAL DE GASTOS
+  async findUserExpenseHistory(userId: string) {
+
+    console.log("Buscando historial para el ID:", userId);
+    // 1. Buscamos la billetera del usuario y sus transacciones
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { userId },
+      include: {
+        transactions: {
+          orderBy: { createdAt: 'desc' }, // Lo más reciente primero
+          include: {
+            // Detalle si fue un mensaje
+            messageUnlock: {
+              include: {
+                message: {
+                  select: {
+                    sender: {
+                      select: { firstName: true, lastName: true }
+                    }
+                  }
+                }
+              }
+            },
+            // Detalle si fue una imagen premium
+            imageUnlock: {
+              include: {
+                image: {
+                  select: {
+                    profile: { select: { username: true } }
+                  }
+                }
+              }
+            },
+            // Detalle si fue una recarga de créditos
+            depositRequest: {
+              select: {
+                packageNameAtMoment: true,
+                amount: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!wallet) {
+      throw new NotFoundException('Billetera no encontrada');
+    }
+
+    // 2. Mapeamos los datos para que el Frontend reciba algo limpio
+    return wallet.transactions.map(t => ({
+      id: t.id,
+      monto: t.amount,
+      tipo: t.type,
+      fecha: t.createdAt,
+      descripcion: t.description,
+      detalle: this.formatDetail(t)
+    }));
+  }
+
+  // Función auxiliar para generar un texto descriptivo según el tipo
+  private formatDetail(t: any) {
+    if (t.type === 'MESSAGE_UNLOCK' || t.type === TransactionType.MESSAGE_UNLOCK ) {
+      const nombreAnfitriona = `${t.messageUnlock?.message?.sender?.firstName || 'Anfitriona'}`;
+      return `Mensaje desbloqueada de ${nombreAnfitriona}`;
+    }
+    if (t.type === 'IMAGE_UNLOCK' || t.type === TransactionType.IMAGE_UNLOCK ) {
+      const nombreAnfitriona = `${t.imageUnlock?.image?.profile?.username || 'Anfitriona'}`;
+      return `Foto premium de ${nombreAnfitriona}`;
+    }
+    if (t.type === 'DEPOSIT' || t.type === TransactionType.DEPOSIT) {
+      return `Recarga: ${t.depositRequest?.packageNameAtMoment || 'Paquete de créditos'}`;
+    }
+    if (t.type === 'CALL_PAYMENT' || t.type === TransactionType.CALL_PAYMENT) {
+      return t.description ? `Llamada: ${t.description}` : `Llamada realizada`;
+    }
+
+    if (t.type === 'EARNING' || t.type === TransactionType.EARNING) {
+      return `Ingreso recibido por servicios`;
+    }
+    return 'Transacción general';
+  }
+
+
   async findOneByPhone(phoneNumber: string): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { phoneNumber } });
   }
@@ -72,7 +157,7 @@ export class UsersService {
       },
     });
 
-    if(!user){
+    if (!user) {
       throw new NotFoundException('Perfil de usuario no encontrado');
     }
 

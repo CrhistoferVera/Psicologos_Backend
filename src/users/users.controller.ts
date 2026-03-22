@@ -41,6 +41,27 @@ export class UsersController {
     return new UserEntity(found);
   }
 
+  //HISTORIAL DE GASTOS
+  @UseGuards(JwtAuthGuard)
+  @Get('expense-history')
+  async getExpenseHistory(@CurrentUser() user: JwtUser) {
+
+    try {
+      const expenseHistory = await this.usersService.findUserExpenseHistory(user.userId);
+
+      return {
+        success: true,
+        data: expenseHistory
+      }
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message || 'Error al obtener el historial de gastos',
+        data: []
+      }
+    }
+  }
+
   //OBTENER TODOS LOS METODOS DE PAGO
   @UseGuards(JwtAuthGuard)
   @Get('payment-methods')
