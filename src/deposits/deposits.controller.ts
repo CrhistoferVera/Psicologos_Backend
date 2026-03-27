@@ -48,11 +48,11 @@ export class DepositsController {
 
     @UseInterceptors(FileInterceptor('file'))
     async createDeposit(
-       @CurrentUser() user: any, //cuando es objeto
+        @CurrentUser() user: any, //cuando es objeto
         @Body() createDepositDto: CreateDepositRequestDto,
         @UploadedFile() file: Express.Multer.File,
     ) {
-      
+
         const userId = user?.userId || user?.id || user?.sub;
 
         this.logger.log(`📥 POST /deposits/request - userId: ${userId}`);

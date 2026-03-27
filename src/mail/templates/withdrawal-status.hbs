@@ -1,0 +1,36 @@
+<div style="font-family: 'Segoe UI', sans-serif; max-width: 500px; margin: auto; border: 1px solid #eee; border-radius: 10px; padding: 20px;">
+
+    <div style="text-align: center; border-bottom: 2px solid #f4f4f4; padding-bottom: 10px;">
+        <h2 style="margin: 0;">Hola, {{firstName}}</h2>
+    </div>
+
+    <p>Te informamos sobre el estado de tu solicitud de retiro realizada el {{date}}:</p>
+
+    <div style="text-align: center; padding: 20px;">
+        {{#if (eq status "APPROVED")}}
+        <span style="font-weight: bold; font-size: 1.2em; color: #2ecc71;">APROBADA</span>
+        {{else}}
+        <span style="font-weight: bold; font-size: 1.2em; color: #e74c3c;">RECHAZADA</span>
+        {{/if}}
+    </div>
+
+    {{#if (eq status "APPROVED")}}
+    <p>Tu retiro de <strong>{{credits}} créditos</strong> equivalente a <strong>S/ {{soles}}</strong> ha sido procesado exitosamente.</p>
+    <p>El monto fue transferido a tu cuenta bancaria registrada.</p>
+    {{else}}
+    <p>Lamentablemente no pudimos procesar tu solicitud de retiro.</p>
+    <p style="background-color: #fdf2f2; border-left: 4px solid #e74c3c; padding: 10px; color: #c0392b;">
+        <strong>Motivo:</strong> {{reason}}
+    </p>
+    <p>Tus créditos han sido devueltos a tu billetera.</p>
+    <p style="margin-top: 20px;">
+        Si tienes dudas contáctate con el
+        <a href="mailto:soporte@pachamama.com" style="color: #3498db; text-decoration: underline;">soporte de la APP</a>.
+    </p>
+    {{/if}}
+
+    <div style="font-size: 0.8em; color: #888; margin-top: 20px; text-align: center;">
+        <p>Por favor no respondas a este correo.</p>
+    </div>
+
+</div>

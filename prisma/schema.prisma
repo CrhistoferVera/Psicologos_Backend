@@ -337,20 +337,27 @@ model BankAccount {
 }
 
 model WithdrawalRequest {
-  id            String           @id @default(uuid())
-  walletId      String
-  bankAccountId BigInt
-  credits       Decimal          @db.Decimal(10, 2)
-  soles         Decimal          @db.Decimal(10, 2)
-  status        WithdrawalStatus @default(PENDING)
-  notes         String?
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  bankAccount   BankAccount      @relation(fields: [bankAccountId], references: [id])
-  wallet        Wallet           @relation(fields: [walletId], references: [id])
+  id              String           @id @default(uuid())
+  walletId        String
+  bankAccountId   BigInt
+  credits         Decimal          @db.Decimal(10, 2)
+  soles           Decimal          @db.Decimal(10, 2)
+  status          WithdrawalStatus @default(PENDING)
+  notes           String?
+
+  rejectionReason String?
+  receiptUrl      String?
+  receiptPublicId String?
+
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  bankAccount     BankAccount      @relation(fields: [bankAccountId], references: [id])
+  wallet          Wallet           @relation(fields: [walletId], references: [id])
 
   @@map("withdrawal_requests")
 }
+
+
 
 enum TransactionType {
   DEPOSIT        // Entrada de dinero (Recarga)

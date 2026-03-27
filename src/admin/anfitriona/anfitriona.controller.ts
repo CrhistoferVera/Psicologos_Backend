@@ -1,13 +1,56 @@
-import { Controller, Get, Patch, Param, Body, Query, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Get, Patch, Param, Body, Query } from '@nestjs/common';
 import { AnfitrionaService } from './anfitriona.service';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { UpdateAnfitrionaDto } from './dto/update-anfitriona.dto';
-import { CreateHistoryDto } from '../../anfitrionas/dto/create-history.dto';
 
 @ApiTags('Admin - Anfitrionas') // Cambiado para organizar mejor tu Swagger
 @Controller('admin/anfitrionas') // Ruta profesional para el panel de administración
 export class AnfitrionaController {
     constructor(private readonly clientService: AnfitrionaService) { }
+
+    /**
+  * LISTAR TODOS LAS SOLICITUDEES DE PAGO (USUARIOS ROL ANFITRIONA)
+  */
+    @Get('list/withdrawal-requests')
+    @ApiOperation({ summary: 'Listar solicitudes de retiro de anfitrionas' })
+    @ApiQuery({ name: 'search', required: false })
+    @ApiQuery({ name: 'cursor', required: false, description: 'ID del último registro recibido' })
+    findAllWithdrawalRequests(
+        @Query('search') search?: string,
+        @Query('cursor') cursor?: string,
+        @Query('limit') limit: number = 10,
+    ) {
+        console.log('✅ HIT withdrawal-requests | search:', search, '| cursor:', cursor, '| limit:', limit);
+        return this.clientService.findAllWithdrawalRequest(
+            search,
+            cursor,
+            Number(limit),
+        );
+    }
+
+    // HISTORIAL DE PAGOS A ANFITRIONA (RECHAZADO Y APROBADO)
+    @Get('payment/history')
+    @ApiOperation({ summary: 'historial de pagos a anfitriona' })
+    @ApiQuery({ name: 'search', required: false })
+    @ApiQuery({ name: 'cursor', required: false, description: 'ID del último registro recibido' })
+    findWithdrawalRequestHistory(
+        @Query('search') search?: string,
+        @Query('cursor') cursor?: string,
+        @Query('limit') limit: number = 10,
+    ) {
+        return this.clientService.findWithdrawalRequestHistory(
+            search,
+            cursor,
+            Number(limit),
+        );
+    }
+
+    //CANTIDAD DE SOLICITUDES DE PAGOS PENDIENTES
+    @Get('count/pending-withdrawal-requests')
+    @ApiOperation({ summary: 'Obtener cantidad de solicitudes de retiro pendientes' })
+    countPendingWithdrawalRequests() {
+        return this.clientService.countPendingRequests();
+    }
 
     /**
      * LISTAR TODOS LAS ANFITRIONA (USUARIOS ROL ANFITRIONA)
@@ -36,7 +79,7 @@ export class AnfitrionaController {
      */
     @Get(':id')
     @ApiOperation({ summary: 'Obtener información detallada de una anfitriona' })
-    findOne(@Param('id', ParseUUIDPipe) id: string) {
+    findOne(@Param('id') id: string) {
         return this.clientService.findOne(id);
     }
 
@@ -46,7 +89,7 @@ export class AnfitrionaController {
     @Patch(':id/status')
     @ApiOperation({ summary: 'Cambiar estado de la anfitriona (Activo/Suspendido)' })
     updateStatus(
-        @Param('id', ParseUUIDPipe) id: string,
+        @Param('id') id: string,
         @Body() updateAnfitrionaStatusDto: UpdateAnfitrionaDto
     ) {
         return this.clientService.updateStatus(id, updateAnfitrionaStatusDto);

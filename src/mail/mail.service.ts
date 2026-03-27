@@ -42,4 +42,42 @@ export class MailService {
             this.logger.error(`Error enviando email a ${email}:`, error);
         }
     }
+
+    //METODO PARA ENVIAR NOTIFICACION DE ESTADO DE SOLICITUD DE RETIRO
+    async sendWithdrawalRequestNotification(
+        email: string,
+        firstName: string,
+        status: 'APPROVED' | 'REJECTED',
+        credits: number,
+        soles: number,
+        reason?: string | null
+    ) {
+        try {
+            const subject = status === 'APPROVED'
+                ? 'Tu solicitud de retiro fue aprobada'
+                : 'Tu solicitud de retiro fue rechazada';
+
+            await this.mailerService.sendMail({
+                to: email,
+                subject,
+                template: 'withdrawal-status',
+                context: {
+                    firstName,
+                    status,
+                    credits,
+                    soles,
+                    reason,
+                    date: new Date().toLocaleDateString('es-BO', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
+                    }),
+                },
+            });
+
+            this.logger.log(`📧 Email retiro enviado a ${email} - Estado: ${status}`);
+        } catch (error) {
+            this.logger.error(`Error enviando email de retiro a ${email}:`, error);
+        }
+    }
 }

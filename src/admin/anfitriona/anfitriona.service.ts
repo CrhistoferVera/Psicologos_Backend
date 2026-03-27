@@ -1,7 +1,7 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { UpdateAnfitrionaDto } from './dto/update-anfitriona.dto';
-import { UserRole, Prisma } from "@prisma/client";
+import { UserRole, Prisma, WithdrawalStatus } from "@prisma/client";
 
 
 @Injectable()
@@ -94,5 +94,120 @@ export class AnfitrionaService {
         };
     }
 
+    //LISTAR TODAS LAS SOLICTUDES DE PAGO QUE REALIZO LA ANFITRIONA + BUSQUEDA
+    async findAllWithdrawalRequest(search?: string, cursor?: string, limit: number = 10) {
+        const requests = await this.prisma.withdrawalRequest.findMany({
+            where: {
+                status: WithdrawalStatus.PENDING,
+                ...(search && {
+                    wallet: {
+                        user: {
+                            OR: [
+                                { firstName: { contains: search, mode: 'insensitive' } },
+                                { lastName: { contains: search, mode: 'insensitive' } },
+                                { phoneNumber: { contains: search } },
+                            ]
+                        }
+                    }
+                })
+            },
+            include: {
+                wallet: {
+                    include: {
+                        user: {
+                            select: { id: true, firstName: true, lastName: true, phoneNumber: true }
+                        }
+                    }
+                },
+                bankAccount: { include: { bank: true } }
+            },
+            orderBy: { createdAt: 'desc' },
+            take: limit + 1,
+            ...(cursor && { skip: 1, cursor: { id: cursor } })
+        });
+
+        let nextCursor: string | null = null;
+        if (requests.length > limit) {
+            requests.pop();
+            nextCursor = requests[requests.length - 1].id;
+        }
+
+        return {
+            data: requests.map(r => ({
+                id: r.id,
+                credits: Number(r.credits),
+                soles: Number(r.soles),
+                status: r.status,
+                bankName: r.bankAccount.bank.name,
+                accountNumber: r.bankAccount.accountNumber,
+                anfitriona: r.wallet.user,
+                createdAt: r.createdAt,
+            })),
+            nextCursor
+        };
+    }
+
+    //CANTIDAD DE SOLICITUDES DE PAGOS PENDIENTES
+    async countPendingRequests() {
+        return await this.prisma.withdrawalRequest.count({
+            where: { status: 'PENDING' }
+        });
+    }
+
+     //HISTORIAL DE PAGOS A ANFITRIONA (RECHAZADO Y APROVADO)
+    async findWithdrawalRequestHistory(search?: string, cursor?: string, limit: number = 10) {
+        const requests = await this.prisma.withdrawalRequest.findMany({
+            where: {
+            status: {
+                in: [WithdrawalStatus.APPROVED, WithdrawalStatus.REJECTED]
+            },
+            ...(search && {
+                wallet: {
+                    user: {
+                        OR: [
+                            { firstName: { contains: search, mode: 'insensitive' } },
+                            { lastName: { contains: search, mode: 'insensitive' } },
+                            { phoneNumber: { contains: search } },
+                        ]
+                    }
+                }
+            })
+        },
+            include: {
+                wallet: {
+                    include: {
+                        user: {
+                            select: { id: true, firstName: true, lastName: true, phoneNumber: true }
+                        }
+                    }
+                },
+                bankAccount: { include: { bank: true } }
+            },
+            orderBy: { createdAt: 'desc' },
+            take: limit + 1,
+            ...(cursor && { skip: 1, cursor: { id: cursor } })
+        });
+
+        let nextCursor: string | null = null;
+        if (requests.length > limit) {
+            requests.pop();
+            nextCursor = requests[requests.length - 1].id;
+        }
+
+        return {
+            data: requests.map(r => ({
+                id: r.id,
+                credits: Number(r.credits),
+                soles: Number(r.soles),
+                status: r.status,
+                bankName: r.bankAccount.bank.name,
+                accountNumber: r.bankAccount.accountNumber,
+                anfitriona: r.wallet.user,
+                createdAt: r.createdAt,
+                updatedAt: r.updatedAt,
+            })),
+            nextCursor
+        };
+    }
 
 }
