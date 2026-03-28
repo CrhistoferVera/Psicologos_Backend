@@ -18,6 +18,7 @@ import { DepositsModule } from './deposits/deposits.module';
 import { WalletModule } from './wallet/wallet.module';
 import { CallsModule } from './calls/calls.module';
 import { PaymentRequestModule } from './admin/paymentRequest/payment-request.module';
+import { StatsModule } from './admin/stats/stats.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { PaymentRequestModule } from './admin/paymentRequest/payment-request.mod
     WalletModule,
     CallsModule,
     PaymentRequestModule,
+    StatsModule,
   ],
   controllers: [],
   providers: [],
