@@ -61,7 +61,7 @@ async function bootstrap() {
   logger.log(`🚀 Servidor corriendo papitos yijuu http://localhost:${port}`);
   logger.log(`🌐 Cors habilitado para este desgraciao: ${frontendUrl}`);
   logger.log(`📚 Documentación disponible en http://localhost:${port}/docs`);
-  //logger.log(`📱 Para tu celular usa: https://caja-negra-pachamama-backend.wkhbmg.easypanel.host:${port}`);
+  //logger.log(`📱 Para tu celular usa: https://caja-negra-pacha-back.wkhbmg.easypanel.host:${port}`);
   logger.log(`📱 Para tu celular usa: http://192.168.100.9:${port}`)
 }
 void bootstrap();
