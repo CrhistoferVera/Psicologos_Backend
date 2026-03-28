@@ -115,8 +115,21 @@ export class AnfitrionaService {
                 wallet: {
                     include: {
                         user: {
-                            select: { id: true, firstName: true, lastName: true, phoneNumber: true }
+                            select: {
+                                id: true,
+                                firstName: true,
+                                lastName: true,
+                                phoneNumber: true,
+                                email: true,
+                                anfitrionaProfile: {
+                                    select: {
+                                        avatarUrl: true,
+                                        coverUrl: true,
+                                    }
+                                }
+                            }
                         }
+
                     }
                 },
                 bankAccount: { include: { bank: true } }
@@ -141,6 +154,9 @@ export class AnfitrionaService {
                 bankName: r.bankAccount.bank.name,
                 accountNumber: r.bankAccount.accountNumber,
                 anfitriona: r.wallet.user,
+
+                currentBalance: Number(r.wallet.balance),
+
                 createdAt: r.createdAt,
             })),
             nextCursor
@@ -154,25 +170,25 @@ export class AnfitrionaService {
         });
     }
 
-     //HISTORIAL DE PAGOS A ANFITRIONA (RECHAZADO Y APROVADO)
+    //HISTORIAL DE PAGOS A ANFITRIONA (RECHAZADO Y APROVADO)
     async findWithdrawalRequestHistory(search?: string, cursor?: string, limit: number = 10) {
         const requests = await this.prisma.withdrawalRequest.findMany({
             where: {
-            status: {
-                in: [WithdrawalStatus.APPROVED, WithdrawalStatus.REJECTED]
-            },
-            ...(search && {
-                wallet: {
-                    user: {
-                        OR: [
-                            { firstName: { contains: search, mode: 'insensitive' } },
-                            { lastName: { contains: search, mode: 'insensitive' } },
-                            { phoneNumber: { contains: search } },
-                        ]
+                status: {
+                    in: [WithdrawalStatus.APPROVED, WithdrawalStatus.REJECTED]
+                },
+                ...(search && {
+                    wallet: {
+                        user: {
+                            OR: [
+                                { firstName: { contains: search, mode: 'insensitive' } },
+                                { lastName: { contains: search, mode: 'insensitive' } },
+                                { phoneNumber: { contains: search } },
+                            ]
+                        }
                     }
-                }
-            })
-        },
+                })
+            },
             include: {
                 wallet: {
                     include: {
