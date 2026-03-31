@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
@@ -15,6 +16,8 @@ import { randomInt } from 'crypto';
 import type { User } from '@prisma/client';
 import { CompleteRegistrationDto } from './dto/complete-registration.dto';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { MailService } from '../mail/mail.service';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -23,6 +26,7 @@ export class AuthService {
     private jwtService: JwtService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     private whatsappService: WhatsappService,
+    private mailService: MailService,
   ) {}
 
   // ─── OTP FLOW ─────────────────────────────────────────────────────────────
@@ -123,6 +127,49 @@ export class AuthService {
 
   login(user: Omit<User, 'password'>) {
     return this.generateTokenResponse(user);
+  }
+
+  // ─── FORGOT PASSWORD ──────────────────────────────────────────────────────
+
+  async forgotPassword(email: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await this.usersService.findOneByEmail(normalizedEmail);
+
+    // Siempre respondemos igual para no revelar si el email existe
+    if (!user || !user.email) {
+      return { message: 'Si el correo está registrado, recibirás un código.' };
+    }
+
+    const code = randomInt(0, 1000000).toString().padStart(6, '0');
+    await this.cacheManager.set(`reset_${normalizedEmail}`, code, 900000); // 15 min
+
+    await this.mailService.sendPasswordResetEmail(
+      user.email,
+      user.firstName ?? 'Usuario',
+      code,
+    );
+
+    return { message: 'Si el correo está registrado, recibirás un código.' };
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    const normalizedEmail = dto.email.trim().toLowerCase();
+    const cached = await this.cacheManager.get<string>(`reset_${normalizedEmail}`);
+
+    if (!cached || cached !== dto.code) {
+      throw new BadRequestException('Código inválido o expirado');
+    }
+
+    const user = await this.usersService.findOneByEmail(normalizedEmail);
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+    await this.usersService.update(user.id, { password: hashedPassword });
+    await this.cacheManager.del(`reset_${normalizedEmail}`);
+
+    return { message: 'Contraseña actualizada correctamente' };
   }
 
   // ─── HELPERS ──────────────────────────────────────────────────────────────

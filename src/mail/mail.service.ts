@@ -43,6 +43,25 @@ export class MailService {
         }
     }
 
+    //METODO PARA ENVIAR CODIGO DE RECUPERACION DE CONTRASEÑA
+    async sendPasswordResetEmail(email: string, firstName: string, code: string) {
+        try {
+            await this.mailerService.sendMail({
+                to: email,
+                subject: 'Recuperación de contraseña - Pachamama',
+                template: 'reset-password',
+                context: {
+                    firstName,
+                    code,
+                },
+            });
+            this.logger.log(`📧 Email de recuperación enviado a ${email}`);
+        } catch (error) {
+            this.logger.error(`Error enviando email de recuperación a ${email}:`, error);
+            throw error;
+        }
+    }
+
     //METODO PARA ENVIAR NOTIFICACION DE ESTADO DE SOLICITUD DE RETIRO
     async sendWithdrawalRequestNotification(
         email: string,
