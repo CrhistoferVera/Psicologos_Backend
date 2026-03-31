@@ -5,13 +5,15 @@ import * as path from 'path';
 @Injectable()
 export class NotificationsService implements OnModuleInit {
     onModuleInit() {
-        // Inicializamos Firebase Admin al arrancar el módulo
         if (!admin.apps.length) {
-            admin.initializeApp({
-                credential: admin.credential.cert(
-                    require(path.join(process.cwd(), 'firebase-auth.json'))
-                ),
-            });
+            const serviceAccountPath = path.join(process.cwd(), 'firebase-auth.json');
+            try {
+                admin.initializeApp({
+                    credential: admin.credential.cert(require(serviceAccountPath)),
+                });
+            } catch {
+                console.warn('⚠️  firebase-auth.json no encontrado. Las notificaciones push estarán deshabilitadas.');
+            }
         }
     }
 

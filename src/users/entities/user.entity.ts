@@ -22,6 +22,9 @@ export class UserEntity implements User {
   password: string | null;
 
   @Exclude()
+  fcmToken: string | null;
+
+  @Exclude()
   resetPasswordToken: string | null;
 
   @Exclude()
