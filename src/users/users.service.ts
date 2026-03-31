@@ -255,6 +255,14 @@ export class UsersService {
     };
   }
 
+  // ACTUALIZAR FCM TOKEN
+  async updateFcmToken(userId: string, fcmToken: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { fcmToken }
+    });
+  }
+
   //OBTENER LOS MEOTODOS DE PAGO
   async findAllActive() {
     try {

@@ -17,6 +17,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '@prisma/client';
 import { EditPhoneNumberDto } from './dto/edit-phone-number.dto';
 import { EditPasswordDto } from './dto/edit-password.dto';
+import { UpdateFcmTokenDto } from './dto/update-fcm-token.dto';
 import * as bcrypt from 'bcrypt';
 
 interface JwtUser {
@@ -94,6 +95,17 @@ export class UsersController {
       userId: wallet.userId,
       updatedAt: wallet.updatedAt
     }
+  }
+
+  // ACTUALIZAR FCM TOKEN
+  @UseGuards(JwtAuthGuard)
+  @Patch('fcm-token')
+  async updateFcmToken(
+    @CurrentUser() user: JwtUser,
+    @Body() body: UpdateFcmTokenDto,
+  ) {
+    await this.usersService.updateFcmToken(user.userId, body.fcmToken);
+    return { success: true };
   }
 
   @Get(':id')

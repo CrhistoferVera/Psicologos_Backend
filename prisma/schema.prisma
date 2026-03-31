@@ -13,6 +13,7 @@ model User {
   password             String?
   firstName            String?
   lastName             String?
+  fcmToken             String? // token del dispositivo para push notifications
   isProfileComplete    Boolean            @default(false)
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
@@ -35,29 +36,28 @@ model User {
   messageUnlocks       MessageUnlock[]
   sentMessages         Message[]          @relation("SentMessages")
   wallet               Wallet?
-  userProfile UserProfile?
+  userProfile          UserProfile?
 
   @@map("users")
 }
 
 model UserProfile {
-  id             String   @id @default(uuid())
-  userId         String   @unique
+  id     String @id @default(uuid())
+  userId String @unique
 
   userName String?
-  bio            String?  @db.Text // @db.Text permite textos largos
-  
+  bio      String? @db.Text // @db.Text permite textos largos
+
   avatarUrl      String?
   avatarPublicId String?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_profile")
 }
-
 
 model Conversation {
   id        String    @id @default(uuid())
@@ -337,31 +337,29 @@ model BankAccount {
 }
 
 model WithdrawalRequest {
-  id              String           @id @default(uuid())
-  walletId        String
-  bankAccountId   BigInt
-  credits         Decimal          @db.Decimal(10, 2)
-  soles           Decimal          @db.Decimal(10, 2)
-  status          WithdrawalStatus @default(PENDING)
-  notes           String?
+  id            String           @id @default(uuid())
+  walletId      String
+  bankAccountId BigInt
+  credits       Decimal          @db.Decimal(10, 2)
+  soles         Decimal          @db.Decimal(10, 2)
+  status        WithdrawalStatus @default(PENDING)
+  notes         String?
 
   rejectionReason String?
   receiptUrl      String?
   receiptPublicId String?
 
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  bankAccount     BankAccount      @relation(fields: [bankAccountId], references: [id])
-  wallet          Wallet           @relation(fields: [walletId], references: [id])
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id])
+  wallet      Wallet      @relation(fields: [walletId], references: [id])
 
   @@map("withdrawal_requests")
 }
 
-
-
 enum TransactionType {
-  DEPOSIT        // Entrada de dinero (Recarga)
-  WITHDRAWAL     // Salida (retiro de anfitriona)
+  DEPOSIT // Entrada de dinero (Recarga)
+  WITHDRAWAL // Salida (retiro de anfitriona)
   MESSAGE_UNLOCK // Pago para desbloquear un mensaje
   IMAGE_UNLOCK // Pago para desbloquear una imagen premium
   CALL_PAYMENT // Pago por llamada de voz o video

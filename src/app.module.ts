@@ -18,6 +18,7 @@ import { DepositsModule } from './deposits/deposits.module';
 import { WalletModule } from './wallet/wallet.module';
 import { CallsModule } from './calls/calls.module';
 import { PaymentRequestModule } from './admin/paymentRequest/payment-request.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { StatsModule } from './admin/stats/stats.module';
 import { CulqiModule } from './culqi/culqi.module';
 
@@ -44,6 +45,7 @@ import { CulqiModule } from './culqi/culqi.module';
     WalletModule,
     CallsModule,
     PaymentRequestModule,
+    NotificationsModule,
     StatsModule,
     CulqiModule,
   ],

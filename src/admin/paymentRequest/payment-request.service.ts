@@ -3,12 +3,14 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { WithdrawalStatus, Prisma, TransactionType } from '@prisma/client';
 import { UpdateWithdrawalRequetsDto } from './dto/update-withdrawalRequest.dto';
 import { MailService } from 'src/mail/mail.service';
+import { NotificationsService } from 'src/notifications/notifications.service';
 
 @Injectable()
 export class RechargeRequestService {
     constructor(
         private prisma: PrismaService,
-        private mailService: MailService
+        private mailService: MailService,
+        private notificationsService: NotificationsService,
     ) { }
 
     async updateDepositStatus(
@@ -24,7 +26,7 @@ export class RechargeRequestService {
                 wallet: {
                     include: {
                         user: {
-                            select: { email: true, firstName: true }
+                            select: { email: true, firstName: true, fcmToken: true }
                         }
                     }
                 }
@@ -78,6 +80,15 @@ export class RechargeRequestService {
                 );
             }
 
+            if (withdrawalRequest.wallet.user.fcmToken) {
+                this.notificationsService.sendPushNotification(
+                    withdrawalRequest.wallet.user.fcmToken,
+                    '❌ Solicitud de retiro rechazada',
+                    rejectionReason ?? 'Tu solicitud de retiro fue rechazada.',
+                    { withdrawalRequestId: id }
+                );
+            }
+
             return { ...updated, bankAccountId: updated.bankAccountId.toString() };
         }
 
@@ -118,6 +129,15 @@ export class RechargeRequestService {
                     credits,
                     Number(withdrawalRequest.soles),
                     null
+                );
+            }
+
+            if (withdrawalRequest.wallet.user.fcmToken) {
+                this.notificationsService.sendPushNotification(
+                    withdrawalRequest.wallet.user.fcmToken,
+                    '✅ Solicitud de retiro aprobada',
+                    `Tu retiro de ${credits} créditos fue procesado exitosamente.`,
+                    { withdrawalRequestId: id }
                 );
             }
 
