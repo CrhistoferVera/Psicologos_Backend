@@ -21,6 +21,7 @@ import { PaymentRequestModule } from './admin/paymentRequest/payment-request.mod
 import { NotificationsModule } from './notifications/notifications.module';
 import { StatsModule } from './admin/stats/stats.module';
 import { CulqiModule } from './culqi/culqi.module';
+import { FlowModule } from './flow/flow.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { CulqiModule } from './culqi/culqi.module';
     NotificationsModule,
     StatsModule,
     CulqiModule,
+    FlowModule,
   ],
   controllers: [],
   providers: [],
