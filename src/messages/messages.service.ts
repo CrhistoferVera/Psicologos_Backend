@@ -6,12 +6,14 @@ import {
 import { ServiceType } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { ServicePricesService } from '../service-prices/service-prices.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class MessagesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly servicePricesService: ServicePricesService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async createMessage(
@@ -52,6 +54,32 @@ export class MessagesService {
         price,
       },
     });
+
+    // Obtener fcmToken del receptor para notificarle
+    const receiver = await this.prisma.user.findUnique({
+      where: { id: receiverId },
+      select: { fcmToken: true },
+    });
+
+    if (receiver?.fcmToken) {
+      if (isLocked) {
+        // Notificar que hay un mensaje bloqueado (de pago)
+        this.notificationsService.sendPushNotification(
+          receiver.fcmToken,
+          '🔒 Nuevo mensaje premium',
+          'Tienes un mensaje bloqueado esperándote',
+          { conversationId: conversation.id, type: 'NEW_LOCKED_MESSAGE' }
+        );
+      } else {
+        // Notificar mensaje normal
+        this.notificationsService.sendPushNotification(
+          receiver.fcmToken,
+          '💬 Nuevo mensaje',
+          'Tienes un nuevo mensaje',
+          { conversationId: conversation.id, type: 'NEW_MESSAGE' }
+        );
+      }
+    }
 
     return { ...message, conversationId: conversation.id };
   }
@@ -162,6 +190,21 @@ export class MessagesService {
         transactionId: clientTx.id,
       },
     });
+
+    // Notificar a la anfitriona que su mensaje fue desbloqueado
+    const anfitriona = await this.prisma.user.findUnique({
+      where: { id: message.senderId },
+      select: { fcmToken: true },
+    });
+
+    if (anfitriona?.fcmToken) {
+      this.notificationsService.sendPushNotification(
+        anfitriona.fcmToken,
+        '💰 Mensaje desbloqueado',
+        `${clientName} desbloqueó tu mensaje`,
+        { conversationId: message.conversationId, type: 'MESSAGE_UNLOCKED' }
+      );
+    }
 
     return { success: true, text: message.text };
   }

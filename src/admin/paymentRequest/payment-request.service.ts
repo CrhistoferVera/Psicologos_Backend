@@ -81,11 +81,13 @@ export class RechargeRequestService {
             }
 
             if (withdrawalRequest.wallet.user.fcmToken) {
+
+                //esto se envia a firebase para que lo reciba la app móvil y muestre una notificación push al usuario informando que su solicitud de retiro fue rechazada.
                 this.notificationsService.sendPushNotification(
                     withdrawalRequest.wallet.user.fcmToken,
                     '❌ Solicitud de retiro rechazada',
                     rejectionReason ?? 'Tu solicitud de retiro fue rechazada.',
-                    { withdrawalRequestId: id }
+                    { withdrawalRequestId: id, type: 'WITHDRAWAL_REJECTED' }
                 );
             }
 
@@ -137,7 +139,7 @@ export class RechargeRequestService {
                     withdrawalRequest.wallet.user.fcmToken,
                     '✅ Solicitud de retiro aprobada',
                     `Tu retiro de ${credits} créditos fue procesado exitosamente.`,
-                    { withdrawalRequestId: id }
+                    { withdrawalRequestId: id, type: 'WITHDRAWAL_APPROVED' }
                 );
             }
 

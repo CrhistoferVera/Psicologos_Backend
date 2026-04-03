@@ -8,6 +8,8 @@ import {
 import { Server, Socket } from 'socket.io';
 import { MessagesService } from './messages.service';
 import { CallsService } from '../calls/calls.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { PrismaService } from '../prisma.service';
 
 interface CallSession {
   callerId: string;
@@ -30,6 +32,8 @@ export class MessagesGateway {
   constructor(
     private readonly messagesService: MessagesService,
     private readonly callsService: CallsService,
+    private readonly notificationsService: NotificationsService,
+    private readonly prisma: PrismaService,
   ) {}
 
   @SubscribeMessage('register')
@@ -64,7 +68,7 @@ export class MessagesGateway {
   // ── LLAMADAS ──────────────────────────────────────────────────────────────
 
   @SubscribeMessage('call_request')
-  handleCallRequest(
+  async handleCallRequest(
     @MessageBody()
     data: {
       callId: string;
@@ -77,7 +81,6 @@ export class MessagesGateway {
     },
     @ConnectedSocket() client: Socket,
   ) {
-    // Guardar sesión para facturación posterior
     this.callSessions.set(data.callId, {
       callerId: data.callerId,
       anfitrionaId: data.receiverId,
@@ -87,27 +90,69 @@ export class MessagesGateway {
 
     this.server.to(`user_${data.receiverId}`).emit('incoming_call', data);
     client.emit('call_ringing', { callId: data.callId });
+
+    // Push a la anfitriona por si tiene la app cerrada
+    const anfitriona = await this.prisma.user.findUnique({
+      where: { id: data.receiverId },
+      select: { fcmToken: true },
+    });
+    if (anfitriona?.fcmToken) {
+      const label = data.callType === 'VIDEO_CALL' ? 'Video llamada' : 'Llamada de voz';
+      this.notificationsService.sendPushNotification(
+        anfitriona.fcmToken,
+        `📞 ${label} entrante`,
+        `${data.callerName} te está llamando`,
+        { callId: data.callId, callerId: data.callerId, type: 'INCOMING_CALL' }
+      );
+    }
   }
 
   @SubscribeMessage('call_accepted')
-  handleCallAccepted(
-    @MessageBody() data: { callId: string; callerId: string },
+  async handleCallAccepted(
+    @MessageBody() data: { callId: string; callerId: string; anfitrionaName: string },
     @ConnectedSocket() _client: Socket,
   ) {
-    // Registrar inicio de la llamada para calcular duración después
     const session = this.callSessions.get(data.callId);
     if (session) session.startedAt = Date.now();
 
     this.server.to(`user_${data.callerId}`).emit('call_accepted', { callId: data.callId });
+
+    // Push al cliente
+    const caller = await this.prisma.user.findUnique({
+      where: { id: data.callerId },
+      select: { fcmToken: true },
+    });
+    if (caller?.fcmToken) {
+      this.notificationsService.sendPushNotification(
+        caller.fcmToken,
+        '✅ Llamada aceptada',
+        `${data.anfitrionaName} aceptó tu llamada`,
+        { callId: data.callId, type: 'CALL_ACCEPTED' }
+      );
+    }
   }
 
   @SubscribeMessage('call_rejected')
-  handleCallRejected(
-    @MessageBody() data: { callId: string; callerId: string },
+  async handleCallRejected(
+    @MessageBody() data: { callId: string; callerId: string; anfitrionaName: string },
     @ConnectedSocket() _client: Socket,
   ) {
     this.callSessions.delete(data.callId);
     this.server.to(`user_${data.callerId}`).emit('call_rejected', { callId: data.callId });
+
+    // Push al cliente
+    const caller = await this.prisma.user.findUnique({
+      where: { id: data.callerId },
+      select: { fcmToken: true },
+    });
+    if (caller?.fcmToken) {
+      this.notificationsService.sendPushNotification(
+        caller.fcmToken, 
+        '❌ Llamada rechazada',
+        `${data.anfitrionaName} no está disponible`,
+        { callId: data.callId, type: 'CALL_REJECTED' }
+      );
+    }
   }
 
   @SubscribeMessage('call_ended')
@@ -135,6 +180,31 @@ export class MessagesGateway {
         const billingResult = { ...billing, durationSeconds };
         this.server.to(`user_${session.callerId}`).emit('call_billed', billingResult);
         this.server.to(`user_${session.anfitrionaId}`).emit('call_billed', billingResult);
+
+        // Push a ambos con el resultado de facturación
+        const [caller, anfitriona] = await Promise.all([
+          this.prisma.user.findUnique({ where: { id: session.callerId }, select: { fcmToken: true } }),
+          this.prisma.user.findUnique({ where: { id: session.anfitrionaId }, select: { fcmToken: true } }),
+        ]);
+
+        const billingMsg = `${billing.minutesBilled} min · ${billing.creditsCharged} créditos`;
+
+        if (caller?.fcmToken) {
+          this.notificationsService.sendPushNotification(
+            caller.fcmToken,
+            '💰 Llamada finalizada',
+            `Se cobraron ${billing.creditsCharged} créditos · ${billing.minutesBilled} min`,
+            { callId: data.callId, type: 'CALL_BILLED', ...billingResult }
+          );
+        }
+        if (anfitriona?.fcmToken) {
+          this.notificationsService.sendPushNotification(
+            anfitriona.fcmToken,
+            '💰 Llamada finalizada',
+            `Ganaste ${billing.creditsCharged} créditos · ${billing.minutesBilled} min`,
+            { callId: data.callId, type: 'CALL_BILLED', ...billingResult }
+          );
+        }
       } catch (err) {
         console.error('[CallBilling] Error al facturar llamada:', err);
       }

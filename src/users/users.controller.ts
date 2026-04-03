@@ -98,6 +98,13 @@ export class UsersController {
   }
 
   // ACTUALIZAR FCM TOKEN
+  //sirve para que el backend tenga el token actualizado y pueda enviar notificaciones
+  //push al dispositivo del usuario.
+  //El token lo genera Firebase automáticamente en el dispositivo (celular) cuando la app se
+  //instala o abre por primera vez. Si el token cambia (ej: reinstalación de la app, cambio de dispositivo),
+  //el cliente debe llamar a esta ruta para actualizarlo en el backend.
+  //De lo contrario, las notificaciones push podrían no llegar al usuario porque el backend 
+  //estaría usando un token obsoleto.
   @UseGuards(JwtAuthGuard)
   @Patch('fcm-token')
   async updateFcmToken(
