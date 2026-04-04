@@ -6,20 +6,13 @@ import * as path from 'path';
 export class NotificationsService implements OnModuleInit {
     onModuleInit() {
         if (!admin.apps.length) {
+            const serviceAccountPath = path.join(process.cwd(), 'firebase-auth.json');
             try {
-                if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-                    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-                    admin.initializeApp({
-                        credential: admin.credential.cert(serviceAccount),
-                    });
-                } else {
-                    const serviceAccountPath = path.join(process.cwd(), 'firebase-auth.json');
-                    admin.initializeApp({
-                        credential: admin.credential.cert(require(serviceAccountPath)),
-                    });
-                }
+                admin.initializeApp({
+                    credential: admin.credential.cert(require(serviceAccountPath)),
+                });
             } catch {
-                console.warn('⚠️  Firebase no inicializado. Las notificaciones push estarán deshabilitadas.');
+                console.warn('⚠️  firebase-auth.json no encontrado. Las notificaciones push estarán deshabilitadas.');
             }
         }
     }
@@ -29,7 +22,7 @@ export class NotificationsService implements OnModuleInit {
      * El parámetro "data" es opcional y se puede usar para enviar información adicional que la app móvil pueda necesitar para manejar la notificación (ej: id de una solicitud). Esta información se envía como parte de la carga útil de la notificación y la app móvil puede acceder a ella cuando recibe la notificación.
      */
     async sendMulticastNotification(tokens: string[], title: string, body: string, data?: any) {
-        if (!admin.apps.length || !tokens.length) return;
+        if (!tokens.length) return;
 
         const stringData = data ? Object.fromEntries(
             Object.entries(data).map(([k, v]) => [k, String(v)])
@@ -58,7 +51,6 @@ export class NotificationsService implements OnModuleInit {
     }
 
     async sendPushNotification(token: string, title: string, body: string, data?: any) {
-        if (!admin.apps.length) return;
         const message: admin.messaging.Message = {
             token: token, //lo genera Firebase automáticamente en el dispositivo (celular) cuando la app se instala o abre por primera vez.
             notification: {
