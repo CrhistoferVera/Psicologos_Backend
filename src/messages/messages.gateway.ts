@@ -163,8 +163,14 @@ export class MessagesGateway {
     const session = this.callSessions.get(data.callId);
     this.callSessions.delete(data.callId);
 
-    // Notificar al otro lado que la llamada terminó
-    this.server.to(`user_${data.otherUserId}`).emit('call_ended', { callId: data.callId });
+    // Notificar a ambos participantes usando los IDs del session map (más confiable que data.otherUserId)
+    if (session) {
+      this.server.to(`user_${session.callerId}`).emit('call_ended', { callId: data.callId });
+      this.server.to(`user_${session.anfitrionaId}`).emit('call_ended', { callId: data.callId });
+    } else {
+      // Fallback: usar el dato enviado si no hay sesión registrada
+      this.server.to(`user_${data.otherUserId}`).emit('call_ended', { callId: data.callId });
+    }
 
     // Facturar si la llamada efectivamente conectó
     if (session?.startedAt) {
