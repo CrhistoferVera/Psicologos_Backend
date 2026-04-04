@@ -257,9 +257,10 @@ export class UsersService {
 
   // ACTUALIZAR FCM TOKEN
   async updateFcmToken(userId: string, fcmToken: string): Promise<void> {
+    if (!fcmToken || fcmToken.trim().length === 0) return;
     await this.prisma.user.update({
       where: { id: userId },
-      data: { fcmToken }
+      data: { fcmToken: fcmToken.trim() }
     });
   }
 

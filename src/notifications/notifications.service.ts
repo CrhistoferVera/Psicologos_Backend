@@ -1,8 +1,10 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import * as admin from 'firebase-admin';
+import { PrismaService } from '../prisma.service';
 
 @Injectable()
 export class NotificationsService implements OnModuleInit {
+    constructor(private readonly prisma: PrismaService) {}
     onModuleInit() {
         if (!admin.apps.length) {
             try {
@@ -29,8 +31,9 @@ export class NotificationsService implements OnModuleInit {
             return;
         }
 
-        if (!tokens.length) {
-            console.warn('⚠️ No hay tokens para enviar');
+        const validTokens = tokens.filter(t => t && t.trim().length > 0);
+        if (!validTokens.length) {
+            console.warn('⚠️ No hay tokens válidos para enviar');
             return;
         }
 
@@ -39,8 +42,8 @@ export class NotificationsService implements OnModuleInit {
             : {};
 
         const chunks: string[][] = [];
-        for (let i = 0; i < tokens.length; i += 500) {
-            chunks.push(tokens.slice(i, i + 500));
+        for (let i = 0; i < validTokens.length; i += 500) {
+            chunks.push(validTokens.slice(i, i + 500));
         }
 
         for (const chunk of chunks) {
@@ -60,9 +63,16 @@ export class NotificationsService implements OnModuleInit {
                     failed: response.failureCount,
                 });
 
-                if (response.failureCount > 0) {
-                    console.warn('⚠️ Tokens fallidos:', response.responses);
-                }
+                // Limpiar tokens obsoletos de la DB
+                response.responses.forEach((resp, idx) => {
+                    if (!resp.success && resp.error?.code === 'messaging/registration-token-not-registered') {
+                        const invalidToken = chunk[idx];
+                        this.prisma.user.updateMany({
+                            where: { fcmToken: invalidToken },
+                            data: { fcmToken: null },
+                        }).catch(() => {});
+                    }
+                });
             } catch (error) {
                 console.error('🔥 Error enviando multicast:', error);
             }
