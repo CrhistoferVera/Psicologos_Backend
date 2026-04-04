@@ -21,6 +21,7 @@ export class NotificationsService implements OnModuleInit {
             }
         }
     }
+    
 
     async sendMulticastNotification(tokens: string[], title: string, body: string, data?: any) {
         if (!admin.apps.length) {
