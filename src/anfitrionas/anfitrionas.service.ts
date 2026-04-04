@@ -26,6 +26,8 @@ import { UpdateGalleryImageDto } from './dto/update-gallery-image.dto';
 import { GalleryImageDto, GalleryImagePublicDto } from './dto/gallery-image.dto';
 import { ConfigService } from '@nestjs/config';
 
+import { NotificationsService } from '../notifications/notifications.service';
+
 @Injectable()
 export class AnfitrioneService {
 
@@ -35,6 +37,7 @@ export class AnfitrioneService {
     private prisma: PrismaService,
     private cloudinary: CloudinaryService,
     private config: ConfigService,
+    private notificationsService: NotificationsService,
   ) { }
 
   async create(dto: CreateAnfitrioneDto, idDocFile?: Express.Multer.File) {
@@ -712,6 +715,28 @@ export class AnfitrioneService {
       },
     });
 
+    // 9. Notificar a la anfitriona
+    const [anfitrionaUser, clientUser] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: anfitrionaId },
+        select: { fcmToken: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: clientUserId },
+        select: { firstName: true, lastName: true },
+      }),
+    ]);
+
+    if (anfitrionaUser?.fcmToken) {
+      const clientName = [clientUser?.firstName, clientUser?.lastName].filter(Boolean).join(' ') || 'Un cliente';
+      this.notificationsService.sendPushNotification(
+        anfitrionaUser.fcmToken,
+        '💰 Imagen desbloqueada',
+        `${clientName} desbloqueó tu imagen premium · ganaste ${creditsRequired} créditos`,
+        { imageId, type: 'IMAGE_UNLOCKED' }
+      );
+    }
+
     return { alreadyUnlocked: false, creditsSpent: creditsRequired, imageUrl: image.url };
   }
 
@@ -905,6 +930,30 @@ export class AnfitrioneService {
         sortOrder: 0,
       },
     });
+
+    // Notificar a todos los clientes
+    const users = await this.prisma.user.findMany({
+      where: { role: 'USER', isActive: true, fcmToken: { not: null } },
+      select: { fcmToken: true },
+    });
+
+    const tokens = users.map(u => u.fcmToken!);
+
+    const anfitrionaName = [await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { firstName: true, lastName: true }
+    }).then(u => [u?.firstName, u?.lastName].filter(Boolean).join(' '))];
+
+    const notifBody = dto.isPremium
+      ? `${anfitrionaName} publicó una imagen privada 🔒 · costo: ${dto.unlockCredits} créditos`
+      : `${anfitrionaName} publicó una nueva imagen 📸`;
+
+    this.notificationsService.sendMulticastNotification(
+      tokens,
+      '📸 Nueva imagen publicada',
+      notifBody,
+      { anfitrionaId: userId, imageId: image.id, type: 'NEW_GALLERY_IMAGE' }
+    );
 
     return {
       id: image.id,

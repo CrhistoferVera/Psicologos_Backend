@@ -16,6 +16,7 @@ interface CallSession {
   anfitrionaId: string;
   callType: 'CALL' | 'VIDEO_CALL';
   startedAt: number | null;
+  warningInterval?: NodeJS.Timeout;
 }
 
 @WebSocketGateway({
@@ -117,6 +118,26 @@ export class MessagesGateway {
 
     this.server.to(`user_${data.callerId}`).emit('call_accepted', { callId: data.callId });
 
+    // Iniciar intervalo de advertencia cada 2 minutos
+    if (session) {
+      session.warningInterval = setInterval(async () => {
+        const caller = await this.prisma.user.findUnique({
+          where: { id: session.callerId },
+          select: { fcmToken: true, wallet: { select: { balance: true } } },
+        });
+
+        if (caller?.fcmToken && caller.wallet) {
+          const balance = Number(caller.wallet.balance);
+          this.notificationsService.sendPushNotification(
+            caller.fcmToken,
+            '⏱️ Llamada en curso',
+            `Te quedan ${balance} créditos`,
+            { callId: data.callId, type: 'CALL_WARNING', balance: balance }
+          );
+        }
+      }, 2 * 60 * 1000); // cada 2 minutos
+    }
+
     // Push al cliente
     const caller = await this.prisma.user.findUnique({
       where: { id: data.callerId },
@@ -137,6 +158,8 @@ export class MessagesGateway {
     @MessageBody() data: { callId: string; callerId: string; anfitrionaName: string },
     @ConnectedSocket() _client: Socket,
   ) {
+    const session = this.callSessions.get(data.callId);
+    if (session?.warningInterval) clearInterval(session.warningInterval);
     this.callSessions.delete(data.callId);
     this.server.to(`user_${data.callerId}`).emit('call_rejected', { callId: data.callId });
 
@@ -147,7 +170,7 @@ export class MessagesGateway {
     });
     if (caller?.fcmToken) {
       this.notificationsService.sendPushNotification(
-        caller.fcmToken, 
+        caller.fcmToken,
         '❌ Llamada rechazada',
         `${data.anfitrionaName} no está disponible`,
         { callId: data.callId, type: 'CALL_REJECTED' }
@@ -163,8 +186,16 @@ export class MessagesGateway {
     const session = this.callSessions.get(data.callId);
     this.callSessions.delete(data.callId);
 
-    // Notificar al otro lado que la llamada terminó
-    this.server.to(`user_${data.otherUserId}`).emit('call_ended', { callId: data.callId });
+    // Limpiar intervalo de advertencia
+    if (session?.warningInterval) clearInterval(session.warningInterval);
+
+    // Notificar a ambos participantes usando los IDs del session map
+    if (session) {
+      this.server.to(`user_${session.callerId}`).emit('call_ended', { callId: data.callId });
+      this.server.to(`user_${session.anfitrionaId}`).emit('call_ended', { callId: data.callId });
+    } else {
+      this.server.to(`user_${data.otherUserId}`).emit('call_ended', { callId: data.callId });
+    }
 
     // Facturar si la llamada efectivamente conectó
     if (session?.startedAt) {

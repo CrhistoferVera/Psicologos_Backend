@@ -4,11 +4,10 @@ import { PublicAnfitrioneController } from './public-anfitrionas.controller';
 import { AnfitrioneService } from './anfitrionas.service';
 import { CloudinaryModule } from '../cloudinary/cloudinary.module';
 import { PrismaModule } from '../../prisma/prisma.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [PrismaModule, CloudinaryModule],
-  // PublicAnfitrioneController MUST be first: its literal /anfitrionas/public
-  // route would otherwise be shadowed by AnfitrioneController's dynamic /:id route
+  imports: [PrismaModule, CloudinaryModule, NotificationsModule],
   controllers: [PublicAnfitrioneController, AnfitrioneController],
   providers: [AnfitrioneService],
 })

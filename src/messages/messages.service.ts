@@ -229,7 +229,7 @@ export class MessagesService {
       this.notificationsService.sendPushNotification(
         anfitriona.fcmToken,
         '💰 Mensaje desbloqueado',
-        `${clientName} desbloqueó tu mensaje`,
+        `${clientName} desbloqueó tu mensaje · ganaste ${creditsRequired} créditos`,
         { conversationId: message.conversationId, type: 'MESSAGE_UNLOCKED' }
       );
     }
