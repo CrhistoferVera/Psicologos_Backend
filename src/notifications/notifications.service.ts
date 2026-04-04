@@ -13,7 +13,7 @@ export class NotificationsService implements OnModuleInit {
                         credential: admin.credential.cert(serviceAccount),
                     });
                 } else {
-                    const serviceAccountPath = path.join(process.cwd(), 'firebase-auth.json');
+                    const serviceAccountPath = path.join(process.cwd(), 'dist', 'firebase-auth.json');
                     admin.initializeApp({
                         credential: admin.credential.cert(require(serviceAccountPath)),
                     });
