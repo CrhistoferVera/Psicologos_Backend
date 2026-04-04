@@ -10,6 +10,7 @@ import {
   BadRequestException,
   Patch,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { UsersService } from './users.service';
 import { UserEntity } from './entities/user.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -31,7 +32,17 @@ interface JwtUser {
 @Controller('users')
 @UseInterceptors(ClassSerializerInterceptor)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) { }
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly config: ConfigService,
+  ) { }
+
+  @Get('config')
+  getConfig() {
+    return {
+      creditToSolesRate: Number(this.config.get<string>('CREDIT_TO_SOLES_RATE') ?? '1'),
+    };
+  }
 
   //OBTENER DATOS PARA EL PERFIL
   @UseGuards(JwtAuthGuard)

@@ -1,12 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { UserRole, DepositStatus, WithdrawalStatus, TransactionType } from '@prisma/client';
+import { UserRole, DepositStatus, WithdrawalStatus } from '@prisma/client';
 
 @Injectable()
 export class StatsService {
   constructor(private prisma: PrismaService) {}
 
   async getStats() {
+    const adminUserId = process.env.ADMIN_USER_ID;
+
+    const adminWallet = await this.prisma.wallet.findUnique({
+      where: { userId: adminUserId },
+    });
+
     const [
       totalClients,
       activeClients,
@@ -15,7 +21,7 @@ export class StatsService {
       pendingDeposits,
       approvedDepositsToday,
       pendingWithdrawals,
-      totalDepositRevenue,
+      adminTotalRevenue,
       totalMessageUnlocks,
       totalImageUnlocks,
       newClientsThisMonth,
@@ -46,11 +52,13 @@ export class StatsService {
       // Retiros pendientes de anfitrionas
       this.prisma.withdrawalRequest.count({ where: { status: WithdrawalStatus.PENDING } }),
 
-      // Ingresos totales aprobados (suma de depósitos aprobados)
-      this.prisma.depositRequest.aggregate({
-        _sum: { amount: true },
-        where: { status: DepositStatus.APPROVED },
-      }),
+      // Ganancias totales del admin (suma de todas las transacciones en su wallet)
+      adminWallet
+        ? this.prisma.transaction.aggregate({
+            _sum: { amount: true },
+            where: { walletId: adminWallet.id },
+          })
+        : Promise.resolve({ _sum: { amount: null } }),
 
       // Total desbloqueos de mensajes
       this.prisma.messageUnlock.count(),
@@ -84,7 +92,7 @@ export class StatsService {
       deposits: {
         pending: pendingDeposits,
         approvedToday: approvedDepositsToday,
-        totalRevenue: Number(totalDepositRevenue._sum.amount ?? 0),
+        totalRevenue: Number(adminTotalRevenue._sum.amount ?? 0),
       },
       withdrawals: {
         pending: pendingWithdrawals,

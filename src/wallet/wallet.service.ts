@@ -3,11 +3,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
 
 @Injectable()
 export class WalletService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+  ) {}
 
   async getMyEarnings(userId: string) {
     const wallet = await this.prisma.wallet.upsert({
@@ -168,7 +172,7 @@ export class WalletService {
       throw new NotFoundException('Cuenta bancaria no encontrada');
     }
 
-    const RATE = 0.90;
+    const RATE = Number(this.config.get<string>('CREDIT_TO_SOLES_RATE') ?? '0.90');
     const soles = dto.credits * RATE;
 
     const [, , request] = await this.prisma.$transaction([

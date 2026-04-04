@@ -24,6 +24,7 @@ import { CreateWalletDto } from './dto/create-wallet.dto';
 import { CreateGalleryImageDto } from './dto/create-gallery-image.dto';
 import { UpdateGalleryImageDto } from './dto/update-gallery-image.dto';
 import { GalleryImageDto, GalleryImagePublicDto } from './dto/gallery-image.dto';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AnfitrioneService {
@@ -33,6 +34,7 @@ export class AnfitrioneService {
   constructor(
     private prisma: PrismaService,
     private cloudinary: CloudinaryService,
+    private config: ConfigService,
   ) { }
 
   async create(dto: CreateAnfitrioneDto, idDocFile?: Express.Multer.File) {
@@ -642,7 +644,17 @@ export class AnfitrioneService {
       throw new NotFoundException('Wallet de la anfitriona no encontrada.');
     }
 
-    // 7. Transacción atómica: débito cliente + crédito anfitriona
+    const adminUserId = this.config.get<string>('ADMIN_USER_ID');
+    const feePct = Number(this.config.get<string>('PLATFORM_FEE_PERCENT') ?? '50') / 100;
+    const total = Number(creditsRequired);
+    const adminShare = Math.round(total * feePct * 100) / 100;
+    const anfitrionaShare = Math.round((total - adminShare) * 100) / 100;
+
+    const adminWallet = adminUserId
+      ? await this.prisma.wallet.findUnique({ where: { userId: adminUserId } })
+      : null;
+
+    // 7. Transacción atómica: débito cliente + crédito anfitriona + comisión admin
     const [, clientTx] = await this.prisma.$transaction([
       // Débito al cliente
       this.prisma.wallet.update({
@@ -661,17 +673,33 @@ export class AnfitrioneService {
       // Crédito a la anfitriona
       this.prisma.wallet.update({
         where: { userId: anfitrionaId },
-        data: { balance: { increment: creditsRequired } },
+        data: { balance: { increment: anfitrionaShare } },
       }),
       // Registro de ganancia de la anfitriona
       this.prisma.transaction.create({
         data: {
           walletId: anfitrionaWallet.id,
           type: 'EARNING',
-          amount: creditsRequired,
+          amount: anfitrionaShare,
           description: JSON.stringify({ service: 'Imagen Premium', clientUserId }),
         },
       }),
+      ...(adminWallet && adminShare > 0
+        ? [
+            this.prisma.wallet.update({
+              where: { userId: adminUserId! },
+              data: { balance: { increment: adminShare } },
+            }),
+            this.prisma.transaction.create({
+              data: {
+                walletId: adminWallet.id,
+                type: 'EARNING',
+                amount: adminShare,
+                description: JSON.stringify({ service: 'Comisión Imagen Premium', clientUserId }),
+              },
+            }),
+          ]
+        : []),
     ]);
 
     // 8. Registrar el unlock (garantiza idempotencia futura)

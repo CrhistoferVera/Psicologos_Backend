@@ -64,6 +64,16 @@ export class CallsService {
 
     const label = callType === 'VIDEO_CALL' ? 'Video llamada' : 'Llamada de voz';
 
+    const adminUserId = this.config.get<string>('ADMIN_USER_ID');
+    const feePct = Number(this.config.get<string>('PLATFORM_FEE_PERCENT') ?? '50') / 100;
+    const total = Number(creditsToCharge);
+    const adminShare = Math.round(total * feePct * 100) / 100;
+    const anfitrionaShare = Math.round((total - adminShare) * 100) / 100;
+
+    const adminWallet = adminUserId
+      ? await this.prisma.wallet.findUnique({ where: { userId: adminUserId } })
+      : null;
+
     await this.prisma.$transaction([
       this.prisma.wallet.update({
         where: { userId: callerId },
@@ -79,16 +89,32 @@ export class CallsService {
       }),
       this.prisma.wallet.update({
         where: { userId: anfitrionaId },
-        data: { balance: { increment: creditsToCharge } },
+        data: { balance: { increment: anfitrionaShare } },
       }),
       this.prisma.transaction.create({
         data: {
           walletId: anfitrionaWallet.id,
           type: TransactionType.EARNING,
-          amount: creditsToCharge,
+          amount: anfitrionaShare,
           description: JSON.stringify({ service: label, minutes }),
         },
       }),
+      ...(adminWallet && adminShare > 0
+        ? [
+            this.prisma.wallet.update({
+              where: { userId: adminUserId! },
+              data: { balance: { increment: adminShare } },
+            }),
+            this.prisma.transaction.create({
+              data: {
+                walletId: adminWallet.id,
+                type: TransactionType.EARNING,
+                amount: adminShare,
+                description: JSON.stringify({ service: `Comisión ${label}`, minutes }),
+              },
+            }),
+          ]
+        : []),
     ]);
 
     return { creditsCharged: creditsToCharge, minutesBilled: minutes };

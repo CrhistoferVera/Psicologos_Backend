@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ServiceType } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
 import { ServicePricesService } from '../service-prices/service-prices.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -14,6 +15,7 @@ export class MessagesService {
     private readonly prisma: PrismaService,
     private readonly servicePricesService: ServicePricesService,
     private readonly notificationsService: NotificationsService,
+    private readonly config: ConfigService,
   ) {}
 
   async createMessage(
@@ -154,7 +156,17 @@ export class MessagesService {
     });
     const clientName = [client?.firstName, client?.lastName].filter(Boolean).join(' ') || 'Cliente';
 
-    // Transacción atómica: débito al cliente + crédito a la anfitriona
+    const adminUserId = this.config.get<string>('ADMIN_USER_ID');
+    const feePct = Number(this.config.get<string>('PLATFORM_FEE_PERCENT') ?? '50') / 100;
+    const total = Number(creditsRequired);
+    const adminShare = Math.round(total * feePct * 100) / 100;
+    const anfitrionaShare = Math.round((total - adminShare) * 100) / 100;
+
+    const adminWallet = adminUserId
+      ? await this.prisma.wallet.findUnique({ where: { userId: adminUserId } })
+      : null;
+
+    // Transacción atómica: débito al cliente + crédito a la anfitriona + comisión admin
     const [, clientTx] = await this.prisma.$transaction([
       this.prisma.wallet.update({
         where: { userId },
@@ -170,16 +182,32 @@ export class MessagesService {
       }),
       this.prisma.wallet.update({
         where: { userId: message.senderId },
-        data: { balance: { increment: creditsRequired } },
+        data: { balance: { increment: anfitrionaShare } },
       }),
       this.prisma.transaction.create({
         data: {
           walletId: anfitrionaWallet.id,
           type: 'EARNING',
-          amount: creditsRequired,
+          amount: anfitrionaShare,
           description: JSON.stringify({ service: 'Mensaje Bloqueado', clientName }),
         },
       }),
+      ...(adminWallet && adminShare > 0
+        ? [
+            this.prisma.wallet.update({
+              where: { userId: adminUserId! },
+              data: { balance: { increment: adminShare } },
+            }),
+            this.prisma.transaction.create({
+              data: {
+                walletId: adminWallet.id,
+                type: 'EARNING',
+                amount: adminShare,
+                description: JSON.stringify({ service: 'Comisión Mensaje Bloqueado', clientName }),
+              },
+            }),
+          ]
+        : []),
     ]);
 
     await this.prisma.messageUnlock.create({
