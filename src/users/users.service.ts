@@ -21,7 +21,14 @@ export class UsersService {
 
           wallet: {
             create: {
-              balance: 0,
+              balance: 20,
+              transactions: {
+                create: {
+                  amount: 20,
+                  type: TransactionType.DEPOSIT,
+                  description: 'Regalo de bienvenida - 20 créditos',
+                },
+              },
             }
           },
           userProfile: {

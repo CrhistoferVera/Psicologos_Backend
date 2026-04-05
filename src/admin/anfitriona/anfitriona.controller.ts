@@ -1,11 +1,17 @@
-import { Controller, Get, Patch, Param, Body, Query } from '@nestjs/common';
+import { Controller, Get, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { AnfitrionaService } from './anfitriona.service';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { UpdateAnfitrionaDto, EditAnfitrionaDto } from './dto/update-anfitriona.dto';
 import { Roles } from 'src/auth/decorators/roles.decorator';
+import { UpdateAnfitrionaProfileDto } from './dto/update-anfitriona-profile.dto';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../auth/guards/roles.guard';
+import { UserRole } from '@prisma/client';
 
-@ApiTags('Admin - Anfitrionas') // Cambiado para organizar mejor tu Swagger
-@Controller('admin/anfitrionas') // Ruta profesional para el panel de administración
+@ApiTags('Admin - Anfitrionas')
+@Controller('admin/anfitrionas')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
 export class AnfitrionaController {
     constructor(private readonly clientService: AnfitrionaService) { }
 
@@ -111,5 +117,17 @@ export class AnfitrionaController {
         @Body() updateAnfitrionaStatusDto: UpdateAnfitrionaDto
     ) {
         return this.clientService.updateStatus(id, updateAnfitrionaStatusDto);
+    }
+
+    /**
+     * EDITAR PERFIL DE UNA ANFITRIONA (admin)
+     */
+    @Patch(':id/profile')
+    @ApiOperation({ summary: 'Editar datos de perfil de una anfitriona' })
+    updateProfile(
+        @Param('id') id: string,
+        @Body() dto: UpdateAnfitrionaProfileDto,
+    ) {
+        return this.clientService.updateProfile(id, dto);
     }
 }
