@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { UpdateAnfitrionaDto } from './dto/update-anfitriona.dto';
+import { UpdateAnfitrionaDto, EditAnfitrionaDto } from './dto/update-anfitriona.dto';
 import { UserRole, Prisma, WithdrawalStatus } from "@prisma/client";
 
 
@@ -48,7 +48,7 @@ export class AnfitrionaService {
         return anfitrionaData;
     }
 
-    // LISTAR CLIENTES + BUSQUEDA
+    // LISTAR Anfitrionas + BUSQUEDA
     async findAll(search?: string, cursor?: string, limit: number = 10) {
 
         const whereCondition: Prisma.UserWhereInput = {
@@ -65,9 +65,23 @@ export class AnfitrionaService {
 
         const anfitriona = await this.prisma.user.findMany({
             where: whereCondition,
-            include: {
-                wallet: {
-                    select: { balance: true }
+            select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phoneNumber: true,
+                isActive: true,
+                createdAt: true,
+                wallet: { select: { balance: true } },
+                anfitrionaProfile: {
+                    select: {
+                        username: true,
+                        avatarUrl: true,
+                        bio: true,
+                        rateCredits: true,
+                        isOnline: true,
+                    }
                 }
             },
             orderBy: { id: 'desc' },
@@ -86,10 +100,8 @@ export class AnfitrionaService {
         }
 
 
-        const sanitized = anfitriona.map(({ password, ...data }) => data);
-
         return {
-            data: sanitized,
+            data: anfitriona,
             nextCursor
         };
     }
@@ -161,6 +173,62 @@ export class AnfitrionaService {
             })),
             nextCursor
         };
+    }
+
+    // EDITAR DATOS DE UNA ANFITRIONA
+    async editAnfitriona(id: string, dto: EditAnfitrionaDto) {
+        const user = await this.prisma.user.findFirst({
+            where: { id, role: UserRole.ANFITRIONA }
+        });
+
+        if (!user) throw new NotFoundException(`No se encontró una anfitriona con ID: ${id}`);
+
+        // Verificar unicidad de phoneNumber
+        if (dto.phoneNumber) {
+            const existing = await this.prisma.user.findFirst({
+                where: { phoneNumber: dto.phoneNumber, NOT: { id } }
+            });
+            if (existing) throw new ConflictException('El número de teléfono ya está registrado.');
+        }
+
+        // Verificar unicidad de email
+        if (dto.email) {
+            const existing = await this.prisma.user.findFirst({
+                where: { email: dto.email, NOT: { id } }
+            });
+            if (existing) throw new ConflictException('El email ya está registrado.');
+        }
+
+        // Verificar unicidad de username
+        if (dto.username) {
+            const existing = await this.prisma.anfitrioneProfile.findFirst({
+                where: { username: dto.username, NOT: { userId: id } }
+            });
+            if (existing) throw new ConflictException('El nombre de usuario ya está en uso.');
+        }
+
+        // Actualizar User
+        await this.prisma.user.update({
+            where: { id },
+            data: {
+                ...(dto.phoneNumber && { phoneNumber: dto.phoneNumber }),
+                ...(dto.email && { email: dto.email }),
+            }
+        });
+
+        // Actualizar AnfitrioneProfile
+        if (dto.username || dto.bio || dto.rateCredits) {
+            await this.prisma.anfitrioneProfile.update({
+                where: { userId: id },
+                data: {
+                    ...(dto.username && { username: dto.username }),
+                    ...(dto.bio !== undefined && { bio: dto.bio }),
+                    ...(dto.rateCredits && { rateCredits: dto.rateCredits }),
+                }
+            });
+        }
+
+        return this.findOne(id);
     }
 
     //CANTIDAD DE SOLICITUDES DE PAGOS PENDIENTES

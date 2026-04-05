@@ -1,7 +1,8 @@
 import { Controller, Get, Patch, Param, Body, Query } from '@nestjs/common';
 import { AnfitrionaService } from './anfitriona.service';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
-import { UpdateAnfitrionaDto } from './dto/update-anfitriona.dto';
+import { UpdateAnfitrionaDto, EditAnfitrionaDto } from './dto/update-anfitriona.dto';
+import { Roles } from 'src/auth/decorators/roles.decorator';
 
 @ApiTags('Admin - Anfitrionas') // Cambiado para organizar mejor tu Swagger
 @Controller('admin/anfitrionas') // Ruta profesional para el panel de administración
@@ -11,6 +12,7 @@ export class AnfitrionaController {
     /**
   * LISTAR TODOS LAS SOLICITUDEES DE PAGO (USUARIOS ROL ANFITRIONA)
   */
+    @Roles('ADMIN') // Solo admin puede ver solicitudes de pago
     @Get('list/withdrawal-requests')
     @ApiOperation({ summary: 'Listar solicitudes de retiro de anfitrionas' })
     @ApiQuery({ name: 'search', required: false })
@@ -29,6 +31,7 @@ export class AnfitrionaController {
     }
 
     // HISTORIAL DE PAGOS A ANFITRIONA (RECHAZADO Y APROBADO)
+    @Roles('ADMIN') // Solo admin puede ver historial de pagos
     @Get('payment/history')
     @ApiOperation({ summary: 'historial de pagos a anfitriona' })
     @ApiQuery({ name: 'search', required: false })
@@ -55,6 +58,7 @@ export class AnfitrionaController {
     /**
      * LISTAR TODOS LAS ANFITRIONA (USUARIOS ROL ANFITRIONA)
      */
+    @Roles('ADMIN') // Solo admin puede ver listado de anfitrionas
     @Get()
     @ApiOperation({ summary: 'Listar anfitrionas o buscar por nombre, email o teléfono' })
 
@@ -84,8 +88,22 @@ export class AnfitrionaController {
     }
 
     /**
+     * EDITAR DATOS DE UNA ANFITRIONA
+     */
+    @Roles('ADMIN') // Solo admin puede editar datos de anfitrionas)
+    @Patch(':id/edit')
+    @ApiOperation({ summary: 'Editar teléfono, username, bio, rateCredits o email de una anfitriona' })
+    editAnfitriona(
+        @Param('id') id: string,
+        @Body() dto: EditAnfitrionaDto
+    ) {
+        return this.clientService.editAnfitriona(id, dto);
+    }
+
+    /**
      * ACTIVAR O SUSPENDER UNA ANFITRIONA
      */
+    @Roles('ADMIN')
     @Patch(':id/status')
     @ApiOperation({ summary: 'Cambiar estado de la anfitriona (Activo/Suspendido)' })
     updateStatus(
