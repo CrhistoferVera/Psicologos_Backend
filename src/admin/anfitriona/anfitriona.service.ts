@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { UpdateAnfitrionaDto } from './dto/update-anfitriona.dto';
+import { UpdateAnfitrionaProfileDto } from './dto/update-anfitriona-profile.dto';
 import { UserRole, Prisma, WithdrawalStatus } from "@prisma/client";
 
 
@@ -22,6 +23,34 @@ export class AnfitrionaService {
             where: { id },
             data: { isActive: updateAnfitrionaDto.isActive }
         });
+    }
+
+    // EDITAR PERFIL DE ANFITRIONA (admin)
+    async updateProfile(id: string, dto: UpdateAnfitrionaProfileDto) {
+        const user = await this.prisma.user.findFirst({
+            where: { id, role: UserRole.ANFITRIONA },
+        });
+        if (!user) throw new NotFoundException('Anfitriona no encontrada');
+
+        const [updatedUser, updatedProfile] = await this.prisma.$transaction([
+            this.prisma.user.update({
+                where: { id },
+                data: {
+                    ...(dto.firstName !== undefined && { firstName: dto.firstName }),
+                    ...(dto.lastName !== undefined && { lastName: dto.lastName }),
+                },
+            }),
+            this.prisma.anfitrioneProfile.update({
+                where: { userId: id },
+                data: {
+                    ...(dto.username !== undefined && { username: dto.username }),
+                    ...(dto.bio !== undefined && { bio: dto.bio }),
+                },
+            }),
+        ]);
+
+        const { password, ...userData } = updatedUser as any;
+        return { ...userData, profile: updatedProfile };
     }
 
     // BUSCAR CLIENTE POR ID
