@@ -6,6 +6,54 @@ import { UserRole, DepositStatus, WithdrawalStatus } from '@prisma/client';
 export class StatsService {
   constructor(private prisma: PrismaService) {}
 
+  async getAnfitrionaStats(userId: string) {
+    const CREDIT_TO_SOLES = Number(process.env.CREDIT_TO_SOLES_RATE ?? 1);
+
+    const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
+    if (!wallet) return null;
+
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const [totalEarnings, todayEarnings, monthEarnings] = await Promise.all([
+      // Ganancias totales
+      this.prisma.transaction.aggregate({
+        _sum: { amount: true },
+        where: { walletId: wallet.id, type: 'EARNING' },
+      }),
+      // Ganancias hoy
+      this.prisma.transaction.aggregate({
+        _sum: { amount: true },
+        where: { walletId: wallet.id, type: 'EARNING', createdAt: { gte: startOfToday } },
+      }),
+      // Ganancias este mes
+      this.prisma.transaction.aggregate({
+        _sum: { amount: true },
+        where: { walletId: wallet.id, type: 'EARNING', createdAt: { gte: startOfMonth } },
+      }),
+    ]);
+
+    const toSoles = (credits: number) => +(credits * CREDIT_TO_SOLES).toFixed(2);
+
+    const totalCredits = Number(totalEarnings._sum.amount ?? 0);
+    const todayCredits = Number(todayEarnings._sum.amount ?? 0);
+    const monthCredits = Number(monthEarnings._sum.amount ?? 0);
+    const balanceCredits = Number(wallet.balance);
+
+    return {
+      balance: {
+        credits: balanceCredits,
+        soles: toSoles(balanceCredits),
+      },
+      earnings: {
+        total: { credits: totalCredits, soles: toSoles(totalCredits) },
+        today: { credits: todayCredits, soles: toSoles(todayCredits) },
+        thisMonth: { credits: monthCredits, soles: toSoles(monthCredits) },
+      },
+    };
+  }
+
   async getStats() {
     const adminUserId = process.env.ADMIN_USER_ID;
 
