@@ -69,7 +69,6 @@ export class StatsService {
       pendingDeposits,
       approvedDepositsToday,
       pendingWithdrawals,
-      adminTotalRevenue,
       totalMessageUnlocks,
       totalImageUnlocks,
       newClientsThisMonth,
@@ -99,14 +98,6 @@ export class StatsService {
 
       // Retiros pendientes de anfitrionas
       this.prisma.withdrawalRequest.count({ where: { status: WithdrawalStatus.PENDING } }),
-
-      // Ganancias totales del admin (suma de todas las transacciones en su wallet)
-      adminWallet
-        ? this.prisma.transaction.aggregate({
-            _sum: { amount: true },
-            where: { walletId: adminWallet.id },
-          })
-        : Promise.resolve({ _sum: { amount: null } }),
 
       // Total desbloqueos de mensajes
       this.prisma.messageUnlock.count(),
@@ -140,7 +131,7 @@ export class StatsService {
       deposits: {
         pending: pendingDeposits,
         approvedToday: approvedDepositsToday,
-        totalRevenue: Number(adminTotalRevenue._sum.amount ?? 0),
+        totalRevenue: Number(adminWallet?.balance ?? 0),
       },
       withdrawals: {
         pending: pendingWithdrawals,

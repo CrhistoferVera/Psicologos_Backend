@@ -1,22 +1,43 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ServiceType } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma.service';
 import { ServicePricesService } from '../service-prices/service-prices.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
+
 @Injectable()
 export class MessagesService {
+  private readonly logger = new Logger(MessagesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly servicePricesService: ServicePricesService,
     private readonly notificationsService: NotificationsService,
     private readonly config: ConfigService,
   ) {}
+
+  private ttlCutoff(): Date {
+    const hours = Number(process.env.MESSAGE_TTL_HOURS ?? 24);
+    return new Date(Date.now() - hours * 60 * 60 * 1000);
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async deleteExpiredMessages() {
+    const cutoff = this.ttlCutoff();
+    const result = await this.prisma.message.deleteMany({
+      where: { createdAt: { lt: cutoff } },
+    });
+    if (result.count > 0) {
+      this.logger.log(`Eliminados ${result.count} mensajes expirados`);
+    }
+  }
 
   async createMessage(
     senderId: string,
@@ -41,11 +62,98 @@ export class MessagesService {
       );
       if (!servicePrice) {
         throw new BadRequestException(
-          'Debes configurar un precio para mensajes antes de bloquearlos',
+          'Debes configurar un precio para regalos antes de usarlos',
         );
       }
       price = servicePrice.price;
     }
+
+    // ── Cobro por enviar mensaje (MESSAGE_SEND) ──────────────────────────────
+    // Solo aplica cuando el que envía es un cliente (no tiene perfil de anfitriona)
+    // y la anfitriona receptora tiene configurado el precio MESSAGE_SEND
+    const senderProfile = await this.prisma.anfitrioneProfile.findUnique({
+      where: { userId: senderId },
+    });
+
+    if (!senderProfile) {
+      // Es un cliente enviando mensaje → cobrar si la anfitriona tiene precio configurado
+      const sendPrice = await this.servicePricesService.getPriceForUser(
+        receiverId,
+        ServiceType.MESSAGE_SEND,
+      );
+
+      if (sendPrice) {
+        const creditsRequired = sendPrice.price;
+
+        const clientWallet = await this.prisma.wallet.findUnique({ where: { userId: senderId } });
+        if (!clientWallet) throw new NotFoundException('Wallet del cliente no encontrada');
+        if (Number(clientWallet.balance) < creditsRequired) {
+          throw new BadRequestException('Créditos insuficientes para enviar el mensaje');
+        }
+
+        const anfitrionaWallet = await this.prisma.wallet.findUnique({ where: { userId: receiverId } });
+        if (!anfitrionaWallet) throw new NotFoundException('Wallet de anfitriona no encontrada');
+
+        const client = await this.prisma.user.findUnique({
+          where: { id: senderId },
+          select: { firstName: true, lastName: true },
+        });
+        const clientName = [client?.firstName, client?.lastName].filter(Boolean).join(' ') || 'Cliente';
+
+        const adminUserId = this.config.get<string>('ADMIN_USER_ID');
+        const feePct = Number(this.config.get<string>('PLATFORM_FEE_PERCENT') ?? '50') / 100;
+        const adminShare = Math.round(creditsRequired * feePct * 100) / 100;
+        const anfitrionaShare = Math.round((creditsRequired - adminShare) * 100) / 100;
+
+        const adminWallet = adminUserId
+          ? await this.prisma.wallet.findUnique({ where: { userId: adminUserId } })
+          : null;
+
+        await this.prisma.$transaction([
+          this.prisma.wallet.update({
+            where: { userId: senderId },
+            data: { balance: { decrement: creditsRequired } },
+          }),
+          this.prisma.transaction.create({
+            data: {
+              walletId: clientWallet.id,
+              type: 'MESSAGE_SEND',
+              amount: creditsRequired,
+              description: 'Costo por enviar mensaje',
+            },
+          }),
+          this.prisma.wallet.update({
+            where: { userId: receiverId },
+            data: { balance: { increment: anfitrionaShare } },
+          }),
+          this.prisma.transaction.create({
+            data: {
+              walletId: anfitrionaWallet.id,
+              type: 'EARNING',
+              amount: anfitrionaShare,
+              description: JSON.stringify({ service: 'Mensaje recibido', clientName }),
+            },
+          }),
+          ...(adminWallet && adminShare > 0
+            ? [
+                this.prisma.wallet.update({
+                  where: { userId: adminUserId! },
+                  data: { balance: { increment: adminShare } },
+                }),
+                this.prisma.transaction.create({
+                  data: {
+                    walletId: adminWallet.id,
+                    type: 'EARNING',
+                    amount: adminShare,
+                    description: JSON.stringify({ service: 'Comisión mensaje', clientName }),
+                  },
+                }),
+              ]
+            : []),
+        ]);
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
     const message = await this.prisma.message.create({
       data: {
@@ -65,15 +173,13 @@ export class MessagesService {
 
     if (receiver?.fcmToken) {
       if (isLocked) {
-        // Notificar que hay un mensaje bloqueado (de pago)
         this.notificationsService.sendPushNotification(
           receiver.fcmToken,
-          '🔒 Nuevo mensaje premium',
-          'Tienes un mensaje bloqueado esperándote',
+          '🎁 Nuevo regalo',
+          'Tienes un regalo esperándote',
           { conversationId: conversation.id, type: 'NEW_LOCKED_MESSAGE' }
         );
       } else {
-        // Notificar mensaje normal
         this.notificationsService.sendPushNotification(
           receiver.fcmToken,
           '💬 Nuevo mensaje',
@@ -88,7 +194,7 @@ export class MessagesService {
 
   async getMessages(conversationId: string, requestingUserId: string) {
     const messages = await this.prisma.message.findMany({
-      where: { conversationId },
+      where: { conversationId, createdAt: { gte: this.ttlCutoff() } },
       orderBy: { createdAt: 'asc' },
       include: {
         messageUnlocks: {
@@ -238,12 +344,14 @@ export class MessagesService {
   }
 
   async getChats(userId: string) {
+    const cutoff = this.ttlCutoff();
     const conversations = await this.prisma.conversation.findMany({
       where: {
         OR: [{ user1Id: userId }, { user2Id: userId }],
       },
       include: {
         messages: {
+          where: { createdAt: { gte: cutoff } },
           orderBy: { createdAt: 'desc' },
           take: 1,
         },
@@ -277,6 +385,7 @@ export class MessagesService {
             conversationId: conv.id,
             read: false,
             senderId: { not: userId },
+            createdAt: { gte: cutoff },
           },
         });
 

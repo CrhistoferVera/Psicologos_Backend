@@ -55,6 +55,12 @@ export class MessagesController {
     return this.messagesService.unlockMessage(messageId, user.userId);
   }
 
+  // POST /messages/expire — forzar limpieza manual (útil para testing)
+  @Post('expire')
+  triggerExpire() {
+    return this.messagesService.deleteExpiredMessages();
+  }
+
   // POST /messages/read — marcar mensajes como leídos
   @Post('read')
   markAsRead(
