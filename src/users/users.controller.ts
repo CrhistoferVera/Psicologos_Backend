@@ -42,6 +42,7 @@ export class UsersController {
   getConfig() {
     return {
       creditToSolesRate: Number(this.config.get<string>('CREDIT_TO_SOLES_RATE') ?? '1'),
+      minVersion: this.config.get<string>('MIN_APP_VERSION') ?? '1.0',
     };
   }
 
