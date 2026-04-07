@@ -22,6 +22,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { StatsModule } from './admin/stats/stats.module';
 import { CulqiModule } from './culqi/culqi.module';
 import { FlowModule } from './flow/flow.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { FlowModule } from './flow/flow.module';
     StatsModule,
     CulqiModule,
     FlowModule,
+    SubscriptionsModule,
   ],
   controllers: [],
   providers: [],

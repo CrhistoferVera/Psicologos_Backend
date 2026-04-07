@@ -27,6 +27,7 @@ import { GalleryImageDto, GalleryImagePublicDto } from './dto/gallery-image.dto'
 import { ConfigService } from '@nestjs/config';
 
 import { NotificationsService } from '../notifications/notifications.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class AnfitrioneService {
@@ -38,6 +39,7 @@ export class AnfitrioneService {
     private cloudinary: CloudinaryService,
     private config: ConfigService,
     private notificationsService: NotificationsService,
+    private subscriptionsService: SubscriptionsService,
   ) { }
 
   async create(dto: CreateAnfitrioneDto, idDocFile?: Express.Multer.File) {
@@ -538,15 +540,23 @@ export class AnfitrioneService {
 
     const rawImages = profile?.images ?? [];
 
-    // Si hay usuario autenticado, averiguar qué imágenes ya desbloqueó — un solo query
+    // Si hay usuario autenticado, verificar suscripción activa e imágenes desbloqueadas
     let unlockedImageIds = new Set<string>();
+    let hasSubscription = false;
     if (currentUserId && rawImages.length > 0) {
-      const imageIds = rawImages.map((img) => img.id);
-      const unlocks = await this.prisma.imageUnlock.findMany({
-        where: { userId: currentUserId, imageId: { in: imageIds } },
-        select: { imageId: true },
-      });
-      unlockedImageIds = new Set(unlocks.map((u) => u.imageId));
+      const [imageIds, subscribed] = await Promise.all([
+        Promise.resolve(rawImages.map((img) => img.id)),
+        this.subscriptionsService.hasActiveSubscription(currentUserId, id),
+      ]);
+      hasSubscription = subscribed;
+
+      if (!hasSubscription) {
+        const unlocks = await this.prisma.imageUnlock.findMany({
+          where: { userId: currentUserId, imageId: { in: imageIds } },
+          select: { imageId: true },
+        });
+        unlockedImageIds = new Set(unlocks.map((u) => u.imageId));
+      }
     }
 
     const galleryImages: GalleryImagePublicDto[] = rawImages.map((img) => ({
@@ -554,8 +564,10 @@ export class AnfitrioneService {
       imageUrl: img.url,
       isPremium: img.isPremium,
       unlockCredits: img.isPremium ? img.unlockCredits : null,
-      // true solo cuando la imagen es premium Y el viewer ya la pagó
-      isUnlockedByViewer: img.isPremium ? unlockedImageIds.has(img.id) : false,
+      // true si tiene suscripción activa O ya pagó la imagen individualmente
+      isUnlockedByViewer: img.isPremium
+        ? hasSubscription || unlockedImageIds.has(img.id)
+        : false,
     }));
 
     let isLiked = false;
@@ -620,7 +632,13 @@ export class AnfitrioneService {
       throw new BadRequestException('Esta imagen no es premium y no requiere desbloqueo.');
     }
 
-    // 4. Idempotencia: si ya está desbloqueada, no cobrar de nuevo
+    // 4. Si tiene suscripción activa, no cobrar
+    const hasSubscription = await this.subscriptionsService.hasActiveSubscription(clientUserId, anfitrionaId);
+    if (hasSubscription) {
+      return { alreadyUnlocked: true, creditsSpent: 0, imageUrl: image.url };
+    }
+
+    // 5. Idempotencia: si ya está desbloqueada, no cobrar de nuevo
     const existing = await this.prisma.imageUnlock.findUnique({
       where: { imageId_userId: { imageId, userId: clientUserId } },
     });
