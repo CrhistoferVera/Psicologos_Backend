@@ -294,7 +294,13 @@ export class CloudinaryService {
       resourceType,
     });
 
-    return { secureUrl: uploaded.publicId, publicId: uploaded.publicId };
+    const signedUrl = this.getSignedUrl({
+      publicId: uploaded.publicId,
+      resourceType: uploaded.resourceType,
+      expiresInSeconds: 60 * 60 * 24 * 365, // 1 año
+    });
+
+    return { secureUrl: signedUrl, publicId: uploaded.publicId };
   }
 
   // SERVICIO PARA SUBIR COMPROBANTES DE DEPÓSITO

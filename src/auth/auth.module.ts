@@ -9,6 +9,8 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { CacheModule } from '@nestjs/cache-manager';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { MailModule } from '../mail/mail.module';
+import { PrismaModule } from '../../prisma/prisma.module';
+import { CloudinaryModule } from '../cloudinary/cloudinary.module';
 
 @Module({
   imports: [
@@ -17,6 +19,8 @@ import { MailModule } from '../mail/mail.module';
     CacheModule.register(),
     WhatsappModule,
     MailModule,
+    PrismaModule,
+    CloudinaryModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

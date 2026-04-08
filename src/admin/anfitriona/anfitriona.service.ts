@@ -110,6 +110,7 @@ export class AnfitrionaService {
                         bio: true,
                         rateCredits: true,
                         isOnline: true,
+                        idDocUrl: true,
                     }
                 }
             },

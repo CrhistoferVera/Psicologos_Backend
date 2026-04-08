@@ -4,7 +4,6 @@ import {
   Inject,
   Injectable,
   NotFoundException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
@@ -15,9 +14,12 @@ import type { Cache } from 'cache-manager';
 import { randomInt } from 'crypto';
 import type { User } from '@prisma/client';
 import { CompleteRegistrationDto } from './dto/complete-registration.dto';
+import { CompleteAnfitrioneRegistrationDto } from './dto/complete-anfitrione-registration.dto';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { PrismaService } from '../../prisma/prisma.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 
 @Injectable()
 export class AuthService {
@@ -27,6 +29,8 @@ export class AuthService {
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     private whatsappService: WhatsappService,
     private mailService: MailService,
+    private prisma: PrismaService,
+    private cloudinary: CloudinaryService,
   ) {}
 
   // ─── OTP FLOW ─────────────────────────────────────────────────────────────
@@ -109,6 +113,86 @@ export class AuthService {
 
     const { password: _, ...userWithoutPass } = newUser;
     return this.generateTokenResponse(userWithoutPass);
+  }
+
+  async completeAnfitrioneRegistration(
+    dto: CompleteAnfitrioneRegistrationDto,
+    idDocFile?: Express.Multer.File,
+  ) {
+    // 1. Validar token temporal
+    let payload: { sub: string; type: string };
+    try {
+      payload = this.jwtService.verify(dto.tempToken);
+    } catch {
+      throw new BadRequestException('Token inválido o expirado');
+    }
+
+    if (payload.type !== 'phone_verified') {
+      throw new BadRequestException('Token inválido');
+    }
+
+    if (dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('Las contraseñas no coinciden');
+    }
+
+    // 2. Verificar unicidad
+    const [existingCedula, existingUsername, existingEmail] = await Promise.all([
+      this.prisma.anfitrioneProfile.findUnique({ where: { cedula: dto.cedula } }),
+      this.prisma.anfitrioneProfile.findUnique({ where: { username: dto.username } }),
+      dto.email ? this.usersService.findOneByEmail(dto.email.trim().toLowerCase()) : null,
+    ]);
+
+    if (existingCedula) throw new ConflictException('La cédula ya está registrada.');
+    if (existingUsername) throw new ConflictException('El nombre de usuario ya está en uso.');
+    if (existingEmail) throw new ConflictException('El email ya está registrado.');
+
+    // 3. Crear usuario con rol ANFITRIONA
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+    const email = dto.email?.trim().toLowerCase();
+
+    const newUser = await this.prisma.user.create({
+      data: {
+        phoneNumber: payload.sub,
+        email: email ?? null,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        password: hashedPassword,
+        role: 'ANFITRIONA',
+        isProfileComplete: true,
+        wallet: { create: { balance: 0 } },
+      },
+    });
+
+    // 4. Subir DNI a Cloudinary si se proporcionó
+    let idDocUrl: string | null = null;
+    let idDocPublicId: string | null = null;
+
+    if (idDocFile) {
+      const uploaded = await this.cloudinary.uploadAnfitrioneIdDoc({
+        file: idDocFile,
+        userId: newUser.id,
+      });
+      idDocUrl = uploaded.secureUrl;
+      idDocPublicId = uploaded.publicId;
+    }
+
+    // 5. Crear perfil de anfitriona
+    const profile = await this.prisma.anfitrioneProfile.create({
+      data: {
+        userId: newUser.id,
+        dateOfBirth: new Date(dto.dateOfBirth),
+        cedula: dto.cedula,
+        username: dto.username,
+        idDocUrl,
+        idDocPublicId,
+      },
+    });
+
+    const { password: _, ...userWithoutPass } = newUser;
+    return {
+      ...this.generateTokenResponse(userWithoutPass),
+      profile,
+    };
   }
 
   // ─── EMAIL/PASSWORD LOGIN (secundario) ────────────────────────────────────
