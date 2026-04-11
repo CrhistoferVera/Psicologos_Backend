@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Post,
   Body,
@@ -16,6 +16,7 @@ import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { CompleteRegistrationDto } from './dto/complete-registration.dto';
 import { CompleteAnfitrioneRegistrationDto } from './dto/complete-anfitrione-registration.dto';
+import { CompleteProfessionalRegistrationDto } from './dto/complete-professional-registration.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 
@@ -40,16 +41,26 @@ export class AuthController {
     return this.authService.completeRegistration(dto);
   }
 
+  @Post('complete-professional-registration')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('idDoc'))
+  async completeProfessionalRegistration(
+    @Body() dto: CompleteProfessionalRegistrationDto,
+    @UploadedFile() idDoc?: Express.Multer.File,
+  ) {
+    return this.authService.completeProfessionalRegistration(dto, idDoc);
+  }
+
+  // Compatibilidad temporal para cliente legacy.
   @Post('complete-anfitrione-registration')
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('idDoc'))
-  async completeAnfitrioneRegistration(
+  async completeLegacyProfessionalRegistration(
     @Body() dto: CompleteAnfitrioneRegistrationDto,
     @UploadedFile() idDoc?: Express.Multer.File,
   ) {
-    return this.authService.completeAnfitrioneRegistration(dto, idDoc);
+    return this.authService.completeProfessionalRegistration(dto, idDoc);
   }
-
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
@@ -59,7 +70,7 @@ export class AuthController {
       loginDto.password,
     );
     if (!user) {
-      throw new UnauthorizedException('Email o contraseña incorrectos');
+      throw new UnauthorizedException('Email o contrasena incorrectos');
     }
     return this.authService.login(user);
   }

@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   ConflictException,
   Inject,
@@ -12,14 +12,16 @@ import { UserEntity } from '../users/entities/user.entity';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { randomInt } from 'crypto';
-import type { User } from '@prisma/client';
+import { User } from '@prisma/client';
 import { CompleteRegistrationDto } from './dto/complete-registration.dto';
+import { CompleteProfessionalRegistrationDto } from './dto/complete-professional-registration.dto';
 import { CompleteAnfitrioneRegistrationDto } from './dto/complete-anfitrione-registration.dto';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
+import { PROFESSIONAL_ROLE } from '../common/professional-role';
 
 @Injectable()
 export class AuthService {
@@ -33,7 +35,7 @@ export class AuthService {
     private cloudinary: CloudinaryService,
   ) {}
 
-  // ─── OTP FLOW ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€ OTP FLOW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async sendOtp(phoneNumber: string) {
     const code = randomInt(0, 1000000).toString().padStart(6, '0');
@@ -41,17 +43,17 @@ export class AuthService {
 
     await this.whatsappService.sendText(
       phoneNumber,
-      `Tu código de verificación de Pachamama es: *${code}*\nExpira en 5 minutos.`,
+      `Tu cÃ³digo de verificaciÃ³n de Pachamama es: *${code}*\nExpira en 5 minutos.`,
     );
 
-    return { message: 'Código OTP enviado por WhatsApp. Expira en 5 minutos.' };
+    return { message: 'CÃ³digo OTP enviado por WhatsApp. Expira en 5 minutos.' };
   }
 
   async verifyOtp(phoneNumber: string, code: string) {
     const cached = await this.cacheManager.get<string>(`otp_${phoneNumber}`);
 
     if (!cached || cached !== code) {
-      throw new BadRequestException('Código OTP inválido o expirado');
+      throw new BadRequestException('CÃ³digo OTP invÃ¡lido o expirado');
     }
 
     await this.cacheManager.del(`otp_${phoneNumber}`);
@@ -59,12 +61,12 @@ export class AuthService {
     const user = await this.usersService.findOneByPhone(phoneNumber);
 
     if (user) {
-      // Usuario existente → retornar JWT
+      // Usuario existente â†’ retornar JWT
       const { password: _, ...userWithoutPass } = user;
       return this.generateTokenResponse(userWithoutPass);
     }
 
-    // Usuario nuevo → retornar token temporal para completar el registro
+    // Usuario nuevo â†’ retornar token temporal para completar el registro
     const tempToken = this.jwtService.sign(
       { sub: phoneNumber, type: 'phone_verified' },
       { expiresIn: '10m' },
@@ -79,15 +81,15 @@ export class AuthService {
     try {
       payload = this.jwtService.verify(dto.tempToken);
     } catch {
-      throw new BadRequestException('Token inválido o expirado');
+      throw new BadRequestException('Token invÃ¡lido o expirado');
     }
 
     if (payload.type !== 'phone_verified') {
-      throw new BadRequestException('Token inválido');
+      throw new BadRequestException('Token invÃ¡lido');
     }
 
     if (dto.password !== dto.confirmPassword) {
-      throw new BadRequestException('Las contraseñas no coinciden');
+      throw new BadRequestException('Las contraseÃ±as no coinciden');
     }
 
     const email = dto.email?.trim().toLowerCase();
@@ -97,7 +99,7 @@ export class AuthService {
 
     const existing = await this.usersService.findOneByEmail(email);
     if (existing) {
-      throw new ConflictException('El email ya está registrado');
+      throw new ConflictException('El email ya estÃ¡ registrado');
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -115,8 +117,8 @@ export class AuthService {
     return this.generateTokenResponse(userWithoutPass);
   }
 
-  async completeAnfitrioneRegistration(
-    dto: CompleteAnfitrioneRegistrationDto,
+  async completeProfessionalRegistration(
+    dto: CompleteProfessionalRegistrationDto | CompleteAnfitrioneRegistrationDto,
     idDocFile?: Express.Multer.File,
   ) {
     // 1. Validar token temporal
@@ -124,15 +126,15 @@ export class AuthService {
     try {
       payload = this.jwtService.verify(dto.tempToken);
     } catch {
-      throw new BadRequestException('Token inválido o expirado');
+      throw new BadRequestException('Token invÃ¡lido o expirado');
     }
 
     if (payload.type !== 'phone_verified') {
-      throw new BadRequestException('Token inválido');
+      throw new BadRequestException('Token invÃ¡lido');
     }
 
     if (dto.password !== dto.confirmPassword) {
-      throw new BadRequestException('Las contraseñas no coinciden');
+      throw new BadRequestException('Las contraseÃ±as no coinciden');
     }
 
     // 2. Verificar unicidad
@@ -142,9 +144,9 @@ export class AuthService {
       dto.email ? this.usersService.findOneByEmail(dto.email.trim().toLowerCase()) : null,
     ]);
 
-    if (existingCedula) throw new ConflictException('La cédula ya está registrada.');
-    if (existingUsername) throw new ConflictException('El nombre de usuario ya está en uso.');
-    if (existingEmail) throw new ConflictException('El email ya está registrado.');
+    if (existingCedula) throw new ConflictException('La cÃ©dula ya estÃ¡ registrada.');
+    if (existingUsername) throw new ConflictException('El nombre de usuario ya estÃ¡ en uso.');
+    if (existingEmail) throw new ConflictException('El email ya estÃ¡ registrado.');
 
     // 3. Crear usuario con rol ANFITRIONA
     const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -157,13 +159,13 @@ export class AuthService {
         firstName: dto.firstName,
         lastName: dto.lastName,
         password: hashedPassword,
-        role: 'ANFITRIONA',
+        role: PROFESSIONAL_ROLE,
         isProfileComplete: true,
         wallet: { create: { balance: 0 } },
       },
     });
 
-    // 4. Subir DNI a Cloudinary si se proporcionó
+    // 4. Subir DNI a Cloudinary si se proporcionÃ³
     let idDocUrl: string | null = null;
     let idDocPublicId: string | null = null;
 
@@ -195,7 +197,7 @@ export class AuthService {
     };
   }
 
-  // ─── EMAIL/PASSWORD LOGIN (secundario) ────────────────────────────────────
+  // â”€â”€â”€ EMAIL/PASSWORD LOGIN (secundario) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async validateUser(
     email: string,
@@ -213,7 +215,7 @@ export class AuthService {
     return this.generateTokenResponse(user);
   }
 
-  // ─── FORGOT PASSWORD ──────────────────────────────────────────────────────
+  // â”€â”€â”€ FORGOT PASSWORD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async forgotPassword(email: string) {
     const normalizedEmail = email.trim().toLowerCase();
@@ -221,7 +223,7 @@ export class AuthService {
 
     // Siempre respondemos igual para no revelar si el email existe
     if (!user || !user.email) {
-      return { message: 'Si el correo está registrado, recibirás un código.' };
+      return { message: 'Si el correo estÃ¡ registrado, recibirÃ¡s un cÃ³digo.' };
     }
 
     const code = randomInt(0, 1000000).toString().padStart(6, '0');
@@ -233,7 +235,7 @@ export class AuthService {
       code,
     );
 
-    return { message: 'Si el correo está registrado, recibirás un código.' };
+    return { message: 'Si el correo estÃ¡ registrado, recibirÃ¡s un cÃ³digo.' };
   }
 
   async resetPassword(dto: ResetPasswordDto) {
@@ -241,7 +243,7 @@ export class AuthService {
     const cached = await this.cacheManager.get<string>(`reset_${normalizedEmail}`);
 
     if (!cached || cached !== dto.code) {
-      throw new BadRequestException('Código inválido o expirado');
+      throw new BadRequestException('CÃ³digo invÃ¡lido o expirado');
     }
 
     const user = await this.usersService.findOneByEmail(normalizedEmail);
@@ -253,10 +255,10 @@ export class AuthService {
     await this.usersService.update(user.id, { password: hashedPassword });
     await this.cacheManager.del(`reset_${normalizedEmail}`);
 
-    return { message: 'Contraseña actualizada correctamente' };
+    return { message: 'ContraseÃ±a actualizada correctamente' };
   }
 
-  // ─── HELPERS ──────────────────────────────────────────────────────────────
+  // â”€â”€â”€ HELPERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private generateTokenResponse(user: Omit<User, 'password'>) {
     this.usersService.updateLastLogin(user.id);
@@ -275,5 +277,7 @@ export class AuthService {
     };
   }
 }
+
+
 
 

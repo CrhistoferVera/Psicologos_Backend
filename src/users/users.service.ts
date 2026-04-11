@@ -1,143 +1,117 @@
 import {
-  Injectable,
   ConflictException,
+  Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma, TransactionType, User, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
-import { User, Prisma, UserRole, TransactionType } from '@prisma/client';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService) {}
 
   async create(data: CreateUserDto): Promise<User> {
-
     try {
       return await this.prisma.user.create({
         data: {
           ...data,
-
           wallet: {
             create: {
               balance: 10,
+              promotionalBalance: 10,
               transactions: {
                 create: {
                   amount: 10,
-                  type: TransactionType.DEPOSIT,
-                  description: 'Regalo de bienvenida - 10 créditos',
+                  promotionalAmount: 10,
+                  realAmount: 0,
+                  isPromotional: true,
+                  type: TransactionType.PROMOTIONAL_GRANT,
+                  description: 'Regalo de bienvenida - 10 creditos',
                 },
               },
-            }
+            },
           },
           userProfile: {
             create: {
               userName: data.firstName ?? `user_${Math.floor(Math.random() * 10000)}`,
-            }
-          }
-
-
-        },
-        include:
-        {
-          wallet: true,
+            },
+          },
         },
       });
-
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2002') {
-          throw new ConflictException('El teléfono o email ya está registrado.');
-        }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('El telefono o email ya esta registrado.');
       }
       throw new InternalServerErrorException('Error al crear el usuario.');
     }
   }
 
-  //HISTORIAL DE GASTOS
   async findUserExpenseHistory(userId: string) {
-
-    console.log("Buscando historial para el ID:", userId);
-    // 1. Buscamos la billetera del usuario y sus transacciones
     const wallet = await this.prisma.wallet.findUnique({
       where: { userId },
       include: {
         transactions: {
-          orderBy: { createdAt: 'desc' }, // Lo más reciente primero
+          orderBy: { createdAt: 'desc' },
           include: {
-            // Detalle si fue un mensaje
-            messageUnlock: {
-              include: {
-                message: {
-                  select: {
-                    sender: {
-                      select: { firstName: true, lastName: true }
-                    }
-                  }
-                }
-              }
-            },
-            // Detalle si fue una imagen premium
-            imageUnlock: {
-              include: {
-                image: {
-                  select: {
-                    profile: { select: { username: true } }
-                  }
-                }
-              }
-            },
-            // Detalle si fue una recarga de créditos
             depositRequest: {
               select: {
                 packageNameAtMoment: true,
-                amount: true
-              }
-            }
-          }
-        }
-      }
+                amount: true,
+              },
+            },
+          },
+        },
+      },
     });
 
-    if (!wallet) {
-      throw new NotFoundException('Billetera no encontrada');
-    }
+    if (!wallet) throw new NotFoundException('Billetera no encontrada');
 
-    // 2. Mapeamos los datos para que el Frontend reciba algo limpio
-    return wallet.transactions.map(t => ({
+    return wallet.transactions.map((t) => ({
       id: t.id,
-      monto: t.amount,
+      monto: Number(t.amount),
       tipo: t.type,
       fecha: t.createdAt,
       descripcion: t.description,
-      detalle: this.formatDetail(t)
+      detalle: this.formatDetail(t),
+      promotionalAmount: Number(t.promotionalAmount),
+      realAmount: Number(t.realAmount),
+      isPromotional: t.isPromotional,
     }));
   }
 
-  // Función auxiliar para generar un texto descriptivo según el tipo
-  private formatDetail(t: any) {
-    if (t.type === 'MESSAGE_UNLOCK' || t.type === TransactionType.MESSAGE_UNLOCK ) {
-      const nombreAnfitriona = `${t.messageUnlock?.message?.sender?.firstName || 'Anfitriona'}`;
-      return `Mensaje desbloqueada de ${nombreAnfitriona}`;
-    }
-    if (t.type === 'IMAGE_UNLOCK' || t.type === TransactionType.IMAGE_UNLOCK ) {
-      const nombreAnfitriona = `${t.imageUnlock?.image?.profile?.username || 'Anfitriona'}`;
-      return `Foto premium de ${nombreAnfitriona}`;
-    }
-    if (t.type === 'DEPOSIT' || t.type === TransactionType.DEPOSIT) {
-      return `Recarga: ${t.depositRequest?.packageNameAtMoment || 'Paquete de créditos'}`;
-    }
-    if (t.type === 'CALL_PAYMENT' || t.type === TransactionType.CALL_PAYMENT) {
-      return t.description ? `Llamada: ${t.description}` : `Llamada realizada`;
+  private formatDetail(t: {
+    type: TransactionType;
+    description: string | null;
+    depositRequest?: { packageNameAtMoment: string | null } | null;
+  }) {
+    if (t.type === TransactionType.DEPOSIT) {
+      return `Recarga: ${t.depositRequest?.packageNameAtMoment || 'Paquete de creditos'}`;
     }
 
-    if (t.type === 'EARNING' || t.type === TransactionType.EARNING) {
-      return `Ingreso recibido por servicios`;
+    if (t.type === TransactionType.PROMOTIONAL_GRANT) {
+      return 'Creditos promocionales/regalo';
     }
-    return 'Transacción general';
+
+    if (t.type === TransactionType.CALL_PAYMENT) {
+      return t.description ? `Llamada: ${t.description}` : 'Llamada realizada';
+    }
+
+    if (t.type === TransactionType.MESSAGE_SEND) {
+      return 'Envio de mensaje';
+    }
+
+    if (t.type === TransactionType.WITHDRAWAL) {
+      return 'Retiro de saldo';
+    }
+
+    if (t.type === TransactionType.EARNING) {
+      return 'Ingreso recibido por servicios';
+    }
+
+    return 'Transaccion general';
   }
-
 
   async findOneByPhone(phoneNumber: string): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { phoneNumber } });
@@ -153,7 +127,6 @@ export class UsersService {
     return this.prisma.user.findUnique({ where: { id } });
   }
 
-  //OBTENER DATOS DE PERFIL DE USUARIO USER, USERPROFILE Y SU WALLET
   async getUserFullProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId, role: UserRole.USER },
@@ -163,10 +136,7 @@ export class UsersService {
       },
     });
 
-    if (!user) {
-      throw new NotFoundException('Perfil de usuario no encontrado');
-    }
-
+    if (!user) throw new NotFoundException('Perfil de usuario no encontrado');
     return user;
   }
 
@@ -181,97 +151,19 @@ export class UsersService {
     });
   }
 
-  //OBTENER LA WALLET DEL USUARIO, ANFITRIONA O ADMIN
   async findWalletByUserId(userId: string) {
-    const wallet = await this.prisma.wallet.findUnique({
-      where: { userId }
-    });
-    return wallet;
+    return this.prisma.wallet.findUnique({ where: { userId } });
   }
 
-  // TOGGLE GUARDAR / QUITAR ANFITRIONA
-  async toggleSavedAnfitriona(userId: string, anfitrionaId: string) {
-    const anfitriona = await this.prisma.user.findFirst({
-      where: { id: anfitrionaId, role: UserRole.ANFITRIONA, isActive: true },
-    });
-
-    if (!anfitriona) throw new NotFoundException('Anfitriona no encontrada.');
-
-    const existing = await this.prisma.savedAnfitriona.findUnique({
-      where: { userId_anfitrionaId: { userId, anfitrionaId } },
-    });
-
-    if (existing) {
-      await this.prisma.savedAnfitriona.delete({
-        where: { userId_anfitrionaId: { userId, anfitrionaId } },
-      });
-      return { saved: false };
-    }
-
-    await this.prisma.savedAnfitriona.create({ data: { userId, anfitrionaId } });
-    return { saved: true };
-  }
-
-  // LISTAR ANFITRIONAS GUARDADAS DEL CLIENTE
-  async getSavedAnfitrionas(userId: string, cursor?: string, limit: number = 10) {
-    const saved = await this.prisma.savedAnfitriona.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: limit + 1,
-      ...(cursor && {
-        skip: 1,
-        cursor: { id: cursor },
-      }),
-      include: {
-        anfitriona: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            anfitrionaProfile: {
-              select: {
-                username: true,
-                avatarUrl: true,
-                isOnline: true,
-                rateCredits: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    let nextCursor: string | null = null;
-
-    if (saved.length > limit) {
-      saved.pop();
-      nextCursor = saved[saved.length - 1].id;
-    }
-
-    return {
-      data: saved.map(s => ({
-        id: s.anfitriona.id,
-        name: `${s.anfitriona.firstName} ${s.anfitriona.lastName}`,
-        username: s.anfitriona.anfitrionaProfile?.username,
-        avatar: s.anfitriona.anfitrionaProfile?.avatarUrl,
-        isOnline: s.anfitriona.anfitrionaProfile?.isOnline,
-        rateCredits: s.anfitriona.anfitrionaProfile?.rateCredits,
-        savedAt: s.createdAt,
-      })),
-      nextCursor,
-    };
-  }
-
-  // ACTUALIZAR FCM TOKEN
   async updateFcmToken(userId: string, fcmToken: string): Promise<void> {
     if (!fcmToken || fcmToken.trim().length === 0) return;
+
     await this.prisma.user.update({
       where: { id: userId },
-      data: { fcmToken: fcmToken.trim() }
+      data: { fcmToken: fcmToken.trim() },
     });
   }
 
-  //OBTENER LOS MEOTODOS DE PAGO
   async findAllActive() {
     try {
       return await this.prisma.paymentMethod.findMany({
@@ -286,8 +178,8 @@ export class UsersService {
           logoUrl: true,
         },
       });
-    } catch (error) {
-      throw new InternalServerErrorException('Error al obtener métodos de pago');
+    } catch {
+      throw new InternalServerErrorException('Error al obtener metodos de pago');
     }
   }
 }

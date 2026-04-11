@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import { DepositStatus, UserRole, WithdrawalStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { UserRole, DepositStatus, WithdrawalStatus } from '@prisma/client';
+import { PROFESSIONAL_ROLE } from '../../common/professional-role';
 
 @Injectable()
 export class StatsService {
   constructor(private prisma: PrismaService) {}
 
-  async getAnfitrionaStats(userId: string) {
+  async getProfessionalStats(userId: string) {
     const CREDIT_TO_SOLES = Number(process.env.CREDIT_TO_SOLES_RATE ?? 1);
 
     const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
@@ -17,20 +18,27 @@ export class StatsService {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const [totalEarnings, todayEarnings, monthEarnings] = await Promise.all([
-      // Ganancias totales
       this.prisma.transaction.aggregate({
         _sum: { amount: true },
-        where: { walletId: wallet.id, type: 'EARNING' },
+        where: { walletId: wallet.id, type: 'EARNING', isPromotional: false },
       }),
-      // Ganancias hoy
       this.prisma.transaction.aggregate({
         _sum: { amount: true },
-        where: { walletId: wallet.id, type: 'EARNING', createdAt: { gte: startOfToday } },
+        where: {
+          walletId: wallet.id,
+          type: 'EARNING',
+          isPromotional: false,
+          createdAt: { gte: startOfToday },
+        },
       }),
-      // Ganancias este mes
       this.prisma.transaction.aggregate({
         _sum: { amount: true },
-        where: { walletId: wallet.id, type: 'EARNING', createdAt: { gte: startOfMonth } },
+        where: {
+          walletId: wallet.id,
+          type: 'EARNING',
+          isPromotional: false,
+          createdAt: { gte: startOfMonth },
+        },
       }),
     ]);
 
@@ -54,6 +62,11 @@ export class StatsService {
     };
   }
 
+  // Compatibilidad temporal.
+  async getAnfitrionaStats(userId: string) {
+    return this.getProfessionalStats(userId);
+  }
+
   async getStats() {
     const adminUserId = process.env.ADMIN_USER_ID;
 
@@ -61,51 +74,60 @@ export class StatsService {
       where: { userId: adminUserId },
     });
 
+    let totalRevenue = 0;
+    if (adminWallet) {
+      // TODO(finance-ledger): reemplazar este calculo por ledger contable definitivo.
+      // Mantener exclusion de transacciones promocionales/no contables.
+      const [newRevenue, legacyRevenue] = await Promise.all([
+        this.prisma.transaction.aggregate({
+          where: {
+            walletId: adminWallet.id,
+            type: 'EARNING',
+            isPromotional: false,
+            realAmount: { gt: 0 },
+          },
+          _sum: { realAmount: true },
+        }),
+        this.prisma.transaction.aggregate({
+          where: {
+            walletId: adminWallet.id,
+            type: 'EARNING',
+            isPromotional: false,
+            realAmount: 0,
+          },
+          _sum: { amount: true },
+        }),
+      ]);
+
+      totalRevenue =
+        Number(newRevenue._sum.realAmount ?? 0) +
+        Number(legacyRevenue._sum.amount ?? 0);
+    }
+
     const [
       totalClients,
       activeClients,
-      totalAnfitrionas,
-      activeAnfitrionas,
+      totalProfessionals,
+      activeProfessionals,
       pendingDeposits,
       approvedDepositsToday,
       pendingWithdrawals,
-      totalMessageUnlocks,
-      totalImageUnlocks,
+      totalMessages,
       newClientsThisMonth,
     ] = await Promise.all([
-      // Total clientes
       this.prisma.user.count({ where: { role: UserRole.USER } }),
-
-      // Clientes activos
       this.prisma.user.count({ where: { role: UserRole.USER, isActive: true } }),
-
-      // Total anfitrionas
-      this.prisma.user.count({ where: { role: UserRole.ANFITRIONA } }),
-
-      // Anfitrionas activas
-      this.prisma.user.count({ where: { role: UserRole.ANFITRIONA, isActive: true } }),
-
-      // Recargas pendientes
+      this.prisma.user.count({ where: { role: PROFESSIONAL_ROLE } }),
+      this.prisma.user.count({ where: { role: PROFESSIONAL_ROLE, isActive: true } }),
       this.prisma.depositRequest.count({ where: { status: DepositStatus.PENDING } }),
-
-      // Recargas aprobadas hoy
       this.prisma.depositRequest.count({
         where: {
           status: DepositStatus.APPROVED,
           updatedAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
         },
       }),
-
-      // Retiros pendientes de anfitrionas
       this.prisma.withdrawalRequest.count({ where: { status: WithdrawalStatus.PENDING } }),
-
-      // Total desbloqueos de mensajes
-      this.prisma.messageUnlock.count(),
-
-      // Total desbloqueos de imágenes
-      this.prisma.imageUnlock.count(),
-
-      // Clientes nuevos este mes
+      this.prisma.message.count(),
       this.prisma.user.count({
         where: {
           role: UserRole.USER,
@@ -123,22 +145,29 @@ export class StatsService {
         suspended: totalClients - activeClients,
         newThisMonth: newClientsThisMonth,
       },
+      professionals: {
+        total: totalProfessionals,
+        active: activeProfessionals,
+        inactive: totalProfessionals - activeProfessionals,
+      },
+      // Compatibilidad temporal para frontend legacy.
       anfitrionas: {
-        total: totalAnfitrionas,
-        active: activeAnfitrionas,
-        inactive: totalAnfitrionas - activeAnfitrionas,
+        total: totalProfessionals,
+        active: activeProfessionals,
+        inactive: totalProfessionals - activeProfessionals,
       },
       deposits: {
         pending: pendingDeposits,
         approvedToday: approvedDepositsToday,
-        totalRevenue: Number(adminWallet?.balance ?? 0),
+        totalRevenue,
       },
       withdrawals: {
         pending: pendingWithdrawals,
       },
       activity: {
-        messageUnlocks: totalMessageUnlocks,
-        imageUnlocks: totalImageUnlocks,
+        messages: totalMessages,
+        messageUnlocks: 0,
+        imageUnlocks: 0,
       },
     };
   }

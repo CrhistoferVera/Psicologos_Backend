@@ -5,7 +5,6 @@ import {
   UseInterceptors,
   ClassSerializerInterceptor,
   NotFoundException,
-  ForbiddenException,
   UseGuards,
   Body,
   BadRequestException,
@@ -105,27 +104,11 @@ export class UsersController {
     return {
       success: true,
       balance: Number(wallet.balance),
+      promotionalBalance: Number(wallet.promotionalBalance ?? 0),
+      realBalance: Number(wallet.balance) - Number(wallet.promotionalBalance ?? 0),
       userId: wallet.userId,
       updatedAt: wallet.updatedAt
     }
-  }
-
-  // OBTENER WALLET DE UN CLIENTE (para anfitrionas que están chateando con él)
-  @UseGuards(JwtAuthGuard)
-  @Get(':id/wallet')
-  async getUserWallet(@CurrentUser() user: JwtUser, @Param('id') targetUserId: string) {
-    if (user.role !== UserRole.ANFITRIONA && user.role !== UserRole.ADMIN) {
-      throw new ForbiddenException('No autorizado');
-    }
-    const wallet = await this.usersService.findWalletByUserId(targetUserId);
-    if (!wallet) {
-      throw new NotFoundException('billetera no encontrada');
-    }
-    return {
-      success: true,
-      balance: Number(wallet.balance),
-      userId: wallet.userId,
-    };
   }
 
   // ACTUALIZAR FCM TOKEN

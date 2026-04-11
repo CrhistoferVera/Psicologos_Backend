@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   Injectable,
   NotFoundException,
@@ -32,6 +32,7 @@ export class WalletService {
         where: {
           walletId: wallet.id,
           type: 'EARNING',
+          isPromotional: false,
           createdAt: { gte: startOfToday },
         },
         _sum: { amount: true },
@@ -40,27 +41,29 @@ export class WalletService {
         where: {
           walletId: wallet.id,
           type: 'EARNING',
+          isPromotional: false,
           createdAt: { gte: startOfWeek },
         },
         _sum: { amount: true },
       }),
       this.prisma.transaction.findMany({
-        where: { walletId: wallet.id, type: 'EARNING' },
+        where: { walletId: wallet.id, type: 'EARNING', isPromotional: false },
         orderBy: { createdAt: 'desc' },
         take: 50,
       }),
     ]);
 
     const parsedTransactions = transactions.map((tx) => {
-      let service = 'Transacción';
+      let service = 'Transaccion';
       let clientName = '';
       try {
         const meta = JSON.parse(tx.description ?? '{}');
         service = meta.service ?? service;
         clientName = meta.clientName ?? '';
       } catch {
-        service = tx.description ?? 'Transacción';
+        service = tx.description ?? 'Transaccion';
       }
+
       return {
         id: tx.id,
         service,
@@ -78,7 +81,6 @@ export class WalletService {
       transactions: parsedTransactions,
     };
   }
-
   async getBanks() {
     const banks = await this.prisma.banks.findMany({
       orderBy: { name: 'asc' },
@@ -115,7 +117,7 @@ export class WalletService {
       where: { userId },
     });
     if (!profile) {
-      throw new NotFoundException('Perfil de anfitriona no encontrado');
+      throw new NotFoundException('Perfil profesional no encontrado');
     }
 
     const account = await this.prisma.bankAccount.create({
@@ -178,12 +180,12 @@ export class WalletService {
     const soles = dto.credits * RATE;
 
     const [, , request] = await this.prisma.$transaction([
-      // Descontar créditos de la wallet
+      // Descontar crÃ©ditos de la wallet
       this.prisma.wallet.update({
         where: { id: wallet.id },
         data: { balance: { decrement: dto.credits } },
       }),
-      // Registrar transacción de retiro
+      // Registrar transacciÃ³n de retiro
       this.prisma.transaction.create({
         data: {
           walletId: wallet.id,
@@ -210,7 +212,7 @@ export class WalletService {
     });
 
     // Notificar a todos los admins
-    const [anfitriona, admins] = await Promise.all([
+    const [professional, admins] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: userId },
         select: { firstName: true, lastName: true },
@@ -221,13 +223,13 @@ export class WalletService {
       }),
     ]);
 
-    const anfitrionaName = [anfitriona?.firstName, anfitriona?.lastName].filter(Boolean).join(' ') || 'Una anfitriona';
+    const professionalName = [professional?.firstName, professional?.lastName].filter(Boolean).join(' ') || 'Un profesional';
     const adminTokens = admins.map(a => a.fcmToken!);
 
     this.notificationsService.sendMulticastNotification(
       adminTokens,
-      '💸 Nueva solicitud de retiro',
-      `${anfitrionaName} solicitó un retiro de ${dto.credits} créditos (S/ ${soles.toFixed(2)})`,
+      'ðŸ’¸ Nueva solicitud de retiro',
+      `${professionalName} solicitÃ³ un retiro de ${dto.credits} crÃ©ditos (S/ ${soles.toFixed(2)})`,
       { withdrawalRequestId: (request as any).id, type: 'NEW_WITHDRAWAL_REQUEST' }
     );
 
@@ -263,3 +265,5 @@ export class WalletService {
     }));
   }
 }
+
+

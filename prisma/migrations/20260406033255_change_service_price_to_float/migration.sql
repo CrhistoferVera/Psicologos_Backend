@@ -1,2 +1,0 @@
--- AlterTable
-ALTER TABLE "service_prices" ALTER COLUMN "price" SET DATA TYPE DOUBLE PRECISION;

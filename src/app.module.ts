@@ -4,13 +4,12 @@ import { PrismaModule } from './prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
-import { AnfitrioneModule } from './anfitrionas/anfitrionas.module';
+import { ProfessionalsModule } from './anfitrionas/anfitrionas.module';
 
 import { PackageModule } from './admin/package/package.module';
 import { ClientModule} from './admin/client/client.module';
-import { AnfitrionaModule } from './admin/anfitriona/anfitriona.module';
+import { AdminProfessionalsModule } from './admin/anfitriona/anfitriona.module';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ChatsModule } from './chats/chats.module';
 import { MessagesModule } from './messages/messages.module';
 import { ServicePricesModule } from './service-prices/service-prices.module';
 import { RechargeRequestModule } from './admin/rechargeRequest/recharge-request.module';
@@ -20,9 +19,8 @@ import { CallsModule } from './calls/calls.module';
 import { PaymentRequestModule } from './admin/paymentRequest/payment-request.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { StatsModule } from './admin/stats/stats.module';
-import { CulqiModule } from './culqi/culqi.module';
-import { FlowModule } from './flow/flow.module';
-import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { PromotionalCreditsModule } from './admin/promotional-credits/promotional-credits.module';
+import { SpecialtyModule } from './admin/specialty/specialty.module';
 
 @Module({
   imports: [
@@ -34,12 +32,11 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     PrismaModule,
     PackageModule,
     ClientModule,
-    AnfitrionaModule,
+    AdminProfessionalsModule,
     AuthModule,
     UsersModule,
     CloudinaryModule,
-    AnfitrioneModule,
-    ChatsModule,
+    ProfessionalsModule,
     MessagesModule,
     ServicePricesModule,
     RechargeRequestModule,
@@ -49,9 +46,8 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     PaymentRequestModule,
     NotificationsModule,
     StatsModule,
-    CulqiModule,
-    FlowModule,
-    SubscriptionsModule,
+    PromotionalCreditsModule,
+    SpecialtyModule,
   ],
   controllers: [],
   providers: [],

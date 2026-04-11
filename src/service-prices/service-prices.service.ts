@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, NotFoundException } from '@nestjs/common';
 import { ServiceType } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { UpsertServicePriceDto } from './dto/upsert-service-price.dto';
@@ -7,25 +7,25 @@ import { UpsertServicePriceDto } from './dto/upsert-service-price.dto';
 export class ServicePricesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // Obtiene todos los precios de la anfitriona autenticada
+  // Obtiene todos los precios del profesional autenticado.
   async getMyPrices(userId: string) {
     const profile = await this.prisma.anfitrioneProfile.findUnique({
       where: { userId },
       include: { servicePrices: true },
     });
 
-    if (!profile) throw new NotFoundException('Perfil de anfitriona no encontrado');
+    if (!profile) throw new NotFoundException('Perfil profesional no encontrado');
 
     return profile.servicePrices;
   }
 
-  // Crea o actualiza un precio para un tipo de servicio
+  // Crea o actualiza un precio para un tipo de servicio.
   async upsertPrice(userId: string, dto: UpsertServicePriceDto) {
     const profile = await this.prisma.anfitrioneProfile.findUnique({
       where: { userId },
     });
 
-    if (!profile) throw new NotFoundException('Perfil de anfitriona no encontrado');
+    if (!profile) throw new NotFoundException('Perfil profesional no encontrado');
 
     return this.prisma.servicePrice.upsert({
       where: {
@@ -45,19 +45,19 @@ export class ServicePricesService {
     });
   }
 
-  // Precios públicos de una anfitriona (para que el cliente los vea antes de llamar)
-  async getPublicPrices(anfitrionaUserId: string) {
+  // Precios publicos de un profesional.
+  async getPublicPrices(professionalUserId: string) {
     const profile = await this.prisma.anfitrioneProfile.findUnique({
-      where: { userId: anfitrionaUserId },
+      where: { userId: professionalUserId },
       include: { servicePrices: true },
     });
     return profile?.servicePrices ?? [];
   }
 
-  // Obtiene el precio activo de un servicio para una anfitriona (usado al enviar mensaje)
-  async getPriceForUser(anfitrionaUserId: string, serviceType: ServiceType) {
+  // Obtiene el precio activo de un servicio para un profesional.
+  async getPriceForUser(professionalUserId: string, serviceType: ServiceType) {
     const profile = await this.prisma.anfitrioneProfile.findUnique({
-      where: { userId: anfitrionaUserId },
+      where: { userId: professionalUserId },
       include: {
         servicePrices: {
           where: { serviceType },

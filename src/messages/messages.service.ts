@@ -4,13 +4,13 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ServiceType } from '@prisma/client';
+import { Prisma, ServiceType, TransactionType } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma.service';
 import { ServicePricesService } from '../service-prices/service-prices.service';
 import { NotificationsService } from '../notifications/notifications.service';
-
+import { allocateCreditDebit } from '../wallet/utils/credit-allocation.util';
 
 @Injectable()
 export class MessagesService {
@@ -34,6 +34,7 @@ export class MessagesService {
     const result = await this.prisma.message.deleteMany({
       where: { createdAt: { lt: cutoff } },
     });
+
     if (result.count > 0) {
       this.logger.log(`Eliminados ${result.count} mensajes expirados`);
     }
@@ -43,8 +44,13 @@ export class MessagesService {
     senderId: string,
     receiverId: string,
     text: string,
-    isLocked: boolean = false,
+    _legacyLockedFlag = false,
   ) {
+    const messageText = text?.trim();
+    if (!messageText) {
+      throw new BadRequestException('El mensaje no puede estar vacio.');
+    }
+
     const [user1Id, user2Id] = [senderId, receiverId].sort();
 
     const conversation = await this.prisma.conversation.upsert({
@@ -53,46 +59,29 @@ export class MessagesService {
       update: {},
     });
 
-    let price: number | null = null;
-
-    if (isLocked) {
-      const servicePrice = await this.servicePricesService.getPriceForUser(
-        senderId,
-        ServiceType.MESSAGE,
-      );
-      if (!servicePrice) {
-        throw new BadRequestException(
-          'Debes configurar un precio para regalos antes de usarlos',
-        );
-      }
-      price = servicePrice.price;
-    }
-
-    // ── Cobro por enviar mensaje (MESSAGE_SEND) ──────────────────────────────
-    // Solo aplica cuando el que envía es un cliente (no tiene perfil de anfitriona)
-    // y la anfitriona receptora tiene configurado el precio MESSAGE_SEND
     const senderProfile = await this.prisma.anfitrioneProfile.findUnique({
       where: { userId: senderId },
+      select: { id: true },
     });
 
+    // Politica actual: solo clientes pagan por enviar mensajes; profesionales no.
     if (!senderProfile) {
-      // Es un cliente enviando mensaje → cobrar si la anfitriona tiene precio configurado
       const sendPrice = await this.servicePricesService.getPriceForUser(
         receiverId,
         ServiceType.MESSAGE_SEND,
       );
 
-      if (sendPrice) {
+      if (sendPrice && sendPrice.price > 0) {
         const creditsRequired = sendPrice.price;
 
         const clientWallet = await this.prisma.wallet.findUnique({ where: { userId: senderId } });
         if (!clientWallet) throw new NotFoundException('Wallet del cliente no encontrada');
         if (Number(clientWallet.balance) < creditsRequired) {
-          throw new BadRequestException('Créditos insuficientes para enviar el mensaje');
+          throw new BadRequestException('Creditos insuficientes para enviar el mensaje');
         }
 
-        const anfitrionaWallet = await this.prisma.wallet.findUnique({ where: { userId: receiverId } });
-        if (!anfitrionaWallet) throw new NotFoundException('Wallet de anfitriona no encontrada');
+        const professionalWallet = await this.prisma.wallet.findUnique({ where: { userId: receiverId } });
+        if (!professionalWallet) throw new NotFoundException('Wallet de profesional no encontrada');
 
         const client = await this.prisma.user.findUnique({
           where: { id: senderId },
@@ -100,206 +89,69 @@ export class MessagesService {
         });
         const clientName = [client?.firstName, client?.lastName].filter(Boolean).join(' ') || 'Cliente';
 
+        const debit = allocateCreditDebit(
+          Number(clientWallet.balance),
+          Number(clientWallet.promotionalBalance),
+          creditsRequired,
+        );
+
         const adminUserId = this.config.get<string>('ADMIN_USER_ID');
         const feePct = Number(this.config.get<string>('PLATFORM_FEE_PERCENT') ?? '50') / 100;
-        const adminShare = Math.round(creditsRequired * feePct * 100) / 100;
-        const anfitrionaShare = Math.round((creditsRequired - adminShare) * 100) / 100;
+        const distributableCredits = debit.realDebited;
+        const adminShare = Math.round(distributableCredits * feePct * 100) / 100;
+        const professionalShare = Math.round((distributableCredits - adminShare) * 100) / 100;
 
         const adminWallet = adminUserId
           ? await this.prisma.wallet.findUnique({ where: { userId: adminUserId } })
           : null;
 
-        await this.prisma.$transaction([
+        const clientWalletUpdate: Prisma.WalletUpdateInput = {
+          balance: { decrement: debit.totalDebited },
+        };
+        if (debit.promotionalDebited > 0) {
+          clientWalletUpdate.promotionalBalance = { decrement: debit.promotionalDebited };
+        }
+
+        const operations: Prisma.PrismaPromise<unknown>[] = [
           this.prisma.wallet.update({
             where: { userId: senderId },
-            data: { balance: { decrement: creditsRequired } },
+            data: clientWalletUpdate,
           }),
           this.prisma.transaction.create({
             data: {
               walletId: clientWallet.id,
-              type: 'MESSAGE_SEND',
-              amount: creditsRequired,
+              type: TransactionType.MESSAGE_SEND,
+              amount: debit.totalDebited,
+              promotionalAmount: debit.promotionalDebited,
+              realAmount: debit.realDebited,
+              isPromotional: debit.realDebited === 0,
               description: 'Costo por enviar mensaje',
             },
           }),
-          this.prisma.wallet.update({
-            where: { userId: receiverId },
-            data: { balance: { increment: anfitrionaShare } },
-          }),
-          this.prisma.transaction.create({
-            data: {
-              walletId: anfitrionaWallet.id,
-              type: 'EARNING',
-              amount: anfitrionaShare,
-              description: JSON.stringify({ service: 'Mensaje recibido', clientName }),
-            },
-          }),
-          ...(adminWallet && adminShare > 0
-            ? [
-                this.prisma.wallet.update({
-                  where: { userId: adminUserId! },
-                  data: { balance: { increment: adminShare } },
-                }),
-                this.prisma.transaction.create({
-                  data: {
-                    walletId: adminWallet.id,
-                    type: 'EARNING',
-                    amount: adminShare,
-                    description: JSON.stringify({ service: 'Comisión mensaje', clientName }),
-                  },
-                }),
-              ]
-            : []),
-        ]);
-      }
-    }
-    // ────────────────────────────────────────────────────────────────────────
+        ];
 
-    const message = await this.prisma.message.create({
-      data: {
-        conversationId: conversation.id,
-        senderId,
-        text,
-        isLocked,
-        price,
-      },
-    });
+        if (professionalShare > 0) {
+          operations.push(
+            this.prisma.wallet.update({
+              where: { userId: receiverId },
+              data: { balance: { increment: professionalShare } },
+            }),
+            this.prisma.transaction.create({
+              data: {
+                walletId: professionalWallet.id,
+                type: TransactionType.EARNING,
+                amount: professionalShare,
+                promotionalAmount: 0,
+                realAmount: professionalShare,
+                isPromotional: false,
+                description: JSON.stringify({ service: 'Mensaje recibido', clientName }),
+              },
+            }),
+          );
+        }
 
-    // Obtener fcmToken del receptor para notificarle
-    const receiver = await this.prisma.user.findUnique({
-      where: { id: receiverId },
-      select: { fcmToken: true },
-    });
-
-    if (receiver?.fcmToken) {
-      if (isLocked) {
-        this.notificationsService.sendPushNotification(
-          receiver.fcmToken,
-          '🎁 Nuevo regalo',
-          'Tienes un regalo esperándote',
-          { conversationId: conversation.id, type: 'NEW_LOCKED_MESSAGE' }
-        );
-      } else {
-        this.notificationsService.sendPushNotification(
-          receiver.fcmToken,
-          '💬 Nuevo mensaje',
-          'Tienes un nuevo mensaje',
-          { conversationId: conversation.id, type: 'NEW_MESSAGE' }
-        );
-      }
-    }
-
-    return { ...message, conversationId: conversation.id };
-  }
-
-  async getMessages(conversationId: string, requestingUserId: string) {
-    const messages = await this.prisma.message.findMany({
-      where: { conversationId, createdAt: { gte: this.ttlCutoff() } },
-      orderBy: { createdAt: 'asc' },
-      include: {
-        messageUnlocks: {
-          where: { userId: requestingUserId },
-          select: { id: true },
-        },
-      },
-    });
-
-    return messages.map((msg) => {
-      const isUnlocked = msg.messageUnlocks.length > 0;
-      const isSender = msg.senderId === requestingUserId;
-
-      return {
-        id: msg.id,
-        conversationId: msg.conversationId,
-        senderId: msg.senderId,
-        // El emisor siempre ve su propio texto; el receptor solo si pagó o es gratis
-        text: isSender || !msg.isLocked || isUnlocked ? msg.text : null,
-        read: msg.read,
-        isLocked: msg.isLocked,
-        price: msg.price,
-        isUnlocked,
-        createdAt: msg.createdAt,
-      };
-    });
-  }
-
-  async unlockMessage(messageId: string, userId: string) {
-    const message = await this.prisma.message.findUnique({
-      where: { id: messageId },
-      include: {
-        sender: { select: { firstName: true, lastName: true } },
-      },
-    });
-
-    if (!message) throw new NotFoundException('Mensaje no encontrado');
-    if (!message.isLocked) throw new BadRequestException('Este mensaje no está bloqueado');
-    if (message.senderId === userId) throw new BadRequestException('No puedes desbloquear tu propio mensaje');
-
-    const existing = await this.prisma.messageUnlock.findUnique({
-      where: { messageId_userId: { messageId, userId } },
-    });
-    if (existing) throw new BadRequestException('Ya desbloqueaste este mensaje');
-
-    const creditsRequired = message.price!;
-
-    // Wallet del cliente que paga
-    const clientWallet = await this.prisma.wallet.findUnique({ where: { userId } });
-    if (!clientWallet) throw new NotFoundException('Wallet no encontrada');
-    if (Number(clientWallet.balance) < creditsRequired) {
-      throw new BadRequestException('Créditos insuficientes');
-    }
-
-    // Wallet de la anfitriona que cobra
-    const anfitrionaWallet = await this.prisma.wallet.findUnique({
-      where: { userId: message.senderId },
-    });
-    if (!anfitrionaWallet) throw new NotFoundException('Wallet de anfitriona no encontrada');
-
-    // Get client name for description
-    const client = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { firstName: true, lastName: true },
-    });
-    const clientName = [client?.firstName, client?.lastName].filter(Boolean).join(' ') || 'Cliente';
-
-    const adminUserId = this.config.get<string>('ADMIN_USER_ID');
-    const feePct = Number(this.config.get<string>('PLATFORM_FEE_PERCENT') ?? '50') / 100;
-    const total = Number(creditsRequired);
-    const adminShare = Math.round(total * feePct * 100) / 100;
-    const anfitrionaShare = Math.round((total - adminShare) * 100) / 100;
-
-    const adminWallet = adminUserId
-      ? await this.prisma.wallet.findUnique({ where: { userId: adminUserId } })
-      : null;
-
-    // Transacción atómica: débito al cliente + crédito a la anfitriona + comisión admin
-    const [, clientTx] = await this.prisma.$transaction([
-      this.prisma.wallet.update({
-        where: { userId },
-        data: { balance: { decrement: creditsRequired } },
-      }),
-      this.prisma.transaction.create({
-        data: {
-          walletId: clientWallet.id,
-          type: 'MESSAGE_UNLOCK',
-          amount: creditsRequired,
-          description: `Desbloqueo de mensaje`,
-        },
-      }),
-      this.prisma.wallet.update({
-        where: { userId: message.senderId },
-        data: { balance: { increment: anfitrionaShare } },
-      }),
-      this.prisma.transaction.create({
-        data: {
-          walletId: anfitrionaWallet.id,
-          type: 'EARNING',
-          amount: anfitrionaShare,
-          description: JSON.stringify({ service: 'Mensaje Bloqueado', clientName }),
-        },
-      }),
-      ...(adminWallet && adminShare > 0
-        ? [
+        if (adminWallet && adminShare > 0) {
+          operations.push(
             this.prisma.wallet.update({
               where: { userId: adminUserId! },
               data: { balance: { increment: adminShare } },
@@ -307,44 +159,65 @@ export class MessagesService {
             this.prisma.transaction.create({
               data: {
                 walletId: adminWallet.id,
-                type: 'EARNING',
+                type: TransactionType.EARNING,
                 amount: adminShare,
-                description: JSON.stringify({ service: 'Comisión Mensaje Bloqueado', clientName }),
+                promotionalAmount: 0,
+                realAmount: adminShare,
+                isPromotional: false,
+                description: JSON.stringify({ service: 'Comision mensaje', clientName }),
               },
             }),
-          ]
-        : []),
-    ]);
+          );
+        }
 
-    await this.prisma.messageUnlock.create({
+        await this.prisma.$transaction(operations);
+      }
+    }
+
+    const message = await this.prisma.message.create({
       data: {
-        messageId,
-        userId,
-        creditsSpent: creditsRequired,
-        transactionId: clientTx.id,
+        conversationId: conversation.id,
+        senderId,
+        text: messageText,
       },
     });
 
-    // Notificar a la anfitriona que su mensaje fue desbloqueado
-    const anfitriona = await this.prisma.user.findUnique({
-      where: { id: message.senderId },
+    const receiver = await this.prisma.user.findUnique({
+      where: { id: receiverId },
       select: { fcmToken: true },
     });
 
-    if (anfitriona?.fcmToken) {
+    if (receiver?.fcmToken) {
       this.notificationsService.sendPushNotification(
-        anfitriona.fcmToken,
-        '💰 Mensaje desbloqueado',
-        `${clientName} desbloqueó tu mensaje · ganaste ${creditsRequired} créditos`,
-        { conversationId: message.conversationId, type: 'MESSAGE_UNLOCKED' }
+        receiver.fcmToken,
+        'Nuevo mensaje',
+        'Tienes un nuevo mensaje',
+        { conversationId: conversation.id, type: 'NEW_MESSAGE' },
       );
     }
 
-    return { success: true, text: message.text };
+    return { ...message, conversationId: conversation.id };
+  }
+
+  async getMessages(conversationId: string, _requestingUserId: string) {
+    const messages = await this.prisma.message.findMany({
+      where: { conversationId, createdAt: { gte: this.ttlCutoff() } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return messages.map((msg) => ({
+      id: msg.id,
+      conversationId: msg.conversationId,
+      senderId: msg.senderId,
+      text: msg.text,
+      read: msg.read,
+      createdAt: msg.createdAt,
+    }));
   }
 
   async getChats(userId: string) {
     const cutoff = this.ttlCutoff();
+
     const conversations = await this.prisma.conversation.findMany({
       where: {
         OR: [{ user1Id: userId }, { user2Id: userId }],
@@ -397,7 +270,7 @@ export class MessagesService {
           otherUserId,
           otherUserName,
           otherUserAvatar: otherUser.anfitrionaProfile?.avatarUrl ?? null,
-          lastMessage: lastMessage?.isLocked ? '🔒 Mensaje bloqueado' : (lastMessage?.text ?? null),
+          lastMessage: lastMessage?.text ?? null,
           lastMessageAt: lastMessage?.createdAt ?? conv.createdAt,
           unreadCount,
         };

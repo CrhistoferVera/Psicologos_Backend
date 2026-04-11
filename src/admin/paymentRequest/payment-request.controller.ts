@@ -1,5 +1,5 @@
 import {
-    Controller, Patch, Param, Body, UseGuards, Post,
+    Controller, Patch, Param, Body, UseGuards,
     UseInterceptors, UploadedFile, BadRequestException, Logger
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -12,7 +12,6 @@ import { RechargeRequestService } from './payment-request.service';
 import { UpdateWithdrawalRequetsDto } from './dto/update-withdrawalRequest.dto';
 import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
-import { NotificationsService } from 'src/notifications/notifications.service';
 
 interface JwtUser { userId: string; }
 
@@ -27,7 +26,6 @@ export class PaymentRequestController {
     constructor(
         private readonly paymentRequestService: RechargeRequestService,
         private readonly cloudinaryService: CloudinaryService,
-        private readonly notificationsService: NotificationsService,
     ) { }
 
     /**
@@ -62,17 +60,5 @@ export class PaymentRequestController {
         }
 
         return this.paymentRequestService.updateDepositStatus(id, updateDto, receiptData);
-    }
-
-    // ENDPOINT TEMPORAL DE PRUEBA — eliminar en producción
-    @Post('test-notification')
-    async testNotification(@Body() body: { fcmToken: string }) {
-        await this.notificationsService.sendPushNotification(
-            body.fcmToken,
-            '✅ Prueba de notificación',
-            'Esta es una notificación de prueba desde Pachamama',
-            { withdrawalRequestId: 'test-123' }
-        );
-        return { success: true };
     }
 }

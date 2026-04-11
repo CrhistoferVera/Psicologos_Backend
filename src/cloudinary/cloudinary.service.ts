@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+﻿import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
 import { v2 as cloudinary } from 'cloudinary';
 
 @Injectable()
@@ -25,7 +25,7 @@ export class CloudinaryService {
 
         return;
       } catch {
-        throw new InternalServerErrorException('CLOUDINARY_URL inválida.');
+        throw new InternalServerErrorException('CLOUDINARY_URL invÃ¡lida.');
       }
     }
 
@@ -279,12 +279,12 @@ export class CloudinaryService {
     const isPdf = file.mimetype === 'application/pdf';
     if (!isImage && !isPdf) {
       throw new InternalServerErrorException(
-        'Tipo de archivo no soportado. Solo imágenes o PDF.',
+        'Tipo de archivo no soportado. Solo imÃ¡genes o PDF.',
       );
     }
 
     const resourceType: 'image' | 'raw' = isImage ? 'image' : 'raw';
-    const folder = `pachamama/anfitrionas/${userId}/identity`;
+    const folder = `psicologos/professionals/${userId}/identity`;
     const publicId = `id_doc_${Date.now()}`;
 
     const uploaded = await this.uploadPrivate({
@@ -297,13 +297,13 @@ export class CloudinaryService {
     const signedUrl = this.getSignedUrl({
       publicId: uploaded.publicId,
       resourceType: uploaded.resourceType,
-      expiresInSeconds: 60 * 60 * 24 * 365, // 1 año
+      expiresInSeconds: 60 * 60 * 24 * 365, // 1 aÃ±o
     });
 
     return { secureUrl: signedUrl, publicId: uploaded.publicId };
   }
 
-  // SERVICIO PARA SUBIR COMPROBANTES DE DEPÓSITO
+  // SERVICIO PARA SUBIR COMPROBANTES DE DEPÃ“SITO
   async uploadDepositPaymentProof(params: {
     file: Express.Multer.File;
     userId: string;
@@ -315,7 +315,7 @@ export class CloudinaryService {
     const isPdf = file.mimetype === 'application/pdf';
 
     if (!isImage && !isPdf) {
-      throw new BadRequestException('Tipo de archivo no soportado. Solo imágenes o PDF.');
+      throw new BadRequestException('Tipo de archivo no soportado. Solo imÃ¡genes o PDF.');
     }
 
     // Definir carpeta y nombre (pachamama/users/ID_USUARIO/deposits)
@@ -359,7 +359,7 @@ export class CloudinaryService {
     const isVideo = file.mimetype.startsWith('video/');
 
     if (!isImage && !isVideo) {
-      throw new InternalServerErrorException('Formato no permitido. Solo imágenes o videos.');
+      throw new InternalServerErrorException('Formato no permitido. Solo imÃ¡genes o videos.');
     }
 
     const resourceType = isImage ? 'image' : 'video';
@@ -397,10 +397,10 @@ export class CloudinaryService {
     const { file, userId } = params;
 
     if (!file.mimetype.startsWith('image/')) {
-      throw new InternalServerErrorException('Solo se permiten imágenes para el avatar.');
+      throw new InternalServerErrorException('Solo se permiten imÃ¡genes para el avatar.');
     }
 
-    const folder = `pachamama/anfitrionas/${userId}/avatar`;
+    const folder = `psicologos/professionals/${userId}/avatar`;
     const publicId = `avatar_${Date.now()}`;
 
     return new Promise((resolve, reject) => {
@@ -424,10 +424,10 @@ export class CloudinaryService {
     const { file, userId } = params;
 
     if (!file.mimetype.startsWith('image/')) {
-      throw new InternalServerErrorException('Solo se permiten imágenes para el banner.');
+      throw new InternalServerErrorException('Solo se permiten imÃ¡genes para el banner.');
     }
 
-    const folder = `pachamama/anfitrionas/${userId}/cover`;
+    const folder = `psicologos/professionals/${userId}/cover`;
     const publicId = `cover_${Date.now()}`;
 
     return new Promise((resolve, reject) => {
@@ -444,7 +444,7 @@ export class CloudinaryService {
     });
   }
 
-  //ELIMINAR UNA HISTORIA DE UNA ANFITRIONA
+  //ELIMINAR UNA HISTORIA DE UN PROFESIONAL
   async deleteHistoryMedia(publicId: string, type: 'image' | 'video') {
     try {
       await cloudinary.uploader.destroy(publicId, { invalidate: true, resource_type: type });
@@ -454,7 +454,7 @@ export class CloudinaryService {
     }
   }
 
-  // ─── Galería permanente de anfitriona ─────────────────────────────────────
+  // â”€â”€â”€ GalerÃ­a permanente de anfitriona â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async uploadGalleryImage(params: {
     file: Express.Multer.File;
@@ -463,10 +463,10 @@ export class CloudinaryService {
     const { file, userId } = params;
 
     if (!file.mimetype.startsWith('image/')) {
-      throw new InternalServerErrorException('Solo se permiten imágenes para la galería.');
+      throw new InternalServerErrorException('Solo se permiten imÃ¡genes para la galerÃ­a.');
     }
 
-    const folder = `pachamama/anfitrionas/${userId}/gallery`;
+    const folder = `psicologos/professionals/${userId}/gallery`;
     const publicId = `gallery_${Date.now()}`;
 
     return new Promise((resolve, reject) => {
@@ -475,7 +475,7 @@ export class CloudinaryService {
         (error, result) => {
           if (error || !result?.secure_url) {
             return reject(
-              new InternalServerErrorException('Error al subir imagen de galería a Cloudinary.'),
+              new InternalServerErrorException('Error al subir imagen de galerÃ­a a Cloudinary.'),
             );
           }
           resolve({ secureUrl: result.secure_url, publicId: result.public_id });
@@ -489,7 +489,7 @@ export class CloudinaryService {
     try {
       await cloudinary.uploader.destroy(publicId, { invalidate: true, resource_type: 'image' });
     } catch {
-      throw new InternalServerErrorException('Error al eliminar la imagen de galería de Cloudinary.');
+      throw new InternalServerErrorException('Error al eliminar la imagen de galerÃ­a de Cloudinary.');
     }
   }
 }
