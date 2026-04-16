@@ -7,6 +7,7 @@ import {
 import { Prisma, TransactionType, User, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { createUniqueReferralCode } from '../referrals/utils/referral-code.util';
 
 @Injectable()
 export class UsersService {
@@ -14,9 +15,15 @@ export class UsersService {
 
   async create(data: CreateUserDto): Promise<User> {
     try {
+      const referralCode = await createUniqueReferralCode(
+        this.prisma,
+        data.firstName ?? data.phoneNumber,
+      );
+
       return await this.prisma.user.create({
         data: {
           ...data,
+          referralCode,
           wallet: {
             create: {
               balance: 10,
@@ -46,6 +53,25 @@ export class UsersService {
       }
       throw new InternalServerErrorException('Error al crear el usuario.');
     }
+  }
+
+  async ensureReferralCode(userId: string): Promise<string> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, firstName: true, referralCode: true },
+    });
+
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    if (user.referralCode) return user.referralCode;
+
+    const referralCode = await createUniqueReferralCode(this.prisma, user.firstName ?? user.id.slice(0, 6));
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: { referralCode },
+      select: { referralCode: true },
+    });
+
+    return updated.referralCode as string;
   }
 
   async findUserExpenseHistory(userId: string) {
@@ -92,6 +118,10 @@ export class UsersService {
 
     if (t.type === TransactionType.PROMOTIONAL_GRANT) {
       return 'Creditos promocionales/regalo';
+    }
+
+    if (t.type === TransactionType.REFERRAL_REWARD) {
+      return 'Recompensa por referido';
     }
 
     if (t.type === TransactionType.CALL_PAYMENT) {

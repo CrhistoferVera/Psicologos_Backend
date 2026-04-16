@@ -1,15 +1,14 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { ProfessionalsModule } from './anfitrionas/anfitrionas.module';
-
 import { PackageModule } from './admin/package/package.module';
-import { ClientModule} from './admin/client/client.module';
+import { ClientModule } from './admin/client/client.module';
 import { AdminProfessionalsModule } from './admin/anfitriona/anfitriona.module';
-import { ScheduleModule } from '@nestjs/schedule';
 import { MessagesModule } from './messages/messages.module';
 import { ServicePricesModule } from './service-prices/service-prices.module';
 import { RechargeRequestModule } from './admin/rechargeRequest/recharge-request.module';
@@ -21,6 +20,9 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { StatsModule } from './admin/stats/stats.module';
 import { PromotionalCreditsModule } from './admin/promotional-credits/promotional-credits.module';
 import { SpecialtyModule } from './admin/specialty/specialty.module';
+import { SystemConfigModule } from './system-config/system-config.module';
+import { AdminConfigModule } from './admin/config/admin-config.module';
+import { ReferralsModule } from './referrals/referrals.module';
 
 @Module({
   imports: [
@@ -30,9 +32,11 @@ import { SpecialtyModule } from './admin/specialty/specialty.module';
     }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    SystemConfigModule,
     PackageModule,
     ClientModule,
     AdminProfessionalsModule,
+    AdminConfigModule,
     AuthModule,
     UsersModule,
     CloudinaryModule,
@@ -48,6 +52,7 @@ import { SpecialtyModule } from './admin/specialty/specialty.module';
     StatsModule,
     PromotionalCreditsModule,
     SpecialtyModule,
+    ReferralsModule,
   ],
   controllers: [],
   providers: [],

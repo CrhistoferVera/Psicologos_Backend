@@ -16,6 +16,7 @@ import {
 } from './dto/professional-public-list.dto';
 import { ProfessionalPublicDetailDto } from './dto/professional-public-detail.dto';
 import { PROFESSIONAL_ROLE } from '../common/professional-role';
+import { createUniqueReferralCode } from '../referrals/utils/referral-code.util';
 
 @Injectable()
 export class ProfessionalsService {
@@ -43,6 +44,7 @@ export class ProfessionalsService {
     if (existingEmail) throw new ConflictException('El email ya esta registrado.');
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
+    const referralCode = await createUniqueReferralCode(this.prisma, dto.firstName ?? dto.username);
 
     let user: Awaited<ReturnType<typeof this.prisma.user.create>>;
     try {
@@ -54,6 +56,7 @@ export class ProfessionalsService {
           lastName: dto.lastName,
           password: hashedPassword,
           role: PROFESSIONAL_ROLE,
+          referralCode,
           isProfileComplete: true,
           wallet: {
             create: {
@@ -425,3 +428,4 @@ export class ProfessionalsService {
     };
   }
 }
+

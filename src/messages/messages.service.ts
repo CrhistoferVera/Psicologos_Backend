@@ -4,13 +4,13 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, ServiceType, TransactionType } from '@prisma/client';
-import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { Prisma, ServiceType, TransactionType, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { ServicePricesService } from '../service-prices/service-prices.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { allocateCreditDebit } from '../wallet/utils/credit-allocation.util';
+import { SystemConfigService } from '../system-config/system-config.service';
 
 @Injectable()
 export class MessagesService {
@@ -20,7 +20,7 @@ export class MessagesService {
     private readonly prisma: PrismaService,
     private readonly servicePricesService: ServicePricesService,
     private readonly notificationsService: NotificationsService,
-    private readonly config: ConfigService,
+    private readonly systemConfigService: SystemConfigService,
   ) {}
 
   private ttlCutoff(): Date {
@@ -64,7 +64,6 @@ export class MessagesService {
       select: { id: true },
     });
 
-    // Politica actual: solo clientes pagan por enviar mensajes; profesionales no.
     if (!senderProfile) {
       const sendPrice = await this.servicePricesService.getPriceForUser(
         receiverId,
@@ -83,10 +82,18 @@ export class MessagesService {
         const professionalWallet = await this.prisma.wallet.findUnique({ where: { userId: receiverId } });
         if (!professionalWallet) throw new NotFoundException('Wallet de profesional no encontrada');
 
-        const client = await this.prisma.user.findUnique({
-          where: { id: senderId },
-          select: { firstName: true, lastName: true },
-        });
+        const [client, runtimeConfig, adminWallet] = await Promise.all([
+          this.prisma.user.findUnique({
+            where: { id: senderId },
+            select: { firstName: true, lastName: true },
+          }),
+          this.systemConfigService.getRuntimeConfig(),
+          this.prisma.wallet.findFirst({
+            where: { user: { role: UserRole.ADMIN } },
+            select: { id: true, userId: true },
+          }),
+        ]);
+
         const clientName = [client?.firstName, client?.lastName].filter(Boolean).join(' ') || 'Cliente';
 
         const debit = allocateCreditDebit(
@@ -95,15 +102,10 @@ export class MessagesService {
           creditsRequired,
         );
 
-        const adminUserId = this.config.get<string>('ADMIN_USER_ID');
-        const feePct = Number(this.config.get<string>('PLATFORM_FEE_PERCENT') ?? '50') / 100;
+        const feePct = runtimeConfig.platformFeePercent / 100;
         const distributableCredits = debit.realDebited;
         const adminShare = Math.round(distributableCredits * feePct * 100) / 100;
         const professionalShare = Math.round((distributableCredits - adminShare) * 100) / 100;
-
-        const adminWallet = adminUserId
-          ? await this.prisma.wallet.findUnique({ where: { userId: adminUserId } })
-          : null;
 
         const clientWalletUpdate: Prisma.WalletUpdateInput = {
           balance: { decrement: debit.totalDebited },
@@ -153,7 +155,7 @@ export class MessagesService {
         if (adminWallet && adminShare > 0) {
           operations.push(
             this.prisma.wallet.update({
-              where: { userId: adminUserId! },
+              where: { id: adminWallet.id },
               data: { balance: { increment: adminShare } },
             }),
             this.prisma.transaction.create({

@@ -10,7 +10,6 @@ import {
   BadRequestException,
   Patch,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { UsersService } from './users.service';
 import { UserEntity } from './entities/user.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -20,6 +19,7 @@ import { EditPhoneNumberDto } from './dto/edit-phone-number.dto';
 import { EditPasswordDto } from './dto/edit-password.dto';
 import { UpdateFcmTokenDto } from './dto/update-fcm-token.dto';
 import * as bcrypt from 'bcrypt';
+import { SystemConfigService } from '../system-config/system-config.service';
 
 interface JwtUser {
   userId: string;
@@ -34,18 +34,14 @@ interface JwtUser {
 export class UsersController {
   constructor(
     private readonly usersService: UsersService,
-    private readonly config: ConfigService,
-  ) { }
+    private readonly systemConfigService: SystemConfigService,
+  ) {}
 
   @Get('config')
   getConfig() {
-    return {
-      creditToSolesRate: Number(this.config.get<string>('CREDIT_TO_SOLES_RATE') ?? '1'),
-      minVersion: this.config.get<string>('MIN_APP_VERSION') ?? '1.0',
-    };
+    return this.systemConfigService.getPublicConfig();
   }
 
-  //OBTENER DATOS PARA EL PERFIL
   @UseGuards(JwtAuthGuard)
   @Get('profile')
   async getProfile(@CurrentUser() user: JwtUser) {
@@ -54,48 +50,43 @@ export class UsersController {
     return new UserEntity(found);
   }
 
-  //HISTORIAL DE GASTOS
   @UseGuards(JwtAuthGuard)
   @Get('expense-history')
   async getExpenseHistory(@CurrentUser() user: JwtUser) {
-
     try {
       const expenseHistory = await this.usersService.findUserExpenseHistory(user.userId);
 
       return {
         success: true,
-        data: expenseHistory
-      }
+        data: expenseHistory,
+      };
     } catch (error) {
       return {
         success: false,
         message: error.message || 'Error al obtener el historial de gastos',
-        data: []
-      }
+        data: [],
+      };
     }
   }
 
-  //OBTENER TODOS LOS METODOS DE PAGO
   @UseGuards(JwtAuthGuard)
   @Get('payment-methods')
   async getMethods() {
     return await this.usersService.findAllActive();
   }
 
-  //OBTENER DATOS USER, USERPROFILE Y WALLET  
   @UseGuards(JwtAuthGuard)
   @Get('my/profile')
   async getMyProfileData(@CurrentUser() user: JwtUser) {
-    const profile = await this.usersService.getUserFullProfile(user.userId)
+    const profile = await this.usersService.getUserFullProfile(user.userId);
 
     return new UserEntity(profile);
   }
 
-  //OBTENER LA WALLET DEL USER, ANFITRIONA Y ADMIN
   @UseGuards(JwtAuthGuard)
-  @Get('wallet') //Ruta insegura: GET /users/wallet/:id -> Cualquiera con el ID de otro usuario podría ver cuánto dinero tiene (si no pones validaciones extra).
+  @Get('wallet')
   async getMyWallet(@CurrentUser() user: JwtUser) {
-    const wallet = await this.usersService.findWalletByUserId(user.userId)
+    const wallet = await this.usersService.findWalletByUserId(user.userId);
 
     if (!wallet) {
       throw new NotFoundException('billetera no encontrada');
@@ -107,18 +98,10 @@ export class UsersController {
       promotionalBalance: Number(wallet.promotionalBalance ?? 0),
       realBalance: Number(wallet.balance) - Number(wallet.promotionalBalance ?? 0),
       userId: wallet.userId,
-      updatedAt: wallet.updatedAt
-    }
+      updatedAt: wallet.updatedAt,
+    };
   }
 
-  // ACTUALIZAR FCM TOKEN
-  //sirve para que el backend tenga el token actualizado y pueda enviar notificaciones
-  //push al dispositivo del usuario.
-  //El token lo genera Firebase automáticamente en el dispositivo (celular) cuando la app se
-  //instala o abre por primera vez. Si el token cambia (ej: reinstalación de la app, cambio de dispositivo),
-  //el cliente debe llamar a esta ruta para actualizarlo en el backend.
-  //De lo contrario, las notificaciones push podrían no llegar al usuario porque el backend 
-  //estaría usando un token obsoleto.
   @UseGuards(JwtAuthGuard)
   @Patch('fcm-token')
   async updateFcmToken(
@@ -147,7 +130,7 @@ export class UsersController {
     });
     return {
       success: true,
-      message: 'Número de teléfono actualizado correctamente',
+      message: 'Numero de telefono actualizado correctamente',
       phoneNumber: updated.phoneNumber,
     };
   }
@@ -160,20 +143,18 @@ export class UsersController {
   ) {
     const dbUser = await this.usersService.findOneById(user.userId);
     if (!dbUser?.password) {
-      throw new BadRequestException('No tienes contraseña configurada');
+      throw new BadRequestException('No tienes contrasena configurada');
     }
 
     const isValid = await bcrypt.compare(body.oldPassword, dbUser.password);
     if (!isValid) {
-      throw new BadRequestException('Contraseña actual incorrecta');
+      throw new BadRequestException('Contrasena actual incorrecta');
     }
 
     await this.usersService.update(user.userId, {
       password: await bcrypt.hash(body.newPassword, 10),
     });
 
-    return { success: true, message: 'Contraseña actualizada correctamente' };
+    return { success: true, message: 'Contrasena actualizada correctamente' };
   }
-
-
 }

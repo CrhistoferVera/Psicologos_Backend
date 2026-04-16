@@ -10,6 +10,7 @@ model User {
   id                          String                    @id @default(uuid())
   phoneNumber                 String                    @unique
   email                       String?                   @unique
+  referralCode                String?                   @unique
   password                    String?
   firstName                   String?
   lastName                    String?
@@ -33,6 +34,8 @@ model User {
   professionalSpecialties     ProfessionalSpecialty[]
   promotionalCreditsGranted   PromotionalCreditGrant[]  @relation("PromotionalCreditsGrantedBy")
   promotionalCreditsReceived  PromotionalCreditGrant[]  @relation("PromotionalCreditsReceivedBy")
+  referralsSent               Referral[]                @relation("ReferralReferrer")
+  referralAsReferred          Referral?                 @relation("ReferralReferred")
 
   @@map("users")
 }
@@ -155,6 +158,7 @@ model DepositRequest {
   package             Package?        @relation(fields: [packageId], references: [id])
   paymentMethod       PaymentMethod?  @relation(fields: [paymentMethodId], references: [id])
   transaction         Transaction?
+  qualifyingReferral  Referral?
 
   @@map("deposit_requests")
 }
@@ -179,20 +183,21 @@ model PaymentMethod {
 }
 
 model Transaction {
-  id                    String                  @id @default(uuid())
-  walletId              String
-  depositRequestId      String?                 @unique
-  type                  TransactionType
-  amount                Decimal                 @db.Decimal(10, 2)
-  promotionalAmount     Decimal                 @default(0.00) @db.Decimal(10, 2)
-  realAmount            Decimal                 @default(0.00) @db.Decimal(10, 2)
-  isPromotional         Boolean                 @default(false)
-  description           String?
-  createdAt             DateTime                @default(now())
+  id                     String                  @id @default(uuid())
+  walletId               String
+  depositRequestId       String?                 @unique
+  type                   TransactionType
+  amount                 Decimal                 @db.Decimal(10, 2)
+  promotionalAmount      Decimal                 @default(0.00) @db.Decimal(10, 2)
+  realAmount             Decimal                 @default(0.00) @db.Decimal(10, 2)
+  isPromotional          Boolean                 @default(false)
+  description            String?
+  createdAt              DateTime                @default(now())
 
-  wallet                Wallet                  @relation(fields: [walletId], references: [id], onDelete: Cascade)
-  depositRequest        DepositRequest?         @relation(fields: [depositRequestId], references: [id])
+  wallet                 Wallet                  @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  depositRequest         DepositRequest?         @relation(fields: [depositRequestId], references: [id])
   promotionalCreditGrant PromotionalCreditGrant?
+  referralReward         Referral?
 
   @@index([walletId, createdAt])
   @@index([type, createdAt])
@@ -309,6 +314,46 @@ model PromotionalCreditGrant {
   @@map("promotional_credit_grants")
 }
 
+model Referral {
+  id                       String          @id @default(uuid())
+  referrerUserId           String
+  referredUserId           String          @unique
+  codeUsed                 String
+  status                   ReferralStatus  @default(PENDING)
+  referredDepositRequestId String?         @unique
+  rewardTransactionId      String?         @unique
+  rewardCredits            Decimal         @default(0.00) @db.Decimal(10, 2)
+  qualifiedAt              DateTime?
+  rewardedAt               DateTime?
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+
+  referrer                 User            @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  referred                 User            @relation("ReferralReferred", fields: [referredUserId], references: [id], onDelete: Cascade)
+  referredDepositRequest   DepositRequest? @relation(fields: [referredDepositRequestId], references: [id], onDelete: SetNull)
+  rewardTransaction        Transaction?    @relation(fields: [rewardTransactionId], references: [id], onDelete: SetNull)
+
+  @@index([referrerUserId])
+  @@index([status, createdAt])
+  @@map("referrals")
+}
+
+model SystemConfig {
+  id                       String   @id @default("global")
+  platformFeePercent       Decimal  @default(50.00) @db.Decimal(5, 2)
+  creditToSolesRate        Decimal  @default(1.00) @db.Decimal(10, 2)
+  minAppVersion            String   @default("1.0")
+  referralRewardCredits    Decimal  @default(10.00) @db.Decimal(10, 2)
+  referralMinDepositAmount Decimal  @default(0.00) @db.Decimal(10, 2)
+  referralEnabled          Boolean  @default(true)
+  paymentsEnabled          Boolean  @default(true)
+  withdrawalsEnabled       Boolean  @default(true)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@map("system_config")
+}
+
 enum TransactionType {
   DEPOSIT
   WITHDRAWAL
@@ -316,6 +361,7 @@ enum TransactionType {
   CALL_PAYMENT
   EARNING
   PROMOTIONAL_GRANT
+  REFERRAL_REWARD
 }
 
 enum ServiceType {
@@ -345,4 +391,10 @@ enum WithdrawalStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+enum ReferralStatus {
+  PENDING
+  QUALIFIED
+  REWARDED
 }

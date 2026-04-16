@@ -5,6 +5,7 @@ export class UserEntity implements User {
   id: string;
   phoneNumber: string;
   email: string | null;
+  referralCode: string | null;
   firstName: string | null;
   lastName: string | null;
   isProfileComplete: boolean;
@@ -34,3 +35,4 @@ export class UserEntity implements User {
     Object.assign(this, partial);
   }
 }
+

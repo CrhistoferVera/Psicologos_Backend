@@ -61,6 +61,7 @@ export class AdminProfessionalsService {
         wallet: {
           select: {
             balance: true,
+            promotionalBalance: true,
           },
         },
       },
@@ -97,7 +98,7 @@ export class AdminProfessionalsService {
         phoneNumber: true,
         isActive: true,
         createdAt: true,
-        wallet: { select: { balance: true } },
+        wallet: { select: { balance: true, promotionalBalance: true } },
         anfitrionaProfile: {
           select: {
             username: true,
@@ -184,6 +185,8 @@ export class AdminProfessionalsService {
         credits: Number(r.credits),
         soles: Number(r.soles),
         status: r.status,
+        notes: r.notes,
+        rejectionReason: r.rejectionReason,
         bankName: r.bankAccount.bank.name,
         accountNumber: r.bankAccount.accountNumber,
         professional: r.wallet.user,
@@ -295,6 +298,10 @@ export class AdminProfessionalsService {
         credits: Number(r.credits),
         soles: Number(r.soles),
         status: r.status,
+        notes: r.notes,
+        rejectionReason: r.rejectionReason,
+        receiptUrl: r.receiptUrl,
+        receiptPublicId: r.receiptPublicId,
         bankName: r.bankAccount.bank.name,
         accountNumber: r.bankAccount.accountNumber,
         professional: r.wallet.user,

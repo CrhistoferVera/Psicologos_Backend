@@ -5,6 +5,8 @@ import {
   Param,
   Patch,
   Post,
+  Put,
+  Query,
   UploadedFile,
   UploadedFiles,
   UseGuards,
@@ -22,12 +24,17 @@ import { ProfessionalsService } from './anfitrionas.service';
 import { CreateAnfitrioneDto } from './dto/create-anfitriona.dto';
 import { UpdateAnfitrioneProfileDto } from './dto/update-anfitriona-profile.dto';
 import { PROFESSIONAL_ROLE } from '../common/professional-role';
+import { SpecialtyService } from '../admin/specialty/specialty.service';
+import { AssignProfessionalSpecialtiesDto } from '../admin/specialty/dto/assign-professional-specialties.dto';
 
 @ApiTags('Professionals - Private')
 @Controller(['professionals', 'anfitrionas'])
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ProfessionalsController {
-  constructor(private readonly service: ProfessionalsService) {}
+  constructor(
+    private readonly service: ProfessionalsService,
+    private readonly specialtyService: SpecialtyService,
+  ) {}
 
   @Post()
   @Roles(UserRole.ADMIN)
@@ -75,6 +82,29 @@ export class ProfessionalsController {
       files?.avatar?.[0],
       files?.cover?.[0],
     );
+  }
+
+  @Get('me/specialties/catalog')
+  @Roles(PROFESSIONAL_ROLE)
+  getSpecialtyCatalog(@Query('search') search?: string) {
+    return this.specialtyService.findAll(false, search);
+  }
+
+  @Get('me/specialties')
+  @Roles(PROFESSIONAL_ROLE)
+  getMySpecialties(@Request() req) {
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.specialtyService.getProfessionalSpecialties(userId);
+  }
+
+  @Put('me/specialties')
+  @Roles(PROFESSIONAL_ROLE)
+  updateMySpecialties(
+    @Request() req,
+    @Body() dto: AssignProfessionalSpecialtiesDto,
+  ) {
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.specialtyService.assignToProfessional(userId, dto);
   }
 
   @Get(':id')

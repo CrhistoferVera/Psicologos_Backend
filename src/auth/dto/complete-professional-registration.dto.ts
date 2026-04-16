@@ -53,4 +53,9 @@ export class CompleteProfessionalRegistrationDto {
   @IsString()
   @IsNotEmpty()
   cedula: string;
+
+  @ApiProperty({ example: 'SALUDAB12', required: false })
+  @IsOptional()
+  @IsString()
+  referralCode?: string;
 }

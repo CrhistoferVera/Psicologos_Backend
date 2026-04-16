@@ -1,17 +1,26 @@
 import { Injectable } from '@nestjs/common';
-import { DepositStatus, UserRole, WithdrawalStatus } from '@prisma/client';
+import { DepositStatus, ReferralStatus, TransactionType, UserRole, WithdrawalStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PROFESSIONAL_ROLE } from '../../common/professional-role';
+import { SystemConfigService } from '../../system-config/system-config.service';
 
 @Injectable()
 export class StatsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly systemConfigService: SystemConfigService,
+  ) {}
+
+  private decimal(value: unknown): number {
+    return Number(value ?? 0);
+  }
 
   async getProfessionalStats(userId: string) {
-    const CREDIT_TO_SOLES = Number(process.env.CREDIT_TO_SOLES_RATE ?? 1);
-
     const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
     if (!wallet) return null;
+
+    const runtimeConfig = await this.systemConfigService.getRuntimeConfig();
+    const creditToSoles = runtimeConfig.creditToSolesRate;
 
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -42,12 +51,12 @@ export class StatsService {
       }),
     ]);
 
-    const toSoles = (credits: number) => +(credits * CREDIT_TO_SOLES).toFixed(2);
+    const toSoles = (credits: number) => +(credits * creditToSoles).toFixed(2);
 
-    const totalCredits = Number(totalEarnings._sum.amount ?? 0);
-    const todayCredits = Number(todayEarnings._sum.amount ?? 0);
-    const monthCredits = Number(monthEarnings._sum.amount ?? 0);
-    const balanceCredits = Number(wallet.balance);
+    const totalCredits = this.decimal(totalEarnings._sum.amount);
+    const todayCredits = this.decimal(todayEarnings._sum.amount);
+    const monthCredits = this.decimal(monthEarnings._sum.amount);
+    const balanceCredits = this.decimal(wallet.balance);
 
     return {
       balance: {
@@ -62,47 +71,13 @@ export class StatsService {
     };
   }
 
-  // Compatibilidad temporal.
   async getAnfitrionaStats(userId: string) {
     return this.getProfessionalStats(userId);
   }
 
   async getStats() {
-    const adminUserId = process.env.ADMIN_USER_ID;
-
-    const adminWallet = await this.prisma.wallet.findUnique({
-      where: { userId: adminUserId },
-    });
-
-    let totalRevenue = 0;
-    if (adminWallet) {
-      // TODO(finance-ledger): reemplazar este calculo por ledger contable definitivo.
-      // Mantener exclusion de transacciones promocionales/no contables.
-      const [newRevenue, legacyRevenue] = await Promise.all([
-        this.prisma.transaction.aggregate({
-          where: {
-            walletId: adminWallet.id,
-            type: 'EARNING',
-            isPromotional: false,
-            realAmount: { gt: 0 },
-          },
-          _sum: { realAmount: true },
-        }),
-        this.prisma.transaction.aggregate({
-          where: {
-            walletId: adminWallet.id,
-            type: 'EARNING',
-            isPromotional: false,
-            realAmount: 0,
-          },
-          _sum: { amount: true },
-        }),
-      ]);
-
-      totalRevenue =
-        Number(newRevenue._sum.realAmount ?? 0) +
-        Number(legacyRevenue._sum.amount ?? 0);
-    }
+    const startOfToday = new Date(new Date().setHours(0, 0, 0, 0));
+    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
     const [
       totalClients,
@@ -114,6 +89,20 @@ export class StatsService {
       pendingWithdrawals,
       totalMessages,
       newClientsThisMonth,
+      depositReal,
+      depositLegacy,
+      promoGrants,
+      referralRewardsTx,
+      promoConsumed,
+      platformEarningReal,
+      platformEarningLegacy,
+      professionalEarningReal,
+      professionalEarningLegacy,
+      referralsTotal,
+      referralsPending,
+      referralsQualified,
+      referralsRewarded,
+      referralRewardsSum,
     ] = await Promise.all([
       this.prisma.user.count({ where: { role: UserRole.USER } }),
       this.prisma.user.count({ where: { role: UserRole.USER, isActive: true } }),
@@ -123,7 +112,7 @@ export class StatsService {
       this.prisma.depositRequest.count({
         where: {
           status: DepositStatus.APPROVED,
-          updatedAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+          updatedAt: { gte: startOfToday },
         },
       }),
       this.prisma.withdrawalRequest.count({ where: { status: WithdrawalStatus.PENDING } }),
@@ -131,12 +120,85 @@ export class StatsService {
       this.prisma.user.count({
         where: {
           role: UserRole.USER,
-          createdAt: {
-            gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-          },
+          createdAt: { gte: startOfMonth },
         },
       }),
+      this.prisma.transaction.aggregate({
+        where: { type: TransactionType.DEPOSIT, isPromotional: false, realAmount: { gt: 0 } },
+        _sum: { realAmount: true },
+      }),
+      this.prisma.transaction.aggregate({
+        where: { type: TransactionType.DEPOSIT, isPromotional: false, realAmount: 0 },
+        _sum: { amount: true },
+      }),
+      this.prisma.transaction.aggregate({
+        where: { type: TransactionType.PROMOTIONAL_GRANT },
+        _sum: { amount: true },
+      }),
+      this.prisma.transaction.aggregate({
+        where: { type: TransactionType.REFERRAL_REWARD },
+        _sum: { amount: true },
+      }),
+      this.prisma.transaction.aggregate({
+        where: {
+          type: { in: [TransactionType.MESSAGE_SEND, TransactionType.CALL_PAYMENT] },
+          promotionalAmount: { gt: 0 },
+        },
+        _sum: { promotionalAmount: true },
+      }),
+      this.prisma.transaction.aggregate({
+        where: {
+          type: TransactionType.EARNING,
+          isPromotional: false,
+          wallet: { user: { role: UserRole.ADMIN } },
+          realAmount: { gt: 0 },
+        },
+        _sum: { realAmount: true },
+      }),
+      this.prisma.transaction.aggregate({
+        where: {
+          type: TransactionType.EARNING,
+          isPromotional: false,
+          wallet: { user: { role: UserRole.ADMIN } },
+          realAmount: 0,
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.transaction.aggregate({
+        where: {
+          type: TransactionType.EARNING,
+          isPromotional: false,
+          wallet: { user: { role: PROFESSIONAL_ROLE } },
+          realAmount: { gt: 0 },
+        },
+        _sum: { realAmount: true },
+      }),
+      this.prisma.transaction.aggregate({
+        where: {
+          type: TransactionType.EARNING,
+          isPromotional: false,
+          wallet: { user: { role: PROFESSIONAL_ROLE } },
+          realAmount: 0,
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.referral.count(),
+      this.prisma.referral.count({ where: { status: ReferralStatus.PENDING } }),
+      this.prisma.referral.count({ where: { status: ReferralStatus.QUALIFIED } }),
+      this.prisma.referral.count({ where: { status: ReferralStatus.REWARDED } }),
+      this.prisma.referral.aggregate({
+        where: { status: ReferralStatus.REWARDED },
+        _sum: { rewardCredits: true },
+      }),
     ]);
+
+    const grossRealRevenue = this.decimal(depositReal._sum.realAmount) + this.decimal(depositLegacy._sum.amount);
+    const platformEarnings = this.decimal(platformEarningReal._sum.realAmount) + this.decimal(platformEarningLegacy._sum.amount);
+    const professionalPaid =
+      this.decimal(professionalEarningReal._sum.realAmount) + this.decimal(professionalEarningLegacy._sum.amount);
+
+    const promotionalGranted = this.decimal(promoGrants._sum.amount) + this.decimal(referralRewardsTx._sum.amount);
+    const promotionalConsumed = this.decimal(promoConsumed._sum.promotionalAmount);
 
     return {
       clients: {
@@ -150,7 +212,6 @@ export class StatsService {
         active: activeProfessionals,
         inactive: totalProfessionals - activeProfessionals,
       },
-      // Compatibilidad temporal para frontend legacy.
       anfitrionas: {
         total: totalProfessionals,
         active: activeProfessionals,
@@ -159,7 +220,7 @@ export class StatsService {
       deposits: {
         pending: pendingDeposits,
         approvedToday: approvedDepositsToday,
-        totalRevenue,
+        totalRevenue: grossRealRevenue,
       },
       withdrawals: {
         pending: pendingWithdrawals,
@@ -168,6 +229,21 @@ export class StatsService {
         messages: totalMessages,
         messageUnlocks: 0,
         imageUnlocks: 0,
+      },
+      finance: {
+        grossRealRevenue,
+        platformEarnings,
+        professionalPaid,
+        promotionalGranted,
+        promotionalConsumed,
+        referralRewards: this.decimal(referralRewardsSum._sum.rewardCredits),
+      },
+      referrals: {
+        total: referralsTotal,
+        pending: referralsPending,
+        qualified: referralsQualified,
+        rewarded: referralsRewarded,
+        totalRewardCredits: this.decimal(referralRewardsSum._sum.rewardCredits),
       },
     };
   }

@@ -1,18 +1,18 @@
-﻿import {
+import {
   BadRequestException,
   ConflictException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
-import { UserEntity } from '../users/entities/user.entity';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
+import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
 import { User } from '@prisma/client';
+import { UsersService } from '../users/users.service';
+import { UserEntity } from '../users/entities/user.entity';
 import { CompleteRegistrationDto } from './dto/complete-registration.dto';
 import { CompleteProfessionalRegistrationDto } from './dto/complete-professional-registration.dto';
 import { CompleteAnfitrioneRegistrationDto } from './dto/complete-anfitrione-registration.dto';
@@ -22,38 +22,39 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { PROFESSIONAL_ROLE } from '../common/professional-role';
+import { ReferralsService } from '../referrals/referrals.service';
+import { createUniqueReferralCode } from '../referrals/utils/referral-code.util';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private usersService: UsersService,
-    private jwtService: JwtService,
-    @Inject(CACHE_MANAGER) private cacheManager: Cache,
-    private whatsappService: WhatsappService,
-    private mailService: MailService,
-    private prisma: PrismaService,
-    private cloudinary: CloudinaryService,
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    private readonly whatsappService: WhatsappService,
+    private readonly mailService: MailService,
+    private readonly prisma: PrismaService,
+    private readonly cloudinary: CloudinaryService,
+    private readonly referralsService: ReferralsService,
   ) {}
-
-  // â”€â”€â”€ OTP FLOW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async sendOtp(phoneNumber: string) {
     const code = randomInt(0, 1000000).toString().padStart(6, '0');
-    await this.cacheManager.set(`otp_${phoneNumber}`, code, 300000); // 5 min
+    await this.cacheManager.set(`otp_${phoneNumber}`, code, 300000);
 
     await this.whatsappService.sendText(
       phoneNumber,
-      `Tu cÃ³digo de verificaciÃ³n de Pachamama es: *${code}*\nExpira en 5 minutos.`,
+      `Tu codigo de verificacion es: *${code}*\nExpira en 5 minutos.`,
     );
 
-    return { message: 'CÃ³digo OTP enviado por WhatsApp. Expira en 5 minutos.' };
+    return { message: 'Codigo OTP enviado por WhatsApp. Expira en 5 minutos.' };
   }
 
   async verifyOtp(phoneNumber: string, code: string) {
     const cached = await this.cacheManager.get<string>(`otp_${phoneNumber}`);
 
     if (!cached || cached !== code) {
-      throw new BadRequestException('CÃ³digo OTP invÃ¡lido o expirado');
+      throw new BadRequestException('Codigo OTP invalido o expirado');
     }
 
     await this.cacheManager.del(`otp_${phoneNumber}`);
@@ -61,12 +62,10 @@ export class AuthService {
     const user = await this.usersService.findOneByPhone(phoneNumber);
 
     if (user) {
-      // Usuario existente â†’ retornar JWT
       const { password: _, ...userWithoutPass } = user;
       return this.generateTokenResponse(userWithoutPass);
     }
 
-    // Usuario nuevo â†’ retornar token temporal para completar el registro
     const tempToken = this.jwtService.sign(
       { sub: phoneNumber, type: 'phone_verified' },
       { expiresIn: '10m' },
@@ -76,30 +75,30 @@ export class AuthService {
   }
 
   async completeRegistration(dto: CompleteRegistrationDto) {
-    // Validar token temporal
     let payload: { sub: string; type: string };
     try {
       payload = this.jwtService.verify(dto.tempToken);
     } catch {
-      throw new BadRequestException('Token invÃ¡lido o expirado');
+      throw new BadRequestException('Token invalido o expirado');
     }
 
     if (payload.type !== 'phone_verified') {
-      throw new BadRequestException('Token invÃ¡lido');
+      throw new BadRequestException('Token invalido');
     }
 
     if (dto.password !== dto.confirmPassword) {
-      throw new BadRequestException('Las contraseÃ±as no coinciden');
+      throw new BadRequestException('Las contrasenas no coinciden');
     }
 
     const email = dto.email?.trim().toLowerCase();
-    if (!email) {
-      throw new BadRequestException('El email es obligatorio');
-    }
+    if (!email) throw new BadRequestException('El email es obligatorio');
 
     const existing = await this.usersService.findOneByEmail(email);
-    if (existing) {
-      throw new ConflictException('El email ya estÃ¡ registrado');
+    if (existing) throw new ConflictException('El email ya esta registrado');
+
+    const requestedReferralCode = dto.referralCode?.trim();
+    if (requestedReferralCode) {
+      await this.referralsService.resolveReferrerByCode(requestedReferralCode);
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -113,6 +112,10 @@ export class AuthService {
       isProfileComplete: true,
     });
 
+    if (requestedReferralCode) {
+      await this.referralsService.createReferralLink(newUser.id, requestedReferralCode);
+    }
+
     const { password: _, ...userWithoutPass } = newUser;
     return this.generateTokenResponse(userWithoutPass);
   }
@@ -121,36 +124,39 @@ export class AuthService {
     dto: CompleteProfessionalRegistrationDto | CompleteAnfitrioneRegistrationDto,
     idDocFile?: Express.Multer.File,
   ) {
-    // 1. Validar token temporal
     let payload: { sub: string; type: string };
     try {
       payload = this.jwtService.verify(dto.tempToken);
     } catch {
-      throw new BadRequestException('Token invÃ¡lido o expirado');
+      throw new BadRequestException('Token invalido o expirado');
     }
 
     if (payload.type !== 'phone_verified') {
-      throw new BadRequestException('Token invÃ¡lido');
+      throw new BadRequestException('Token invalido');
     }
 
     if (dto.password !== dto.confirmPassword) {
-      throw new BadRequestException('Las contraseÃ±as no coinciden');
+      throw new BadRequestException('Las contrasenas no coinciden');
     }
 
-    // 2. Verificar unicidad
     const [existingCedula, existingUsername, existingEmail] = await Promise.all([
       this.prisma.anfitrioneProfile.findUnique({ where: { cedula: dto.cedula } }),
       this.prisma.anfitrioneProfile.findUnique({ where: { username: dto.username } }),
       dto.email ? this.usersService.findOneByEmail(dto.email.trim().toLowerCase()) : null,
     ]);
 
-    if (existingCedula) throw new ConflictException('La cÃ©dula ya estÃ¡ registrada.');
-    if (existingUsername) throw new ConflictException('El nombre de usuario ya estÃ¡ en uso.');
-    if (existingEmail) throw new ConflictException('El email ya estÃ¡ registrado.');
+    if (existingCedula) throw new ConflictException('La cedula ya esta registrada.');
+    if (existingUsername) throw new ConflictException('El nombre de usuario ya esta en uso.');
+    if (existingEmail) throw new ConflictException('El email ya esta registrado.');
 
-    // 3. Crear usuario con rol ANFITRIONA
+    const requestedReferralCode = dto.referralCode?.trim();
+    if (requestedReferralCode) {
+      await this.referralsService.resolveReferrerByCode(requestedReferralCode);
+    }
+
     const hashedPassword = await bcrypt.hash(dto.password, 10);
     const email = dto.email?.trim().toLowerCase();
+    const referralCode = await createUniqueReferralCode(this.prisma, dto.firstName ?? dto.username);
 
     const newUser = await this.prisma.user.create({
       data: {
@@ -160,12 +166,12 @@ export class AuthService {
         lastName: dto.lastName,
         password: hashedPassword,
         role: PROFESSIONAL_ROLE,
+        referralCode,
         isProfileComplete: true,
-        wallet: { create: { balance: 0 } },
+        wallet: { create: { balance: 0, promotionalBalance: 0 } },
       },
     });
 
-    // 4. Subir DNI a Cloudinary si se proporcionÃ³
     let idDocUrl: string | null = null;
     let idDocPublicId: string | null = null;
 
@@ -178,7 +184,6 @@ export class AuthService {
       idDocPublicId = uploaded.publicId;
     }
 
-    // 5. Crear perfil de anfitriona
     const profile = await this.prisma.anfitrioneProfile.create({
       data: {
         userId: newUser.id,
@@ -190,6 +195,10 @@ export class AuthService {
       },
     });
 
+    if (requestedReferralCode) {
+      await this.referralsService.createReferralLink(newUser.id, requestedReferralCode);
+    }
+
     const { password: _, ...userWithoutPass } = newUser;
     return {
       ...this.generateTokenResponse(userWithoutPass),
@@ -197,12 +206,7 @@ export class AuthService {
     };
   }
 
-  // â”€â”€â”€ EMAIL/PASSWORD LOGIN (secundario) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-  async validateUser(
-    email: string,
-    pass: string,
-  ): Promise<Omit<User, 'password'> | null> {
+  async validateUser(email: string, pass: string): Promise<Omit<User, 'password'> | null> {
     const user = await this.usersService.findOneByEmail(email);
     if (user && user.password && (await bcrypt.compare(pass, user.password))) {
       const { password: _, ...result } = user;
@@ -215,19 +219,16 @@ export class AuthService {
     return this.generateTokenResponse(user);
   }
 
-  // â”€â”€â”€ FORGOT PASSWORD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
   async forgotPassword(email: string) {
     const normalizedEmail = email.trim().toLowerCase();
     const user = await this.usersService.findOneByEmail(normalizedEmail);
 
-    // Siempre respondemos igual para no revelar si el email existe
     if (!user || !user.email) {
-      return { message: 'Si el correo estÃ¡ registrado, recibirÃ¡s un cÃ³digo.' };
+      return { message: 'Si el correo esta registrado, recibiras un codigo.' };
     }
 
     const code = randomInt(0, 1000000).toString().padStart(6, '0');
-    await this.cacheManager.set(`reset_${normalizedEmail}`, code, 900000); // 15 min
+    await this.cacheManager.set(`reset_${normalizedEmail}`, code, 900000);
 
     await this.mailService.sendPasswordResetEmail(
       user.email,
@@ -235,7 +236,7 @@ export class AuthService {
       code,
     );
 
-    return { message: 'Si el correo estÃ¡ registrado, recibirÃ¡s un cÃ³digo.' };
+    return { message: 'Si el correo esta registrado, recibiras un codigo.' };
   }
 
   async resetPassword(dto: ResetPasswordDto) {
@@ -243,22 +244,18 @@ export class AuthService {
     const cached = await this.cacheManager.get<string>(`reset_${normalizedEmail}`);
 
     if (!cached || cached !== dto.code) {
-      throw new BadRequestException('CÃ³digo invÃ¡lido o expirado');
+      throw new BadRequestException('Codigo invalido o expirado');
     }
 
     const user = await this.usersService.findOneByEmail(normalizedEmail);
-    if (!user) {
-      throw new NotFoundException('Usuario no encontrado');
-    }
+    if (!user) throw new NotFoundException('Usuario no encontrado');
 
     const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
     await this.usersService.update(user.id, { password: hashedPassword });
     await this.cacheManager.del(`reset_${normalizedEmail}`);
 
-    return { message: 'ContraseÃ±a actualizada correctamente' };
+    return { message: 'Contrasena actualizada correctamente' };
   }
-
-  // â”€â”€â”€ HELPERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private generateTokenResponse(user: Omit<User, 'password'>) {
     this.usersService.updateLastLogin(user.id);
@@ -277,7 +274,3 @@ export class AuthService {
     };
   }
 }
-
-
-
-

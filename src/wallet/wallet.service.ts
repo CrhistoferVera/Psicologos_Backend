@@ -1,24 +1,24 @@
-﻿import {
+import {
   BadRequestException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 
 @Injectable()
 export class WalletService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
     private readonly notificationsService: NotificationsService,
+    private readonly systemConfigService: SystemConfigService,
   ) {}
 
   async getMyEarnings(userId: string) {
     const wallet = await this.prisma.wallet.upsert({
       where: { userId },
-      create: { userId, balance: 0 },
+      create: { userId, balance: 0, promotionalBalance: 0 },
       update: {},
     });
 
@@ -81,6 +81,7 @@ export class WalletService {
       transactions: parsedTransactions,
     };
   }
+
   async getBanks() {
     const banks = await this.prisma.banks.findMany({
       orderBy: { name: 'asc' },
@@ -160,6 +161,11 @@ export class WalletService {
       throw new BadRequestException('El monto debe ser mayor a 0');
     }
 
+    const withdrawalsEnabled = await this.systemConfigService.isWithdrawalsEnabled();
+    if (!withdrawalsEnabled) {
+      throw new BadRequestException('Los retiros se encuentran temporalmente deshabilitados.');
+    }
+
     const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
     if (!wallet) {
       throw new NotFoundException('Wallet no encontrada');
@@ -176,25 +182,25 @@ export class WalletService {
       throw new NotFoundException('Cuenta bancaria no encontrada');
     }
 
-    const RATE = Number(this.config.get<string>('CREDIT_TO_SOLES_RATE') ?? '0.90');
+    const RATE = await this.systemConfigService.getCreditToSolesRate();
     const soles = dto.credits * RATE;
 
     const [, , request] = await this.prisma.$transaction([
-      // Descontar crÃ©ditos de la wallet
       this.prisma.wallet.update({
         where: { id: wallet.id },
         data: { balance: { decrement: dto.credits } },
       }),
-      // Registrar transacciÃ³n de retiro
       this.prisma.transaction.create({
         data: {
           walletId: wallet.id,
           type: 'WITHDRAWAL',
           amount: dto.credits,
+          isPromotional: false,
+          promotionalAmount: 0,
+          realAmount: dto.credits,
           description: JSON.stringify({ reason: 'Solicitud de retiro' }),
         },
       }),
-      // Crear la solicitud
       this.prisma.withdrawalRequest.create({
         data: {
           walletId: wallet.id,
@@ -211,7 +217,6 @@ export class WalletService {
       include: { bankAccount: { include: { bank: true } } },
     });
 
-    // Notificar a todos los admins
     const [professional, admins] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: userId },
@@ -224,13 +229,13 @@ export class WalletService {
     ]);
 
     const professionalName = [professional?.firstName, professional?.lastName].filter(Boolean).join(' ') || 'Un profesional';
-    const adminTokens = admins.map(a => a.fcmToken!);
+    const adminTokens = admins.map((a) => a.fcmToken!);
 
     this.notificationsService.sendMulticastNotification(
       adminTokens,
-      'ðŸ’¸ Nueva solicitud de retiro',
-      `${professionalName} solicitÃ³ un retiro de ${dto.credits} crÃ©ditos (S/ ${soles.toFixed(2)})`,
-      { withdrawalRequestId: (request as any).id, type: 'NEW_WITHDRAWAL_REQUEST' }
+      'Nueva solicitud de retiro',
+      `${professionalName} solicito un retiro de ${dto.credits} creditos (S/ ${soles.toFixed(2)})`,
+      { withdrawalRequestId: (request as any).id, type: 'NEW_WITHDRAWAL_REQUEST' },
     );
 
     return {
@@ -259,11 +264,13 @@ export class WalletService {
       credits: Number(r.credits),
       soles: Number(r.soles),
       status: r.status,
+      notes: r.notes,
+      rejectionReason: r.rejectionReason,
+      receiptUrl: r.receiptUrl,
       bankName: r.bankAccount.bank.name,
       accountNumber: r.bankAccount.accountNumber,
       createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
     }));
   }
 }
-
-
