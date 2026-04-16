@@ -1,4 +1,4 @@
-﻿import { Body, Controller, Get, Param, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Put, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ServicePricesService } from './service-prices.service';
@@ -9,7 +9,6 @@ interface JwtUser {
   role: string;
 }
 
-@UseGuards(JwtAuthGuard)
 @Controller('service-prices')
 export class ServicePricesController {
   constructor(private readonly servicePricesService: ServicePricesService) {}
@@ -22,12 +21,14 @@ export class ServicePricesController {
 
   // GET /service-prices - profesional consulta sus precios
   @Get()
+  @UseGuards(JwtAuthGuard)
   getMyPrices(@CurrentUser() user: JwtUser) {
     return this.servicePricesService.getMyPrices(user.userId);
   }
 
   // PUT /service-prices - profesional crea o actualiza un precio
   @Put()
+  @UseGuards(JwtAuthGuard)
   upsertPrice(@CurrentUser() user: JwtUser, @Body() dto: UpsertServicePriceDto) {
     return this.servicePricesService.upsertPrice(user.userId, dto);
   }

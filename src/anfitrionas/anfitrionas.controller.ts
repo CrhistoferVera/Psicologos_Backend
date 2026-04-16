@@ -1,4 +1,4 @@
-import {
+﻿import {
   Body,
   Controller,
   Get,
@@ -28,7 +28,7 @@ import { SpecialtyService } from '../admin/specialty/specialty.service';
 import { AssignProfessionalSpecialtiesDto } from '../admin/specialty/dto/assign-professional-specialties.dto';
 
 @ApiTags('Professionals - Private')
-@Controller(['professionals', 'anfitrionas'])
+@Controller('professionals')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ProfessionalsController {
   constructor(
@@ -57,6 +57,13 @@ export class ProfessionalsController {
   getMyProfile(@Request() req) {
     const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
     return this.service.getMyProfile(userId);
+  }
+
+  @Get('me/review-status')
+  @Roles(PROFESSIONAL_ROLE)
+  getMyReviewStatus(@Request() req) {
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.service.getMyReviewStatus(userId);
   }
 
   @Patch('me/profile')
@@ -113,3 +120,4 @@ export class ProfessionalsController {
     return this.service.findOne(id);
   }
 }
+

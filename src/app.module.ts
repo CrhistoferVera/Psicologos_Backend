@@ -23,6 +23,7 @@ import { SpecialtyModule } from './admin/specialty/specialty.module';
 import { SystemConfigModule } from './system-config/system-config.module';
 import { AdminConfigModule } from './admin/config/admin-config.module';
 import { ReferralsModule } from './referrals/referrals.module';
+import { FlowModule } from './flow/flow.module';
 
 @Module({
   imports: [
@@ -53,8 +54,10 @@ import { ReferralsModule } from './referrals/referrals.module';
     PromotionalCreditsModule,
     SpecialtyModule,
     ReferralsModule,
+    FlowModule,
   ],
   controllers: [],
   providers: [],
 })
 export class AppModule {}
+

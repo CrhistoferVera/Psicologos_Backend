@@ -1,4 +1,4 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query, Request, UseGuards } from '@nestjs/common';
+﻿import { Controller, Get, Param, ParseUUIDPipe, Query, Request, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { ProfessionalsService } from './anfitrionas.service';
@@ -6,7 +6,7 @@ import { ProfessionalPublicListResponseDto } from './dto/professional-public-lis
 import { ProfessionalPublicDetailDto } from './dto/professional-public-detail.dto';
 
 @ApiTags('Professionals - Public')
-@Controller(['professionals/public', 'anfitrionas/public'])
+@Controller('professionals/public')
 export class PublicProfessionalsController {
   constructor(private readonly service: ProfessionalsService) {}
 
@@ -62,3 +62,4 @@ export class PublicProfessionalsController {
     return this.service.findOnePublic(id, currentUserId);
   }
 }
+

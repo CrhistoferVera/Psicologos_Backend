@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   ConflictException,
   Inject,
@@ -15,7 +15,6 @@ import { UsersService } from '../users/users.service';
 import { UserEntity } from '../users/entities/user.entity';
 import { CompleteRegistrationDto } from './dto/complete-registration.dto';
 import { CompleteProfessionalRegistrationDto } from './dto/complete-professional-registration.dto';
-import { CompleteAnfitrioneRegistrationDto } from './dto/complete-anfitrione-registration.dto';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -121,7 +120,7 @@ export class AuthService {
   }
 
   async completeProfessionalRegistration(
-    dto: CompleteProfessionalRegistrationDto | CompleteAnfitrioneRegistrationDto,
+    dto: CompleteProfessionalRegistrationDto,
     idDocFile?: Express.Multer.File,
   ) {
     let payload: { sub: string; type: string };
@@ -157,7 +156,6 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(dto.password, 10);
     const email = dto.email?.trim().toLowerCase();
     const referralCode = await createUniqueReferralCode(this.prisma, dto.firstName ?? dto.username);
-
     const newUser = await this.prisma.user.create({
       data: {
         phoneNumber: payload.sub,
@@ -168,10 +166,10 @@ export class AuthService {
         role: PROFESSIONAL_ROLE,
         referralCode,
         isProfileComplete: true,
+        isActive: false,
         wallet: { create: { balance: 0, promotionalBalance: 0 } },
       },
     });
-
     let idDocUrl: string | null = null;
     let idDocPublicId: string | null = null;
 
@@ -192,6 +190,7 @@ export class AuthService {
         username: dto.username,
         idDocUrl,
         idDocPublicId,
+        reviewStatus: 'PENDING',
       },
     });
 
@@ -274,3 +273,10 @@ export class AuthService {
     };
   }
 }
+
+
+
+
+
+
+

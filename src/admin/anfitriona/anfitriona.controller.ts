@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
+﻿import { Controller, Get, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { UpdateAnfitrionaDto, EditAnfitrionaDto } from './dto/update-anfitriona.dto';
 import { UpdateAnfitrionaProfileDto } from './dto/update-anfitriona-profile.dto';
@@ -9,7 +9,7 @@ import { UserRole } from '@prisma/client';
 import { AdminProfessionalsService } from './anfitriona.service';
 
 @ApiTags('Admin - Professionals')
-@Controller(['admin/professionals', 'admin/anfitrionas'])
+@Controller('admin/professionals')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
 export class AdminProfessionalsController {
@@ -94,3 +94,4 @@ export class AdminProfessionalsController {
     return this.professionalsService.updateProfile(id, dto);
   }
 }
+

@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { Prisma, WithdrawalStatus } from '@prisma/client';
+import { Prisma, WithdrawalStatus, ProfessionalReviewStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { UpdateAnfitrionaDto, EditAnfitrionaDto } from './dto/update-anfitriona.dto';
 import { UpdateAnfitrionaProfileDto } from './dto/update-anfitriona-profile.dto';
@@ -12,16 +12,49 @@ export class AdminProfessionalsService {
   async updateStatus(id: string, updateStatusDto: UpdateAnfitrionaDto) {
     const user = await this.prisma.user.findFirst({
       where: { id, role: PROFESSIONAL_ROLE },
+      select: {
+        id: true,
+        anfitrionaProfile: {
+          select: {
+            username: true,
+          },
+        },
+      },
     });
 
     if (!user) {
       throw new NotFoundException(`No se encontro un profesional con ID: ${id}`);
     }
 
-    return this.prisma.user.update({
-      where: { id },
-      data: { isActive: updateStatusDto.isActive },
-    });
+    const reviewStatus =
+      updateStatusDto.reviewStatus ??
+      (updateStatusDto.isActive ? ProfessionalReviewStatus.APPROVED : ProfessionalReviewStatus.REJECTED);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id },
+        data: { isActive: updateStatusDto.isActive },
+      }),
+      this.prisma.anfitrioneProfile.upsert({
+        where: { userId: id },
+        update: {
+          reviewStatus,
+          ...(updateStatusDto.reviewNotes !== undefined
+            ? { reviewNotes: updateStatusDto.reviewNotes }
+            : {}),
+        },
+        create: {
+          userId: id,
+          username: user.anfitrionaProfile?.username ?? `prof_${id.slice(0, 8)}`,
+          reviewStatus,
+          ...(updateStatusDto.reviewNotes !== undefined
+            ? { reviewNotes: updateStatusDto.reviewNotes }
+            : {}),
+        },
+      }),
+    ]);
+
+    return this.findOne(id);
   }
 
   async updateProfile(id: string, dto: UpdateAnfitrionaProfileDto) {
@@ -38,10 +71,15 @@ export class AdminProfessionalsService {
           ...(dto.lastName !== undefined && { lastName: dto.lastName }),
         },
       }),
-      this.prisma.anfitrioneProfile.update({
+      this.prisma.anfitrioneProfile.upsert({
         where: { userId: id },
-        data: {
+        update: {
           ...(dto.username !== undefined && { username: dto.username }),
+          ...(dto.bio !== undefined && { bio: dto.bio }),
+        },
+        create: {
+          userId: id,
+          username: dto.username ?? `prof_${id.slice(0, 8)}`,
           ...(dto.bio !== undefined && { bio: dto.bio }),
         },
       }),
@@ -62,6 +100,19 @@ export class AdminProfessionalsService {
           select: {
             balance: true,
             promotionalBalance: true,
+          },
+        },
+        anfitrionaProfile: {
+          select: {
+            username: true,
+            avatarUrl: true,
+            bio: true,
+            rateCredits: true,
+            isOnline: true,
+            idDocUrl: true,
+            reviewStatus: true,
+            reviewNotes: true,
+            availability: true,
           },
         },
       },
@@ -107,6 +158,8 @@ export class AdminProfessionalsService {
             rateCredits: true,
             isOnline: true,
             idDocUrl: true,
+            reviewStatus: true,
+            reviewNotes: true,
           },
         },
       },

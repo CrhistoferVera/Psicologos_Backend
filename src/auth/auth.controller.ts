@@ -15,7 +15,6 @@ import { LoginDto } from './dto/login.dto';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { CompleteRegistrationDto } from './dto/complete-registration.dto';
-import { CompleteAnfitrioneRegistrationDto } from './dto/complete-anfitrione-registration.dto';
 import { CompleteProfessionalRegistrationDto } from './dto/complete-professional-registration.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -50,18 +49,6 @@ export class AuthController {
   ) {
     return this.authService.completeProfessionalRegistration(dto, idDoc);
   }
-
-  // Compatibilidad temporal para cliente legacy.
-  @Post('complete-anfitrione-registration')
-  @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FileInterceptor('idDoc'))
-  async completeLegacyProfessionalRegistration(
-    @Body() dto: CompleteAnfitrioneRegistrationDto,
-    @UploadedFile() idDoc?: Express.Multer.File,
-  ) {
-    return this.authService.completeProfessionalRegistration(dto, idDoc);
-  }
-
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() loginDto: LoginDto) {
@@ -87,3 +74,4 @@ export class AuthController {
     return this.authService.resetPassword(dto);
   }
 }
+

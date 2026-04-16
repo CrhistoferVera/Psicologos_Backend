@@ -293,6 +293,7 @@ export class ProfessionalsService {
         id: true,
         firstName: true,
         lastName: true,
+        isActive: true,
         anfitrionaProfile: {
           select: {
             username: true,
@@ -301,6 +302,9 @@ export class ProfessionalsService {
             isOnline: true,
             avatarUrl: true,
             coverUrl: true,
+            reviewStatus: true,
+            reviewNotes: true,
+            availability: true,
           },
         },
       },
@@ -318,6 +322,37 @@ export class ProfessionalsService {
       isOnline: user.anfitrionaProfile?.isOnline ?? false,
       avatarUrl: user.anfitrionaProfile?.avatarUrl ?? null,
       coverUrl: user.anfitrionaProfile?.coverUrl ?? null,
+      reviewStatus: user.anfitrionaProfile?.reviewStatus ?? 'PENDING',
+      reviewNotes: user.anfitrionaProfile?.reviewNotes ?? null,
+      availability:
+        (user.anfitrionaProfile?.availability as Record<string, unknown> | null) ?? null,
+      isActive: user.isActive,
+    };
+  }
+
+  async getMyReviewStatus(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        isActive: true,
+        anfitrionaProfile: {
+          select: {
+            reviewStatus: true,
+            reviewNotes: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!user) throw new NotFoundException('Usuario no encontrado.');
+
+    return {
+      status: user.anfitrionaProfile?.reviewStatus ?? 'PENDING',
+      notes: user.anfitrionaProfile?.reviewNotes ?? null,
+      isActive: user.isActive,
+      updatedAt: user.anfitrionaProfile?.updatedAt ?? null,
     };
   }
 
@@ -363,6 +398,9 @@ export class ProfessionalsService {
       ...(profileFields.bio !== undefined && { bio: profileFields.bio }),
       ...(profileFields.rateCredits !== undefined && { rateCredits: profileFields.rateCredits }),
       ...(profileFields.isOnline !== undefined && { isOnline: profileFields.isOnline }),
+      ...(profileFields.availability !== undefined && {
+        availability: profileFields.availability as Prisma.InputJsonValue,
+      }),
       ...(avatarUpdate && {
         avatarUrl: avatarUpdate.avatarUrl,
         avatarPublicId: avatarUpdate.avatarPublicId,
@@ -386,6 +424,9 @@ export class ProfessionalsService {
       if (profileFields.bio !== undefined) createData.bio = profileFields.bio;
       if (profileFields.rateCredits !== undefined) createData.rateCredits = profileFields.rateCredits;
       if (profileFields.isOnline !== undefined) createData.isOnline = profileFields.isOnline;
+      if (profileFields.availability !== undefined) {
+        createData.availability = profileFields.availability as Prisma.InputJsonValue;
+      }
       if (avatarUpdate) {
         createData.avatarUrl = avatarUpdate.avatarUrl;
         createData.avatarPublicId = avatarUpdate.avatarPublicId;

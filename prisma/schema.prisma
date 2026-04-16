@@ -98,6 +98,9 @@ model AnfitrioneProfile {
   bio            String?
   rateCredits    Int?
   isOnline       Boolean           @default(false)
+  reviewStatus   ProfessionalReviewStatus @default(PENDING)
+  reviewNotes    String?
+  availability   Json?
   coverPublicId  String?
   coverUrl       String?
   createdAt      DateTime          @default(now())
@@ -398,3 +401,12 @@ enum ReferralStatus {
   QUALIFIED
   REWARDED
 }
+
+
+enum ProfessionalReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+

@@ -19,10 +19,11 @@ export class StatsController {
     return this.statsService.getStats();
   }
 
-  @Get(['professional/:id', 'anfitriona/:id'])
+  @Get('professional/:id')
   @ApiOperation({ summary: 'Obtener ganancias en creditos y soles de un profesional' })
   getProfessionalStats(@Param('id') id: string) {
     return this.statsService.getProfessionalStats(id);
   }
 }
+
 
