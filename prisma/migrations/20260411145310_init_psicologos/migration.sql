@@ -11,7 +11,7 @@ CREATE TYPE "PaymentType" AS ENUM ('QR', 'TRANSFERENCIA');
 CREATE TYPE "DepositStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
 
 -- CreateEnum
-CREATE TYPE "UserRole" AS ENUM ('USER', 'ADMIN', 'ANFITRIONA');
+CREATE TYPE "UserRole" AS ENUM ('USER', 'ADMIN', 'PROFESSIONAL', 'ANFITRIONA');
 
 -- CreateEnum
 CREATE TYPE "WithdrawalStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
@@ -75,7 +75,7 @@ CREATE TABLE "messages" (
 );
 
 -- CreateTable
-CREATE TABLE "anfitrione_profiles" (
+CREATE TABLE "professional_profiles" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "username" TEXT NOT NULL,
@@ -93,7 +93,7 @@ CREATE TABLE "anfitrione_profiles" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "anfitrione_profiles_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "professional_profiles_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -202,7 +202,7 @@ CREATE TABLE "bank_accounts" (
     "id" BIGSERIAL NOT NULL,
     "userId" TEXT NOT NULL,
     "bankId" INTEGER NOT NULL,
-    "anfitrionaProfileId" TEXT NOT NULL,
+    "professionalProfileId" TEXT NOT NULL,
     "accountNumber" VARCHAR(50) NOT NULL,
     "accountHolderName" VARCHAR(100),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -281,13 +281,13 @@ CREATE UNIQUE INDEX "conversations_user1Id_user2Id_key" ON "conversations"("user
 CREATE INDEX "messages_conversationId_createdAt_idx" ON "messages"("conversationId", "createdAt");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "anfitrione_profiles_userId_key" ON "anfitrione_profiles"("userId");
+CREATE UNIQUE INDEX "professional_profiles_userId_key" ON "professional_profiles"("userId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "anfitrione_profiles_username_key" ON "anfitrione_profiles"("username");
+CREATE UNIQUE INDEX "professional_profiles_username_key" ON "professional_profiles"("username");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "anfitrione_profiles_cedula_key" ON "anfitrione_profiles"("cedula");
+CREATE UNIQUE INDEX "professional_profiles_cedula_key" ON "professional_profiles"("cedula");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "wallets_userId_key" ON "wallets"("userId");
@@ -350,7 +350,7 @@ ALTER TABLE "messages" ADD CONSTRAINT "messages_conversationId_fkey" FOREIGN KEY
 ALTER TABLE "messages" ADD CONSTRAINT "messages_senderId_fkey" FOREIGN KEY ("senderId") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "anfitrione_profiles" ADD CONSTRAINT "anfitrione_profiles_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "professional_profiles" ADD CONSTRAINT "professional_profiles_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "wallets" ADD CONSTRAINT "wallets_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -371,13 +371,13 @@ ALTER TABLE "transactions" ADD CONSTRAINT "transactions_walletId_fkey" FOREIGN K
 ALTER TABLE "transactions" ADD CONSTRAINT "transactions_depositRequestId_fkey" FOREIGN KEY ("depositRequestId") REFERENCES "deposit_requests"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "service_prices" ADD CONSTRAINT "service_prices_profileId_fkey" FOREIGN KEY ("profileId") REFERENCES "anfitrione_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "service_prices" ADD CONSTRAINT "service_prices_profileId_fkey" FOREIGN KEY ("profileId") REFERENCES "professional_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "bank_accounts" ADD CONSTRAINT "bank_accounts_bankId_fkey" FOREIGN KEY ("bankId") REFERENCES "Banks"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "bank_accounts" ADD CONSTRAINT "bank_accounts_anfitrionaProfileId_fkey" FOREIGN KEY ("anfitrionaProfileId") REFERENCES "anfitrione_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "bank_accounts" ADD CONSTRAINT "bank_accounts_professionalProfileId_fkey" FOREIGN KEY ("professionalProfileId") REFERENCES "professional_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "withdrawal_requests" ADD CONSTRAINT "withdrawal_requests_walletId_fkey" FOREIGN KEY ("walletId") REFERENCES "wallets"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -399,3 +399,4 @@ ALTER TABLE "promotional_credit_grants" ADD CONSTRAINT "promotional_credit_grant
 
 -- AddForeignKey
 ALTER TABLE "promotional_credit_grants" ADD CONSTRAINT "promotional_credit_grants_transactionId_fkey" FOREIGN KEY ("transactionId") REFERENCES "transactions"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+

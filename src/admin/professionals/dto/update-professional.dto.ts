@@ -3,7 +3,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { ProfessionalReviewStatus } from '@prisma/client';
 
-export class UpdateAnfitrionaDto {
+export class UpdateProfessionalDto {
     @ApiProperty({
         example: true,
         description: 'Estado de cuenta de un usuario (true: Activo / false: Suspendido)',
@@ -24,7 +24,7 @@ export class UpdateAnfitrionaDto {
     reviewNotes?: string;
 }
 
-export class EditAnfitrionaDto {
+export class EditProfessionalDto {
     @ApiProperty({ example: '59171234567', description: 'Numero de telefono con codigo de pais', required: false })
     @IsOptional()
     @IsString()
@@ -52,3 +52,4 @@ export class EditAnfitrionaDto {
     @IsEmail({}, { message: 'El email no tiene un formato valido' })
     email?: string;
 }
+

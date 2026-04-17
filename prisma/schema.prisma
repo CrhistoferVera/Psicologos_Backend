@@ -24,7 +24,7 @@ model User {
   resetPasswordToken          String?
   isActive                    Boolean                   @default(true)
 
-  anfitrionaProfile           AnfitrioneProfile?
+  professionalProfile         ProfessionalProfile?
   userProfile                 UserProfile?
   wallet                      Wallet?
   depositRequests             DepositRequest[]
@@ -85,7 +85,7 @@ model Message {
   @@map("messages")
 }
 
-model AnfitrioneProfile {
+model ProfessionalProfile {
   id             String            @id @default(uuid())
   userId         String            @unique
   username       String            @unique
@@ -110,7 +110,7 @@ model AnfitrioneProfile {
   bankAccounts   BankAccount[]
   servicePrices  ServicePrice[]
 
-  @@map("anfitrione_profiles")
+  @@map("professional_profiles")
 }
 
 model Wallet {
@@ -215,7 +215,7 @@ model ServicePrice {
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
-  profile        AnfitrioneProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  professionalProfile ProfessionalProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@unique([profileId, serviceType])
   @@map("service_prices")
@@ -235,14 +235,14 @@ model BankAccount {
   id                  BigInt              @id @default(autoincrement())
   userId              String
   bankId              Int
-  anfitrionaProfileId String
+  professionalProfileId String
   accountNumber       String              @db.VarChar(50)
   accountHolderName   String?             @db.VarChar(100)
   createdAt           DateTime            @default(now())
   updatedAt           DateTime?           @updatedAt
 
   bank                Banks               @relation(fields: [bankId], references: [id])
-  anfitrionaProfile   AnfitrioneProfile   @relation(fields: [anfitrionaProfileId], references: [id], onDelete: Cascade)
+  professionalProfile ProfessionalProfile @relation(fields: [professionalProfileId], references: [id], onDelete: Cascade)
   withdrawalRequests  WithdrawalRequest[]
 
   @@index([userId])
@@ -329,7 +329,7 @@ model Referral {
   qualifiedAt              DateTime?
   rewardedAt               DateTime?
   createdAt                DateTime        @default(now())
-  updatedAt                DateTime        @updatedAt
+  updatedAt                DateTime        @default(now()) @updatedAt
 
   referrer                 User            @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
   referred                 User            @relation("ReferralReferred", fields: [referredUserId], references: [id], onDelete: Cascade)
@@ -352,7 +352,7 @@ model SystemConfig {
   paymentsEnabled          Boolean  @default(true)
   withdrawalsEnabled       Boolean  @default(true)
   createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
+  updatedAt                DateTime @default(now()) @updatedAt
 
   @@map("system_config")
 }
@@ -387,6 +387,7 @@ enum DepositStatus {
 enum UserRole {
   USER
   ADMIN
+  PROFESSIONAL
   ANFITRIONA
 }
 
@@ -408,5 +409,6 @@ enum ProfessionalReviewStatus {
   APPROVED
   REJECTED
 }
+
 
 

@@ -1,4 +1,4 @@
-﻿import {
+import {
   Body,
   Controller,
   Get,
@@ -20,10 +20,10 @@ import { ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { ProfessionalsService } from './anfitrionas.service';
-import { CreateAnfitrioneDto } from './dto/create-anfitriona.dto';
-import { UpdateAnfitrioneProfileDto } from './dto/update-anfitriona-profile.dto';
-import { PROFESSIONAL_ROLE } from '../common/professional-role';
+import { ProfessionalsService } from './professionals.service';
+import { CreateProfessionalDto } from './dto/create-professional.dto';
+import { UpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
+import { PROFESSIONAL_ROLES } from '../common/professional-role';
 import { SpecialtyService } from '../admin/specialty/specialty.service';
 import { AssignProfessionalSpecialtiesDto } from '../admin/specialty/dto/assign-professional-specialties.dto';
 
@@ -40,7 +40,7 @@ export class ProfessionalsController {
   @Roles(UserRole.ADMIN)
   @UseInterceptors(FileInterceptor('idDoc', { storage: memoryStorage() }))
   create(
-    @Body() dto: CreateAnfitrioneDto,
+    @Body() dto: CreateProfessionalDto,
     @UploadedFile() idDoc?: Express.Multer.File,
   ) {
     return this.service.create(dto, idDoc);
@@ -53,21 +53,21 @@ export class ProfessionalsController {
   }
 
   @Get('me/profile')
-  @Roles(PROFESSIONAL_ROLE)
+  @Roles(...PROFESSIONAL_ROLES)
   getMyProfile(@Request() req) {
     const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
     return this.service.getMyProfile(userId);
   }
 
   @Get('me/review-status')
-  @Roles(PROFESSIONAL_ROLE)
+  @Roles(...PROFESSIONAL_ROLES)
   getMyReviewStatus(@Request() req) {
     const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
     return this.service.getMyReviewStatus(userId);
   }
 
   @Patch('me/profile')
-  @Roles(PROFESSIONAL_ROLE)
+  @Roles(...PROFESSIONAL_ROLES)
   @UseInterceptors(
     FileFieldsInterceptor(
       [
@@ -79,7 +79,7 @@ export class ProfessionalsController {
   )
   updateMyProfile(
     @Request() req,
-    @Body() dto: UpdateAnfitrioneProfileDto,
+    @Body() dto: UpdateProfessionalProfileDto,
     @UploadedFiles() files?: { avatar?: Express.Multer.File[]; cover?: Express.Multer.File[] },
   ) {
     const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
@@ -92,20 +92,20 @@ export class ProfessionalsController {
   }
 
   @Get('me/specialties/catalog')
-  @Roles(PROFESSIONAL_ROLE)
+  @Roles(...PROFESSIONAL_ROLES)
   getSpecialtyCatalog(@Query('search') search?: string) {
     return this.specialtyService.findAll(false, search);
   }
 
   @Get('me/specialties')
-  @Roles(PROFESSIONAL_ROLE)
+  @Roles(...PROFESSIONAL_ROLES)
   getMySpecialties(@Request() req) {
     const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
     return this.specialtyService.getProfessionalSpecialties(userId);
   }
 
   @Put('me/specialties')
-  @Roles(PROFESSIONAL_ROLE)
+  @Roles(...PROFESSIONAL_ROLES)
   updateMySpecialties(
     @Request() req,
     @Body() dto: AssignProfessionalSpecialtiesDto,
@@ -120,4 +120,5 @@ export class ProfessionalsController {
     return this.service.findOne(id);
   }
 }
+
 

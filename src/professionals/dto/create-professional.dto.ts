@@ -6,7 +6,7 @@ import {
   MinLength,
 } from 'class-validator';
 
-export class CreateAnfitrioneDto {
+export class CreateProfessionalDto {
   @IsString()
   @IsNotEmpty()
   firstName: string;
@@ -39,3 +39,4 @@ export class CreateAnfitrioneDto {
   @MinLength(6)
   password: string;
 }
+

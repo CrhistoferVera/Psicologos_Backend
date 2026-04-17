@@ -1,4 +1,7 @@
 import { UserRole } from '@prisma/client';
 
-// Transitional mapping: DB enum is still ANFITRIONA, domain contract is PROFESSIONAL.
-export const PROFESSIONAL_ROLE = UserRole.ANFITRIONA;
+// Internal canonical role for professionals.
+export const PROFESSIONAL_ROLE = UserRole.PROFESSIONAL;
+
+// Compatibility set to read legacy rows/tokens while migration completes.
+export const PROFESSIONAL_ROLES: UserRole[] = [UserRole.PROFESSIONAL, UserRole.ANFITRIONA];

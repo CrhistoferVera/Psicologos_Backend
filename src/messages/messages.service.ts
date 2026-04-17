@@ -59,7 +59,7 @@ export class MessagesService {
       update: {},
     });
 
-    const senderProfile = await this.prisma.anfitrioneProfile.findUnique({
+    const senderProfile = await this.prisma.professionalProfile.findUnique({
       where: { userId: senderId },
       select: { id: true },
     });
@@ -234,14 +234,14 @@ export class MessagesService {
           select: {
             firstName: true,
             lastName: true,
-            anfitrionaProfile: { select: { avatarUrl: true, username: true } },
+            professionalProfile: { select: { avatarUrl: true, username: true } },
           },
         },
         user2: {
           select: {
             firstName: true,
             lastName: true,
-            anfitrionaProfile: { select: { avatarUrl: true, username: true } },
+            professionalProfile: { select: { avatarUrl: true, username: true } },
           },
         },
       },
@@ -265,13 +265,13 @@ export class MessagesService {
         });
 
         const fullName = [otherUser.firstName, otherUser.lastName].filter(Boolean).join(' ');
-        const otherUserName = otherUser.anfitrionaProfile?.username ?? (fullName || 'Usuario');
+        const otherUserName = otherUser.professionalProfile?.username ?? (fullName || 'Usuario');
 
         return {
           conversationId: conv.id,
           otherUserId,
           otherUserName,
-          otherUserAvatar: otherUser.anfitrionaProfile?.avatarUrl ?? null,
+          otherUserAvatar: otherUser.professionalProfile?.avatarUrl ?? null,
           lastMessage: lastMessage?.text ?? null,
           lastMessageAt: lastMessage?.createdAt ?? conv.createdAt,
           unreadCount,
@@ -299,3 +299,4 @@ export class MessagesService {
     return { success: true };
   }
 }
+

@@ -107,7 +107,13 @@ export class MessagesGateway {
   @SubscribeMessage('call_accepted')
   async handleCallAccepted(
     @MessageBody()
-    data: { callId: string; callerId: string; professionalName?: string; anfitrionaName?: string },
+    data: {
+      callId: string;
+      callerId: string;
+      professionalName?: string;
+      // Deprecated legacy alias kept for backwards compatibility with old clients.
+      anfitrionaName?: string;
+    },
     @ConnectedSocket() _client: Socket,
   ) {
     const session = this.callSessions.get(data.callId);
@@ -152,7 +158,13 @@ export class MessagesGateway {
   @SubscribeMessage('call_rejected')
   async handleCallRejected(
     @MessageBody()
-    data: { callId: string; callerId: string; professionalName?: string; anfitrionaName?: string },
+    data: {
+      callId: string;
+      callerId: string;
+      professionalName?: string;
+      // Deprecated legacy alias kept for backwards compatibility with old clients.
+      anfitrionaName?: string;
+    },
     @ConnectedSocket() _client: Socket,
   ) {
     const session = this.callSessions.get(data.callId);

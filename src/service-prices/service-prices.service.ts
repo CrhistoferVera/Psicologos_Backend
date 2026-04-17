@@ -1,4 +1,4 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { ServiceType } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { UpsertServicePriceDto } from './dto/upsert-service-price.dto';
@@ -9,7 +9,7 @@ export class ServicePricesService {
 
   // Obtiene todos los precios del profesional autenticado.
   async getMyPrices(userId: string) {
-    const profile = await this.prisma.anfitrioneProfile.findUnique({
+    const profile = await this.prisma.professionalProfile.findUnique({
       where: { userId },
       include: { servicePrices: true },
     });
@@ -21,7 +21,7 @@ export class ServicePricesService {
 
   // Crea o actualiza un precio para un tipo de servicio.
   async upsertPrice(userId: string, dto: UpsertServicePriceDto) {
-    const profile = await this.prisma.anfitrioneProfile.findUnique({
+    const profile = await this.prisma.professionalProfile.findUnique({
       where: { userId },
     });
 
@@ -47,7 +47,7 @@ export class ServicePricesService {
 
   // Precios publicos de un profesional.
   async getPublicPrices(professionalUserId: string) {
-    const profile = await this.prisma.anfitrioneProfile.findUnique({
+    const profile = await this.prisma.professionalProfile.findUnique({
       where: { userId: professionalUserId },
       include: { servicePrices: true },
     });
@@ -56,7 +56,7 @@ export class ServicePricesService {
 
   // Obtiene el precio activo de un servicio para un profesional.
   async getPriceForUser(professionalUserId: string, serviceType: ServiceType) {
-    const profile = await this.prisma.anfitrioneProfile.findUnique({
+    const profile = await this.prisma.professionalProfile.findUnique({
       where: { userId: professionalUserId },
       include: {
         servicePrices: {
@@ -68,3 +68,4 @@ export class ServicePricesService {
     return profile?.servicePrices[0] ?? null;
   }
 }
+

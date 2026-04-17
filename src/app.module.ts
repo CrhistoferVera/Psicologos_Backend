@@ -5,10 +5,10 @@ import { PrismaModule } from './prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
-import { ProfessionalsModule } from './anfitrionas/anfitrionas.module';
+import { ProfessionalsModule } from './professionals/professionals.module';
 import { PackageModule } from './admin/package/package.module';
 import { ClientModule } from './admin/client/client.module';
-import { AdminProfessionalsModule } from './admin/anfitriona/anfitriona.module';
+import { AdminProfessionalsModule } from './admin/professionals/professionals.module';
 import { MessagesModule } from './messages/messages.module';
 import { ServicePricesModule } from './service-prices/service-prices.module';
 import { RechargeRequestModule } from './admin/rechargeRequest/recharge-request.module';
@@ -60,4 +60,5 @@ import { FlowModule } from './flow/flow.module';
   providers: [],
 })
 export class AppModule {}
+
 

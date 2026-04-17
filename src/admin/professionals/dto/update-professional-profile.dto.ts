@@ -1,7 +1,7 @@
 import { IsOptional, IsString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
-export class UpdateAnfitrionaProfileDto {
+export class UpdateProfessionalProfileDto {
   @ApiPropertyOptional({ example: 'María' })
   @IsOptional()
   @IsString()
@@ -22,3 +22,4 @@ export class UpdateAnfitrionaProfileDto {
   @IsString()
   bio?: string;
 }
+
