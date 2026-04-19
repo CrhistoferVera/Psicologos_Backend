@@ -201,6 +201,9 @@ model Transaction {
   depositRequest         DepositRequest?         @relation(fields: [depositRequestId], references: [id])
   promotionalCreditGrant PromotionalCreditGrant?
   referralReward         Referral?
+  asSourceReferralReward   ReferralRewardEvent?   @relation("ReferralRewardSource")
+  asRewardReferralReward   ReferralRewardEvent?   @relation("ReferralRewardTarget")
+  asReversalReferralReward ReferralRewardEvent?   @relation("ReferralRewardReversal")
 
   @@index([walletId, createdAt])
   @@index([type, createdAt])
@@ -318,27 +321,61 @@ model PromotionalCreditGrant {
 }
 
 model Referral {
-  id                       String          @id @default(uuid())
+  id                       String               @id @default(uuid())
   referrerUserId           String
-  referredUserId           String          @unique
+  referredUserId           String               @unique
   codeUsed                 String
-  status                   ReferralStatus  @default(PENDING)
-  referredDepositRequestId String?         @unique
-  rewardTransactionId      String?         @unique
-  rewardCredits            Decimal         @default(0.00) @db.Decimal(10, 2)
+  status                   ReferralStatus       @default(PENDING)
+  referredDepositRequestId String?              @unique
+  rewardTransactionId      String?              @unique
+  rewardCredits            Decimal              @default(0.00) @db.Decimal(10, 2)
   qualifiedAt              DateTime?
   rewardedAt               DateTime?
-  createdAt                DateTime        @default(now())
-  updatedAt                DateTime        @default(now()) @updatedAt
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @default(now()) @updatedAt
 
-  referrer                 User            @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
-  referred                 User            @relation("ReferralReferred", fields: [referredUserId], references: [id], onDelete: Cascade)
-  referredDepositRequest   DepositRequest? @relation(fields: [referredDepositRequestId], references: [id], onDelete: SetNull)
-  rewardTransaction        Transaction?    @relation(fields: [rewardTransactionId], references: [id], onDelete: SetNull)
+  referrer                 User                 @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  referred                 User                 @relation("ReferralReferred", fields: [referredUserId], references: [id], onDelete: Cascade)
+  referredDepositRequest   DepositRequest?      @relation(fields: [referredDepositRequestId], references: [id], onDelete: SetNull)
+  rewardTransaction        Transaction?         @relation(fields: [rewardTransactionId], references: [id], onDelete: SetNull)
+  rewardEvents             ReferralRewardEvent[]
 
   @@index([referrerUserId])
   @@index([status, createdAt])
   @@map("referrals")
+}
+
+model ReferralRewardEvent {
+  id                    String       @id @default(uuid())
+  referralId            String
+  sourceTransactionId   String       @unique
+  rewardTransactionId   String       @unique
+  rewardAmount          Decimal      @db.Decimal(10, 2)
+  percentageApplied     Decimal      @db.Decimal(5, 2)
+  bonusPercentApplied   Decimal      @default(0.00) @db.Decimal(5, 2)
+  reversedAt            DateTime?
+  reversalTransactionId String?      @unique
+  createdAt             DateTime     @default(now())
+
+  referral              Referral     @relation(fields: [referralId], references: [id], onDelete: Cascade)
+  sourceTransaction     Transaction  @relation("ReferralRewardSource", fields: [sourceTransactionId], references: [id], onDelete: Cascade)
+  rewardTransaction     Transaction  @relation("ReferralRewardTarget", fields: [rewardTransactionId], references: [id], onDelete: Cascade)
+  reversalTransaction   Transaction? @relation("ReferralRewardReversal", fields: [reversalTransactionId], references: [id], onDelete: SetNull)
+
+  @@index([referralId])
+  @@map("referral_reward_events")
+}
+
+model ReferralBonusTier {
+  id                 String   @id @default(uuid())
+  label              String
+  minActiveReferrals Int
+  bonusPercent       Decimal  @db.Decimal(5, 2)
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("referral_bonus_tiers")
 }
 
 model SystemConfig {
@@ -346,6 +383,7 @@ model SystemConfig {
   platformFeePercent       Decimal  @default(50.00) @db.Decimal(5, 2)
   creditToSolesRate        Decimal  @default(1.00) @db.Decimal(10, 2)
   minAppVersion            String   @default("1.0")
+  referralPercentage       Decimal  @default(2.50) @db.Decimal(5, 2)
   referralRewardCredits    Decimal  @default(10.00) @db.Decimal(10, 2)
   referralMinDepositAmount Decimal  @default(0.00) @db.Decimal(10, 2)
   referralEnabled          Boolean  @default(true)
@@ -365,6 +403,7 @@ enum TransactionType {
   EARNING
   PROMOTIONAL_GRANT
   REFERRAL_REWARD
+  REFERRAL_REWARD_REVERSAL
 }
 
 enum ServiceType {
@@ -399,6 +438,7 @@ enum WithdrawalStatus {
 
 enum ReferralStatus {
   PENDING
+  ACTIVE
   QUALIFIED
   REWARDED
 }
