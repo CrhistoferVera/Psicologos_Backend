@@ -20,7 +20,7 @@ CREATE TABLE "referrals" (
     "qualifiedAt" TIMESTAMP(3),
     "rewardedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "referrals_pkey" PRIMARY KEY ("id")
 );
@@ -37,7 +37,7 @@ CREATE TABLE "system_config" (
     "paymentsEnabled" BOOLEAN NOT NULL DEFAULT true,
     "withdrawalsEnabled" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "system_config_pkey" PRIMARY KEY ("id")
 );
@@ -73,5 +73,7 @@ ALTER TABLE "referrals" ADD CONSTRAINT "referrals_referredDepositRequestId_fkey"
 ALTER TABLE "referrals" ADD CONSTRAINT "referrals_rewardTransactionId_fkey" FOREIGN KEY ("rewardTransactionId") REFERENCES "transactions"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- Seed singleton config row
-INSERT INTO "system_config" ("id") VALUES ('global') ON CONFLICT ("id") DO NOTHING;
+INSERT INTO "system_config" ("id", "createdAt", "updatedAt")
+VALUES ('global', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT ("id") DO NOTHING;
 

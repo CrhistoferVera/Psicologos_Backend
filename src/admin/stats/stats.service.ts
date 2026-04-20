@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DepositStatus, ReferralStatus, TransactionType, UserRole, WithdrawalStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { PROFESSIONAL_ROLE } from '../../common/professional-role';
+import { PROFESSIONAL_ROLES } from '../../common/professional-role';
 import { SystemConfigService } from '../../system-config/system-config.service';
 
 @Injectable()
@@ -71,10 +71,6 @@ export class StatsService {
     };
   }
 
-  async getAnfitrionaStats(userId: string) {
-    return this.getProfessionalStats(userId);
-  }
-
   async getStats() {
     const startOfToday = new Date(new Date().setHours(0, 0, 0, 0));
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
@@ -106,8 +102,8 @@ export class StatsService {
     ] = await Promise.all([
       this.prisma.user.count({ where: { role: UserRole.USER } }),
       this.prisma.user.count({ where: { role: UserRole.USER, isActive: true } }),
-      this.prisma.user.count({ where: { role: PROFESSIONAL_ROLE } }),
-      this.prisma.user.count({ where: { role: PROFESSIONAL_ROLE, isActive: true } }),
+      this.prisma.user.count({ where: { role: { in: PROFESSIONAL_ROLES } } }),
+      this.prisma.user.count({ where: { role: { in: PROFESSIONAL_ROLES }, isActive: true } }),
       this.prisma.depositRequest.count({ where: { status: DepositStatus.PENDING } }),
       this.prisma.depositRequest.count({
         where: {
@@ -168,7 +164,7 @@ export class StatsService {
         where: {
           type: TransactionType.EARNING,
           isPromotional: false,
-          wallet: { user: { role: PROFESSIONAL_ROLE } },
+          wallet: { user: { role: { in: PROFESSIONAL_ROLES } } },
           realAmount: { gt: 0 },
         },
         _sum: { realAmount: true },
@@ -177,7 +173,7 @@ export class StatsService {
         where: {
           type: TransactionType.EARNING,
           isPromotional: false,
-          wallet: { user: { role: PROFESSIONAL_ROLE } },
+          wallet: { user: { role: { in: PROFESSIONAL_ROLES } } },
           realAmount: 0,
         },
         _sum: { amount: true },
@@ -208,11 +204,6 @@ export class StatsService {
         newThisMonth: newClientsThisMonth,
       },
       professionals: {
-        total: totalProfessionals,
-        active: activeProfessionals,
-        inactive: totalProfessionals - activeProfessionals,
-      },
-      anfitrionas: {
         total: totalProfessionals,
         active: activeProfessionals,
         inactive: totalProfessionals - activeProfessionals,

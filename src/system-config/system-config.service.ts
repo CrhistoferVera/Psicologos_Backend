@@ -6,6 +6,7 @@ export type RuntimeSystemConfig = {
   platformFeePercent: number;
   creditToSolesRate: number;
   minAppVersion: string;
+  referralPercentage: number;
   referralRewardCredits: number;
   referralMinDepositAmount: number;
   referralEnabled: boolean;
@@ -22,6 +23,7 @@ export class SystemConfigService {
       platformFeePercent: Number(process.env.PLATFORM_FEE_PERCENT ?? '50'),
       creditToSolesRate: Number(process.env.CREDIT_TO_SOLES_RATE ?? '1'),
       minAppVersion: process.env.MIN_APP_VERSION ?? '1.0',
+      referralPercentage: Number(process.env.REFERRAL_PERCENTAGE ?? '2.5'),
       referralRewardCredits: Number(process.env.REFERRAL_REWARD_CREDITS ?? '10'),
       referralMinDepositAmount: Number(process.env.REFERRAL_MIN_DEPOSIT_AMOUNT ?? '0'),
       referralEnabled: (process.env.REFERRAL_ENABLED ?? 'true').toLowerCase() !== 'false',
@@ -68,6 +70,7 @@ export class SystemConfigService {
       platformFeePercent: Number(config.platformFeePercent),
       creditToSolesRate: Number(config.creditToSolesRate),
       minAppVersion: config.minAppVersion,
+      referralPercentage: Number(config.referralPercentage),
       referralRewardCredits: Number(config.referralRewardCredits),
       referralMinDepositAmount: Number(config.referralMinDepositAmount),
       referralEnabled: config.referralEnabled,
@@ -90,6 +93,7 @@ export class SystemConfigService {
         ...(payload.platformFeePercent !== undefined ? { platformFeePercent: payload.platformFeePercent } : {}),
         ...(payload.creditToSolesRate !== undefined ? { creditToSolesRate: payload.creditToSolesRate } : {}),
         ...(payload.minAppVersion !== undefined ? { minAppVersion: payload.minAppVersion } : {}),
+        ...(payload.referralPercentage !== undefined ? { referralPercentage: payload.referralPercentage } : {}),
         ...(payload.referralRewardCredits !== undefined ? { referralRewardCredits: payload.referralRewardCredits } : {}),
         ...(payload.referralMinDepositAmount !== undefined ? { referralMinDepositAmount: payload.referralMinDepositAmount } : {}),
         ...(payload.referralEnabled !== undefined ? { referralEnabled: payload.referralEnabled } : {}),
@@ -109,6 +113,7 @@ export class SystemConfigService {
       paymentsEnabled: config.paymentsEnabled,
       withdrawalsEnabled: config.withdrawalsEnabled,
       referralEnabled: config.referralEnabled,
+      referralPercentage: config.referralPercentage,
       referralRewardCredits: config.referralRewardCredits,
       referralMinDepositAmount: config.referralMinDepositAmount,
     };

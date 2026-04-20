@@ -114,7 +114,7 @@ export class WalletService {
     userId: string,
     dto: { bankId: number; accountNumber: string; accountHolderName?: string },
   ) {
-    const profile = await this.prisma.anfitrioneProfile.findUnique({
+    const profile = await this.prisma.professionalProfile.findUnique({
       where: { userId },
     });
     if (!profile) {
@@ -125,7 +125,7 @@ export class WalletService {
       data: {
         userId,
         bankId: dto.bankId,
-        anfitrionaProfileId: profile.id,
+        professionalProfileId: profile.id,
         accountNumber: dto.accountNumber,
         accountHolderName: dto.accountHolderName,
       },
@@ -274,3 +274,4 @@ export class WalletService {
     }));
   }
 }
+

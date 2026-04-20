@@ -1,4 +1,4 @@
-﻿import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
 import { v2 as cloudinary } from 'cloudinary';
 
 @Injectable()
@@ -25,7 +25,7 @@ export class CloudinaryService {
 
         return;
       } catch {
-        throw new InternalServerErrorException('CLOUDINARY_URL invÃ¡lida.');
+        throw new InternalServerErrorException('CLOUDINARY_URL inválida.');
       }
     }
 
@@ -269,7 +269,7 @@ export class CloudinaryService {
     });
   }
 
-  async uploadAnfitrioneIdDoc(params: {
+  async uploadProfessionalIdDoc(params: {
     file: Express.Multer.File;
     userId: string;
   }): Promise<{ secureUrl: string; publicId: string }> {
@@ -279,7 +279,7 @@ export class CloudinaryService {
     const isPdf = file.mimetype === 'application/pdf';
     if (!isImage && !isPdf) {
       throw new InternalServerErrorException(
-        'Tipo de archivo no soportado. Solo imÃ¡genes o PDF.',
+        'Tipo de archivo no soportado. Solo imágenes o PDF.',
       );
     }
 
@@ -297,13 +297,13 @@ export class CloudinaryService {
     const signedUrl = this.getSignedUrl({
       publicId: uploaded.publicId,
       resourceType: uploaded.resourceType,
-      expiresInSeconds: 60 * 60 * 24 * 365, // 1 aÃ±o
+      expiresInSeconds: 60 * 60 * 24 * 365, // 1 año
     });
 
     return { secureUrl: signedUrl, publicId: uploaded.publicId };
   }
 
-  // SERVICIO PARA SUBIR COMPROBANTES DE DEPÃ“SITO
+  // SERVICIO PARA SUBIR COMPROBANTES DE DEPÓSITO
   async uploadDepositPaymentProof(params: {
     file: Express.Multer.File;
     userId: string;
@@ -315,7 +315,7 @@ export class CloudinaryService {
     const isPdf = file.mimetype === 'application/pdf';
 
     if (!isImage && !isPdf) {
-      throw new BadRequestException('Tipo de archivo no soportado. Solo imÃ¡genes o PDF.');
+      throw new BadRequestException('Tipo de archivo no soportado. Solo imágenes o PDF.');
     }
 
     // Definir carpeta y nombre (pachamama/users/ID_USUARIO/deposits)
@@ -359,7 +359,7 @@ export class CloudinaryService {
     const isVideo = file.mimetype.startsWith('video/');
 
     if (!isImage && !isVideo) {
-      throw new InternalServerErrorException('Formato no permitido. Solo imÃ¡genes o videos.');
+      throw new InternalServerErrorException('Formato no permitido. Solo imágenes o videos.');
     }
 
     const resourceType = isImage ? 'image' : 'video';
@@ -390,14 +390,14 @@ export class CloudinaryService {
     });
   }
 
-  async uploadAnfitrioneAvatar(params: {
+  async uploadProfessionalAvatar(params: {
     file: Express.Multer.File;
     userId: string;
   }): Promise<{ secureUrl: string; publicId: string }> {
     const { file, userId } = params;
 
     if (!file.mimetype.startsWith('image/')) {
-      throw new InternalServerErrorException('Solo se permiten imÃ¡genes para el avatar.');
+      throw new InternalServerErrorException('Solo se permiten imágenes para el avatar.');
     }
 
     const folder = `psicologos/professionals/${userId}/avatar`;
@@ -424,7 +424,7 @@ export class CloudinaryService {
     const { file, userId } = params;
 
     if (!file.mimetype.startsWith('image/')) {
-      throw new InternalServerErrorException('Solo se permiten imÃ¡genes para el banner.');
+      throw new InternalServerErrorException('Solo se permiten imágenes para el banner.');
     }
 
     const folder = `psicologos/professionals/${userId}/cover`;
@@ -454,7 +454,7 @@ export class CloudinaryService {
     }
   }
 
-  // â”€â”€â”€ GalerÃ­a permanente de anfitriona â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Galeria permanente de profesional ────────────────────────────────────
 
   async uploadGalleryImage(params: {
     file: Express.Multer.File;
@@ -463,7 +463,7 @@ export class CloudinaryService {
     const { file, userId } = params;
 
     if (!file.mimetype.startsWith('image/')) {
-      throw new InternalServerErrorException('Solo se permiten imÃ¡genes para la galerÃ­a.');
+      throw new InternalServerErrorException('Solo se permiten imágenes para la galería.');
     }
 
     const folder = `psicologos/professionals/${userId}/gallery`;
@@ -475,7 +475,7 @@ export class CloudinaryService {
         (error, result) => {
           if (error || !result?.secure_url) {
             return reject(
-              new InternalServerErrorException('Error al subir imagen de galerÃ­a a Cloudinary.'),
+              new InternalServerErrorException('Error al subir imagen de galería a Cloudinary.'),
             );
           }
           resolve({ secureUrl: result.secure_url, publicId: result.public_id });
@@ -489,7 +489,8 @@ export class CloudinaryService {
     try {
       await cloudinary.uploader.destroy(publicId, { invalidate: true, resource_type: 'image' });
     } catch {
-      throw new InternalServerErrorException('Error al eliminar la imagen de galerÃ­a de Cloudinary.');
+      throw new InternalServerErrorException('Error al eliminar la imagen de galería de Cloudinary.');
     }
   }
 }
+

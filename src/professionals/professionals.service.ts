@@ -8,14 +8,14 @@ import * as bcrypt from 'bcrypt';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
-import { CreateAnfitrioneDto } from './dto/create-anfitriona.dto';
-import { UpdateAnfitrioneProfileDto } from './dto/update-anfitriona-profile.dto';
+import { CreateProfessionalDto } from './dto/create-professional.dto';
+import { UpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
 import {
   ProfessionalPublicListItemDto,
   ProfessionalPublicListResponseDto,
 } from './dto/professional-public-list.dto';
 import { ProfessionalPublicDetailDto } from './dto/professional-public-detail.dto';
-import { PROFESSIONAL_ROLE } from '../common/professional-role';
+import { PROFESSIONAL_ROLE, PROFESSIONAL_ROLES } from '../common/professional-role';
 import { createUniqueReferralCode } from '../referrals/utils/referral-code.util';
 
 @Injectable()
@@ -25,14 +25,14 @@ export class ProfessionalsService {
     private readonly cloudinary: CloudinaryService,
   ) {}
 
-  async create(dto: CreateAnfitrioneDto, idDocFile?: Express.Multer.File) {
+  async create(dto: CreateProfessionalDto, idDocFile?: Express.Multer.File) {
     const [existingPhone, existingCedula, existingUsername, existingEmail] =
       await Promise.all([
         this.prisma.user.findUnique({ where: { phoneNumber: dto.phoneNumber } }),
         dto.cedula
-          ? this.prisma.anfitrioneProfile.findFirst({ where: { cedula: dto.cedula } })
+          ? this.prisma.professionalProfile.findFirst({ where: { cedula: dto.cedula } })
           : Promise.resolve(null),
-        this.prisma.anfitrioneProfile.findUnique({ where: { username: dto.username } }),
+        this.prisma.professionalProfile.findUnique({ where: { username: dto.username } }),
         dto.email
           ? this.prisma.user.findUnique({ where: { email: dto.email } })
           : Promise.resolve(null),
@@ -78,7 +78,7 @@ export class ProfessionalsService {
 
     if (idDocFile) {
       try {
-        const uploaded = await this.cloudinary.uploadAnfitrioneIdDoc({
+        const uploaded = await this.cloudinary.uploadProfessionalIdDoc({
           file: idDocFile,
           userId: user.id,
         });
@@ -90,7 +90,7 @@ export class ProfessionalsService {
       }
     }
 
-    const profile = await this.prisma.anfitrioneProfile.create({
+    const profile = await this.prisma.professionalProfile.create({
       data: {
         userId: user.id,
         username: dto.username,
@@ -107,7 +107,7 @@ export class ProfessionalsService {
 
   async findAll() {
     return this.prisma.user.findMany({
-      where: { role: PROFESSIONAL_ROLE },
+      where: { role: { in: PROFESSIONAL_ROLES } },
       select: {
         id: true,
         phoneNumber: true,
@@ -117,7 +117,7 @@ export class ProfessionalsService {
         isProfileComplete: true,
         isActive: true,
         createdAt: true,
-        anfitrionaProfile: true,
+        professionalProfile: true,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -125,7 +125,7 @@ export class ProfessionalsService {
 
   async findOne(id: string) {
     return this.prisma.user.findFirst({
-      where: { id, role: PROFESSIONAL_ROLE },
+      where: { id, role: { in: PROFESSIONAL_ROLES } },
       select: {
         id: true,
         phoneNumber: true,
@@ -135,7 +135,7 @@ export class ProfessionalsService {
         isProfileComplete: true,
         isActive: true,
         createdAt: true,
-        anfitrionaProfile: true,
+        professionalProfile: true,
       },
     });
   }
@@ -149,7 +149,7 @@ export class ProfessionalsService {
     const specialtyFilter = this.buildSpecialtyFilter(specialty);
 
     const where: Prisma.UserWhereInput = {
-      role: PROFESSIONAL_ROLE,
+      role: { in: PROFESSIONAL_ROLES },
       isActive: true,
       isProfileComplete: true,
       ...(specialtyFilter
@@ -170,7 +170,7 @@ export class ProfessionalsService {
       this.prisma.user.findMany({
         where,
         orderBy: [
-          { anfitrionaProfile: { isOnline: 'desc' } },
+          { professionalProfile: { isOnline: 'desc' } },
           { createdAt: 'desc' },
         ],
         skip: (page - 1) * limit,
@@ -179,7 +179,7 @@ export class ProfessionalsService {
           id: true,
           firstName: true,
           lastName: true,
-          anfitrionaProfile: {
+          professionalProfile: {
             select: {
               username: true,
               avatarUrl: true,
@@ -207,7 +207,7 @@ export class ProfessionalsService {
     ]);
 
     const data: ProfessionalPublicListItemDto[] = users.map((u) => {
-      const profile = u.anfitrionaProfile;
+      const profile = u.professionalProfile;
       const mainImage = profile?.coverUrl ?? profile?.avatarUrl ?? null;
 
       return {
@@ -231,7 +231,7 @@ export class ProfessionalsService {
     const user = await this.prisma.user.findFirst({
       where: {
         id,
-        role: PROFESSIONAL_ROLE,
+        role: { in: PROFESSIONAL_ROLES },
         isActive: true,
         isProfileComplete: true,
       },
@@ -239,7 +239,7 @@ export class ProfessionalsService {
         id: true,
         firstName: true,
         lastName: true,
-        anfitrionaProfile: {
+        professionalProfile: {
           select: {
             username: true,
             dateOfBirth: true,
@@ -267,7 +267,7 @@ export class ProfessionalsService {
 
     if (!user) throw new NotFoundException('Profesional no encontrado.');
 
-    const profile = user.anfitrionaProfile;
+    const profile = user.professionalProfile;
     const age = profile?.dateOfBirth ? this.calculateAge(profile.dateOfBirth) : null;
     const coverImage = profile?.coverUrl ?? profile?.avatarUrl ?? null;
 
@@ -294,7 +294,7 @@ export class ProfessionalsService {
         firstName: true,
         lastName: true,
         isActive: true,
-        anfitrionaProfile: {
+        professionalProfile: {
           select: {
             username: true,
             bio: true,
@@ -316,16 +316,16 @@ export class ProfessionalsService {
       id: user.id,
       firstName: user.firstName,
       lastName: user.lastName,
-      username: user.anfitrionaProfile?.username ?? '',
-      bio: user.anfitrionaProfile?.bio ?? '',
-      rateCredits: user.anfitrionaProfile?.rateCredits ?? 0,
-      isOnline: user.anfitrionaProfile?.isOnline ?? false,
-      avatarUrl: user.anfitrionaProfile?.avatarUrl ?? null,
-      coverUrl: user.anfitrionaProfile?.coverUrl ?? null,
-      reviewStatus: user.anfitrionaProfile?.reviewStatus ?? 'PENDING',
-      reviewNotes: user.anfitrionaProfile?.reviewNotes ?? null,
+      username: user.professionalProfile?.username ?? '',
+      bio: user.professionalProfile?.bio ?? '',
+      rateCredits: user.professionalProfile?.rateCredits ?? 0,
+      isOnline: user.professionalProfile?.isOnline ?? false,
+      avatarUrl: user.professionalProfile?.avatarUrl ?? null,
+      coverUrl: user.professionalProfile?.coverUrl ?? null,
+      reviewStatus: user.professionalProfile?.reviewStatus ?? 'PENDING',
+      reviewNotes: user.professionalProfile?.reviewNotes ?? null,
       availability:
-        (user.anfitrionaProfile?.availability as Record<string, unknown> | null) ?? null,
+        (user.professionalProfile?.availability as Record<string, unknown> | null) ?? null,
       isActive: user.isActive,
     };
   }
@@ -336,7 +336,7 @@ export class ProfessionalsService {
       select: {
         id: true,
         isActive: true,
-        anfitrionaProfile: {
+        professionalProfile: {
           select: {
             reviewStatus: true,
             reviewNotes: true,
@@ -349,21 +349,21 @@ export class ProfessionalsService {
     if (!user) throw new NotFoundException('Usuario no encontrado.');
 
     return {
-      status: user.anfitrionaProfile?.reviewStatus ?? 'PENDING',
-      notes: user.anfitrionaProfile?.reviewNotes ?? null,
+      status: user.professionalProfile?.reviewStatus ?? 'PENDING',
+      notes: user.professionalProfile?.reviewNotes ?? null,
       isActive: user.isActive,
-      updatedAt: user.anfitrionaProfile?.updatedAt ?? null,
+      updatedAt: user.professionalProfile?.updatedAt ?? null,
     };
   }
 
   async updateMyProfile(
     userId: string,
-    dto: UpdateAnfitrioneProfileDto,
+    dto: UpdateProfessionalProfileDto,
     avatarFile?: Express.Multer.File,
     coverFile?: Express.Multer.File,
   ) {
     if (dto.username) {
-      const conflict = await this.prisma.anfitrioneProfile.findFirst({
+      const conflict = await this.prisma.professionalProfile.findFirst({
         where: { username: dto.username, NOT: { userId } },
       });
       if (conflict) throw new ConflictException('El nombre de usuario ya esta en uso.');
@@ -371,7 +371,7 @@ export class ProfessionalsService {
 
     let avatarUpdate: { avatarUrl: string; avatarPublicId: string } | undefined;
     if (avatarFile) {
-      const uploaded = await this.cloudinary.uploadAnfitrioneAvatar({ file: avatarFile, userId });
+      const uploaded = await this.cloudinary.uploadProfessionalAvatar({ file: avatarFile, userId });
       avatarUpdate = { avatarUrl: uploaded.secureUrl, avatarPublicId: uploaded.publicId };
     }
 
@@ -393,7 +393,7 @@ export class ProfessionalsService {
       });
     }
 
-    const profileData: Prisma.AnfitrioneProfileUpdateInput = {
+    const profileData: Prisma.ProfessionalProfileUpdateInput = {
       ...(profileFields.username !== undefined && { username: profileFields.username }),
       ...(profileFields.bio !== undefined && { bio: profileFields.bio }),
       ...(profileFields.rateCredits !== undefined && { rateCredits: profileFields.rateCredits }),
@@ -415,7 +415,7 @@ export class ProfessionalsService {
       const usernameForCreate =
         (profileData.username as string | undefined) ?? `prof_${userId.slice(0, 8)}`;
 
-      const createData: Prisma.AnfitrioneProfileUncheckedCreateInput = {
+      const createData: Prisma.ProfessionalProfileUncheckedCreateInput = {
         userId,
         username: usernameForCreate,
         dateOfBirth: null,
@@ -436,7 +436,7 @@ export class ProfessionalsService {
         createData.coverPublicId = coverUpdate.coverPublicId;
       }
 
-      await this.prisma.anfitrioneProfile.upsert({
+      await this.prisma.professionalProfile.upsert({
         where: { userId },
         update: profileData,
         create: createData,
@@ -469,4 +469,5 @@ export class ProfessionalsService {
     };
   }
 }
+
 

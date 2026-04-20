@@ -1,4 +1,4 @@
-﻿import {
+import {
   BadRequestException,
   ConflictException,
   Inject,
@@ -139,8 +139,8 @@ export class AuthService {
     }
 
     const [existingCedula, existingUsername, existingEmail] = await Promise.all([
-      this.prisma.anfitrioneProfile.findUnique({ where: { cedula: dto.cedula } }),
-      this.prisma.anfitrioneProfile.findUnique({ where: { username: dto.username } }),
+      this.prisma.professionalProfile.findUnique({ where: { cedula: dto.cedula } }),
+      this.prisma.professionalProfile.findUnique({ where: { username: dto.username } }),
       dto.email ? this.usersService.findOneByEmail(dto.email.trim().toLowerCase()) : null,
     ]);
 
@@ -174,7 +174,7 @@ export class AuthService {
     let idDocPublicId: string | null = null;
 
     if (idDocFile) {
-      const uploaded = await this.cloudinary.uploadAnfitrioneIdDoc({
+      const uploaded = await this.cloudinary.uploadProfessionalIdDoc({
         file: idDocFile,
         userId: newUser.id,
       });
@@ -182,7 +182,7 @@ export class AuthService {
       idDocPublicId = uploaded.publicId;
     }
 
-    const profile = await this.prisma.anfitrioneProfile.create({
+    const profile = await this.prisma.professionalProfile.create({
       data: {
         userId: newUser.id,
         dateOfBirth: new Date(dto.dateOfBirth),
@@ -273,6 +273,7 @@ export class AuthService {
     };
   }
 }
+
 
 
 

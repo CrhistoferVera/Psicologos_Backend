@@ -8,7 +8,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateSpecialtyDto } from './dto/create-specialty.dto';
 import { UpdateSpecialtyDto } from './dto/update-specialty.dto';
 import { AssignProfessionalSpecialtiesDto } from './dto/assign-professional-specialties.dto';
-import { PROFESSIONAL_ROLE } from '../../common/professional-role';
+import { PROFESSIONAL_ROLES } from '../../common/professional-role';
 
 @Injectable()
 export class SpecialtyService {
@@ -128,7 +128,7 @@ export class SpecialtyService {
 
   async assignToProfessional(userId: string, dto: AssignProfessionalSpecialtiesDto) {
     const professional = await this.prisma.user.findFirst({
-      where: { id: userId, role: PROFESSIONAL_ROLE },
+      where: { id: userId, role: { in: PROFESSIONAL_ROLES } },
       select: { id: true },
     });
     if (!professional) {

@@ -6,9 +6,10 @@ import { ServicePricesModule } from '../service-prices/service-prices.module';
 import { CallsModule } from '../calls/calls.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PrismaModule } from '../../prisma/prisma.module';
+import { ReferralsModule } from '../referrals/referrals.module';
 
 @Module({
-  imports: [ServicePricesModule, CallsModule, NotificationsModule, PrismaModule],
+  imports: [ServicePricesModule, CallsModule, NotificationsModule, PrismaModule, ReferralsModule],
   controllers: [MessagesController],
   providers: [MessagesService, MessagesGateway],
 })

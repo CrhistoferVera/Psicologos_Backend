@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { ProfessionalsController } from './anfitrionas.controller';
-import { PublicProfessionalsController } from './public-anfitrionas.controller';
-import { ProfessionalsService } from './anfitrionas.service';
+import { ProfessionalsController } from './professionals.controller';
+import { PublicProfessionalsController } from './public-professionals.controller';
+import { ProfessionalsService } from './professionals.service';
 import { CloudinaryModule } from '../cloudinary/cloudinary.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -13,3 +13,4 @@ import { SpecialtyModule } from '../admin/specialty/specialty.module';
   providers: [ProfessionalsService],
 })
 export class ProfessionalsModule {}
+

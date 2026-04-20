@@ -11,6 +11,7 @@ import { ServicePricesService } from '../service-prices/service-prices.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { allocateCreditDebit } from '../wallet/utils/credit-allocation.util';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { ReferralsService } from '../referrals/referrals.service';
 
 @Injectable()
 export class MessagesService {
@@ -21,6 +22,7 @@ export class MessagesService {
     private readonly servicePricesService: ServicePricesService,
     private readonly notificationsService: NotificationsService,
     private readonly systemConfigService: SystemConfigService,
+    private readonly referralsService: ReferralsService,
   ) {}
 
   private ttlCutoff(): Date {
@@ -59,7 +61,7 @@ export class MessagesService {
       update: {},
     });
 
-    const senderProfile = await this.prisma.anfitrioneProfile.findUnique({
+    const senderProfile = await this.prisma.professionalProfile.findUnique({
       where: { userId: senderId },
       select: { id: true },
     });
@@ -114,12 +116,9 @@ export class MessagesService {
           clientWalletUpdate.promotionalBalance = { decrement: debit.promotionalDebited };
         }
 
-        const operations: Prisma.PrismaPromise<unknown>[] = [
-          this.prisma.wallet.update({
-            where: { userId: senderId },
-            data: clientWalletUpdate,
-          }),
-          this.prisma.transaction.create({
+        await this.prisma.$transaction(async (tx) => {
+          await tx.wallet.update({ where: { userId: senderId }, data: clientWalletUpdate });
+          await tx.transaction.create({
             data: {
               walletId: clientWallet.id,
               type: TransactionType.MESSAGE_SEND,
@@ -129,16 +128,14 @@ export class MessagesService {
               isPromotional: debit.realDebited === 0,
               description: 'Costo por enviar mensaje',
             },
-          }),
-        ];
+          });
 
-        if (professionalShare > 0) {
-          operations.push(
-            this.prisma.wallet.update({
+          if (professionalShare > 0) {
+            await tx.wallet.update({
               where: { userId: receiverId },
               data: { balance: { increment: professionalShare } },
-            }),
-            this.prisma.transaction.create({
+            });
+            const earningTx = await tx.transaction.create({
               data: {
                 walletId: professionalWallet.id,
                 type: TransactionType.EARNING,
@@ -148,17 +145,17 @@ export class MessagesService {
                 isPromotional: false,
                 description: JSON.stringify({ service: 'Mensaje recibido', clientName }),
               },
-            }),
-          );
-        }
+            });
+            await this.referralsService.maybeRewardReferralOnProfessionalEarning(tx, {
+              professionalUserId: receiverId,
+              earningTransactionId: earningTx.id,
+              earningRealAmount: professionalShare,
+            });
+          }
 
-        if (adminWallet && adminShare > 0) {
-          operations.push(
-            this.prisma.wallet.update({
-              where: { id: adminWallet.id },
-              data: { balance: { increment: adminShare } },
-            }),
-            this.prisma.transaction.create({
+          if (adminWallet && adminShare > 0) {
+            await tx.wallet.update({ where: { id: adminWallet.id }, data: { balance: { increment: adminShare } } });
+            await tx.transaction.create({
               data: {
                 walletId: adminWallet.id,
                 type: TransactionType.EARNING,
@@ -168,11 +165,9 @@ export class MessagesService {
                 isPromotional: false,
                 description: JSON.stringify({ service: 'Comision mensaje', clientName }),
               },
-            }),
-          );
-        }
-
-        await this.prisma.$transaction(operations);
+            });
+          }
+        });
       }
     }
 
@@ -234,14 +229,14 @@ export class MessagesService {
           select: {
             firstName: true,
             lastName: true,
-            anfitrionaProfile: { select: { avatarUrl: true, username: true } },
+            professionalProfile: { select: { avatarUrl: true, username: true } },
           },
         },
         user2: {
           select: {
             firstName: true,
             lastName: true,
-            anfitrionaProfile: { select: { avatarUrl: true, username: true } },
+            professionalProfile: { select: { avatarUrl: true, username: true } },
           },
         },
       },
@@ -265,13 +260,13 @@ export class MessagesService {
         });
 
         const fullName = [otherUser.firstName, otherUser.lastName].filter(Boolean).join(' ');
-        const otherUserName = otherUser.anfitrionaProfile?.username ?? (fullName || 'Usuario');
+        const otherUserName = otherUser.professionalProfile?.username ?? (fullName || 'Usuario');
 
         return {
           conversationId: conv.id,
           otherUserId,
           otherUserName,
-          otherUserAvatar: otherUser.anfitrionaProfile?.avatarUrl ?? null,
+          otherUserAvatar: otherUser.professionalProfile?.avatarUrl ?? null,
           lastMessage: lastMessage?.text ?? null,
           lastMessageAt: lastMessage?.createdAt ?? conv.createdAt,
           unreadCount,
@@ -299,3 +294,4 @@ export class MessagesService {
     return { success: true };
   }
 }
+

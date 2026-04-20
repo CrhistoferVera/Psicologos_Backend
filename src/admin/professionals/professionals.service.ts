@@ -1,20 +1,20 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { Prisma, WithdrawalStatus, ProfessionalReviewStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { UpdateAnfitrionaDto, EditAnfitrionaDto } from './dto/update-anfitriona.dto';
-import { UpdateAnfitrionaProfileDto } from './dto/update-anfitriona-profile.dto';
-import { PROFESSIONAL_ROLE } from '../../common/professional-role';
+import { UpdateProfessionalDto, EditProfessionalDto } from './dto/update-professional.dto';
+import { UpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
+import { PROFESSIONAL_ROLES } from '../../common/professional-role';
 
 @Injectable()
 export class AdminProfessionalsService {
   constructor(private prisma: PrismaService) {}
 
-  async updateStatus(id: string, updateStatusDto: UpdateAnfitrionaDto) {
+  async updateStatus(id: string, updateStatusDto: UpdateProfessionalDto) {
     const user = await this.prisma.user.findFirst({
-      where: { id, role: PROFESSIONAL_ROLE },
+      where: { id, role: { in: PROFESSIONAL_ROLES } },
       select: {
         id: true,
-        anfitrionaProfile: {
+        professionalProfile: {
           select: {
             username: true,
           },
@@ -35,7 +35,7 @@ export class AdminProfessionalsService {
         where: { id },
         data: { isActive: updateStatusDto.isActive },
       }),
-      this.prisma.anfitrioneProfile.upsert({
+      this.prisma.professionalProfile.upsert({
         where: { userId: id },
         update: {
           reviewStatus,
@@ -45,7 +45,7 @@ export class AdminProfessionalsService {
         },
         create: {
           userId: id,
-          username: user.anfitrionaProfile?.username ?? `prof_${id.slice(0, 8)}`,
+          username: user.professionalProfile?.username ?? `prof_${id.slice(0, 8)}`,
           reviewStatus,
           ...(updateStatusDto.reviewNotes !== undefined
             ? { reviewNotes: updateStatusDto.reviewNotes }
@@ -57,9 +57,9 @@ export class AdminProfessionalsService {
     return this.findOne(id);
   }
 
-  async updateProfile(id: string, dto: UpdateAnfitrionaProfileDto) {
+  async updateProfile(id: string, dto: UpdateProfessionalProfileDto) {
     const user = await this.prisma.user.findFirst({
-      where: { id, role: PROFESSIONAL_ROLE },
+      where: { id, role: { in: PROFESSIONAL_ROLES } },
     });
     if (!user) throw new NotFoundException('Profesional no encontrado');
 
@@ -71,7 +71,7 @@ export class AdminProfessionalsService {
           ...(dto.lastName !== undefined && { lastName: dto.lastName }),
         },
       }),
-      this.prisma.anfitrioneProfile.upsert({
+      this.prisma.professionalProfile.upsert({
         where: { userId: id },
         update: {
           ...(dto.username !== undefined && { username: dto.username }),
@@ -93,7 +93,7 @@ export class AdminProfessionalsService {
     const professional = await this.prisma.user.findFirst({
       where: {
         id,
-        role: PROFESSIONAL_ROLE,
+        role: { in: PROFESSIONAL_ROLES },
       },
       include: {
         wallet: {
@@ -102,7 +102,7 @@ export class AdminProfessionalsService {
             promotionalBalance: true,
           },
         },
-        anfitrionaProfile: {
+        professionalProfile: {
           select: {
             username: true,
             avatarUrl: true,
@@ -128,7 +128,7 @@ export class AdminProfessionalsService {
 
   async findAll(search?: string, cursor?: string, limit = 10) {
     const whereCondition: Prisma.UserWhereInput = {
-      role: PROFESSIONAL_ROLE,
+      role: { in: PROFESSIONAL_ROLES },
       ...(search && {
         OR: [
           { firstName: { contains: search, mode: 'insensitive' } },
@@ -150,7 +150,7 @@ export class AdminProfessionalsService {
         isActive: true,
         createdAt: true,
         wallet: { select: { balance: true, promotionalBalance: true } },
-        anfitrionaProfile: {
+        professionalProfile: {
           select: {
             username: true,
             avatarUrl: true,
@@ -209,7 +209,7 @@ export class AdminProfessionalsService {
                 lastName: true,
                 phoneNumber: true,
                 email: true,
-                anfitrionaProfile: {
+                professionalProfile: {
                   select: {
                     avatarUrl: true,
                     coverUrl: true,
@@ -250,9 +250,9 @@ export class AdminProfessionalsService {
     };
   }
 
-  async editProfessional(id: string, dto: EditAnfitrionaDto) {
+  async editProfessional(id: string, dto: EditProfessionalDto) {
     const user = await this.prisma.user.findFirst({
-      where: { id, role: PROFESSIONAL_ROLE },
+      where: { id, role: { in: PROFESSIONAL_ROLES } },
     });
 
     if (!user) throw new NotFoundException(`No se encontro un profesional con ID: ${id}`);
@@ -272,7 +272,7 @@ export class AdminProfessionalsService {
     }
 
     if (dto.username) {
-      const existing = await this.prisma.anfitrioneProfile.findFirst({
+      const existing = await this.prisma.professionalProfile.findFirst({
         where: { username: dto.username, NOT: { userId: id } },
       });
       if (existing) throw new ConflictException('El nombre de usuario ya esta en uso.');
@@ -287,7 +287,7 @@ export class AdminProfessionalsService {
     });
 
     if (dto.username || dto.bio || dto.rateCredits) {
-      await this.prisma.anfitrioneProfile.update({
+      await this.prisma.professionalProfile.update({
         where: { userId: id },
         data: {
           ...(dto.username && { username: dto.username }),
@@ -365,3 +365,4 @@ export class AdminProfessionalsService {
     };
   }
 }
+

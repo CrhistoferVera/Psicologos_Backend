@@ -1,12 +1,12 @@
-﻿import { Controller, Get, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
-import { UpdateAnfitrionaDto, EditAnfitrionaDto } from './dto/update-anfitriona.dto';
-import { UpdateAnfitrionaProfileDto } from './dto/update-anfitriona-profile.dto';
+import { UpdateProfessionalDto, EditProfessionalDto } from './dto/update-professional.dto';
+import { UpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '@prisma/client';
-import { AdminProfessionalsService } from './anfitriona.service';
+import { AdminProfessionalsService } from './professionals.service';
 
 @ApiTags('Admin - Professionals')
 @Controller('admin/professionals')
@@ -78,20 +78,21 @@ export class AdminProfessionalsController {
 
   @Patch(':id/edit')
   @ApiOperation({ summary: 'Editar telefono, username, bio, rateCredits o email de un profesional' })
-  editProfessional(@Param('id') id: string, @Body() dto: EditAnfitrionaDto) {
+  editProfessional(@Param('id') id: string, @Body() dto: EditProfessionalDto) {
     return this.professionalsService.editProfessional(id, dto);
   }
 
   @Patch(':id/status')
   @ApiOperation({ summary: 'Cambiar estado del profesional (Activo/Suspendido)' })
-  updateStatus(@Param('id') id: string, @Body() updateStatusDto: UpdateAnfitrionaDto) {
+  updateStatus(@Param('id') id: string, @Body() updateStatusDto: UpdateProfessionalDto) {
     return this.professionalsService.updateStatus(id, updateStatusDto);
   }
 
   @Patch(':id/profile')
   @ApiOperation({ summary: 'Editar datos de perfil de un profesional' })
-  updateProfile(@Param('id') id: string, @Body() dto: UpdateAnfitrionaProfileDto) {
+  updateProfile(@Param('id') id: string, @Body() dto: UpdateProfessionalProfileDto) {
     return this.professionalsService.updateProfile(id, dto);
   }
 }
+
 

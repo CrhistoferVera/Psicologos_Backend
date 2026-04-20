@@ -2,7 +2,7 @@ import { IsBoolean, IsInt, IsObject, IsOptional, IsString, Min } from 'class-val
 import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
-export class UpdateAnfitrioneProfileDto {
+export class UpdateProfessionalProfileDto {
   @ApiPropertyOptional({ example: 'Maria' })
   @IsString()
   @IsOptional()
@@ -58,3 +58,4 @@ export class UpdateAnfitrioneProfileDto {
   @IsObject()
   availability?: Record<string, unknown>;
 }
+
