@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -37,5 +37,17 @@ export class AdminReferralsController {
   @ApiOperation({ summary: 'Eliminar un tier de bono' })
   deleteBonusTier(@Param('id') id: string) {
     return this.referralsService.deleteAdminBonusTier(id);
+  }
+
+  @Post('reverse-reward/:sourceTransactionId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Revertir manualmente el reward de referido asociado a una transacción EARNING',
+    description:
+      'Idempotente. Si ya fue revertido, devuelve { reversed: false }. ' +
+      'Usar cuando el earning fuente deba anularse (fraude, error, devolución manual).',
+  })
+  reverseReward(@Param('sourceTransactionId') sourceTransactionId: string) {
+    return this.referralsService.adminReverseReward(sourceTransactionId);
   }
 }

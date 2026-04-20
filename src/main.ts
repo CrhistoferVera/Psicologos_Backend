@@ -32,7 +32,15 @@ async function bootstrap() {
 
   //  Configurar CORS desde variables de entorno
   app.enableCors({
-    origin: [frontendUrl, 'http://localhost:3000', 'http://192.168.100.9:8081', /http:\/\/192\.168\.100\..+/],
+    origin: [
+      frontendUrl,
+      'http://localhost:3000',
+      'http://localhost:4000',
+      'http://localhost:8081',
+      'http://localhost:19006',
+      'http://192.168.100.9:8081',
+      /http:\/\/192\.168\.\d+\.\d+(:\d+)?/,
+    ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
     credentials: true,

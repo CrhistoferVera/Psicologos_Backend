@@ -175,6 +175,22 @@ export class ReferralsService {
     return { deleted: true };
   }
 
+  /**
+   * Entrada pública para reversión manual por admin.
+   * Abre su propia $transaction porque el llamador (controller) no es una TX.
+   * Para uso automático dentro de una TX existente, llamar a
+   * reverseReferralRewardBySourceTransaction(tx, sourceTransactionId) directamente.
+   */
+  async adminReverseReward(sourceTransactionId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const result = await this.reverseReferralRewardBySourceTransaction(tx, sourceTransactionId);
+      if (!result) {
+        return { reversed: false, reason: 'No existe reward activo para esa transacción fuente' };
+      }
+      return { reversed: true, eventId: result.id, reversedAt: result.reversedAt };
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Recompensa de referido — crear
   // ---------------------------------------------------------------------------
