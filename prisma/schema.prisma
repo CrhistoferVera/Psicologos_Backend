@@ -103,6 +103,19 @@ model ProfessionalProfile {
   availability   Json?
   coverPublicId  String?
   coverUrl       String?
+
+  // KYC
+  kycVideoUrl               String?
+  kycVideoPublicId          String?
+  kycSelfieUrl              String?
+  kycSelfiePublicId         String?
+  matriculaUrl              String?
+  matriculaPublicId         String?
+  tituloProfesionalUrl      String?
+  tituloProfesionalPublicId String?
+  kycFaceMatchScore         Float?
+  kycFaceMatchStatus        KycFaceMatchStatus @default(PENDING)
+
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
@@ -448,6 +461,13 @@ enum ProfessionalReviewStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+enum KycFaceMatchStatus {
+  PENDING
+  PASSED
+  FAILED
+  SKIPPED
 }
 
 

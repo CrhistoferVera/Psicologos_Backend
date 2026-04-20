@@ -12,6 +12,7 @@ import { MailModule } from '../mail/mail.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { CloudinaryModule } from '../cloudinary/cloudinary.module';
 import { ReferralsModule } from '../referrals/referrals.module';
+import { KycModule } from '../kyc/kyc.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ReferralsModule } from '../referrals/referrals.module';
     PrismaModule,
     CloudinaryModule,
     ReferralsModule,
+    KycModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
