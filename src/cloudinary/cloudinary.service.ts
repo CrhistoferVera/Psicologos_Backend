@@ -269,6 +269,49 @@ export class CloudinaryService {
     });
   }
 
+  async uploadKycFile(params: {
+    file: Express.Multer.File;
+    userId: string;
+    folder: string;
+    publicIdPrefix: string;
+  }): Promise<{ secureUrl: string; publicId: string }> {
+    const { file, userId, folder, publicIdPrefix } = params;
+
+    const isImage = file.mimetype.startsWith('image/');
+    const isVideo = file.mimetype.startsWith('video/');
+    const isPdf = file.mimetype === 'application/pdf';
+
+    if (!isImage && !isVideo && !isPdf) {
+      throw new InternalServerErrorException(
+        'Tipo de archivo no soportado. Solo imágenes, videos o PDF.',
+      );
+    }
+
+    const resourceType: 'image' | 'video' | 'raw' = isImage
+      ? 'image'
+      : isVideo
+        ? 'video'
+        : 'raw';
+
+    const fullFolder = `psicologos/professionals/${userId}/${folder}`;
+    const publicId = `${publicIdPrefix}_${Date.now()}`;
+
+    const uploaded = await this.uploadPrivate({
+      file,
+      folder: fullFolder,
+      publicId,
+      resourceType,
+    });
+
+    const signedUrl = this.getSignedUrl({
+      publicId: uploaded.publicId,
+      resourceType: uploaded.resourceType,
+      expiresInSeconds: 60 * 60 * 24 * 365,
+    });
+
+    return { secureUrl: signedUrl, publicId: uploaded.publicId };
+  }
+
   async uploadProfessionalIdDoc(params: {
     file: Express.Multer.File;
     userId: string;

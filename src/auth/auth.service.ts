@@ -23,6 +23,7 @@ import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { PROFESSIONAL_ROLE } from '../common/professional-role';
 import { ReferralsService } from '../referrals/referrals.service';
 import { createUniqueReferralCode } from '../referrals/utils/referral-code.util';
+import { FaceMatchService } from '../kyc/face-match.service';
 
 @Injectable()
 export class AuthService {
@@ -35,6 +36,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
     private readonly referralsService: ReferralsService,
+    private readonly faceMatch: FaceMatchService,
   ) {}
 
   async sendOtp(phoneNumber: string) {
@@ -121,7 +123,13 @@ export class AuthService {
 
   async completeProfessionalRegistration(
     dto: CompleteProfessionalRegistrationDto,
-    idDocFile?: Express.Multer.File,
+    files?: {
+      idDoc?: Express.Multer.File;
+      kycVideo?: Express.Multer.File;
+      kycSelfie?: Express.Multer.File;
+      matricula?: Express.Multer.File;
+      tituloProfesional?: Express.Multer.File;
+    },
   ) {
     let payload: { sub: string; type: string };
     try {
@@ -170,32 +178,73 @@ export class AuthService {
         wallet: { create: { balance: 0, promotionalBalance: 0 } },
       },
     });
-    let idDocUrl: string | null = null;
-    let idDocPublicId: string | null = null;
 
-    if (idDocFile) {
-      const uploaded = await this.cloudinary.uploadProfessionalIdDoc({
-        file: idDocFile,
-        userId: newUser.id,
-      });
-      idDocUrl = uploaded.secureUrl;
-      idDocPublicId = uploaded.publicId;
+    const uid = newUser.id;
+
+    // Upload all KYC documents in parallel
+    const [idDocResult, kycVideoResult, kycSelfieResult, matriculaResult, tituloResult] =
+      await Promise.all([
+        files?.idDoc
+          ? this.cloudinary.uploadProfessionalIdDoc({ file: files.idDoc, userId: uid })
+          : null,
+        files?.kycVideo
+          ? this.cloudinary.uploadKycFile({ file: files.kycVideo, userId: uid, folder: 'kyc/video', publicIdPrefix: 'kyc_video' })
+          : null,
+        files?.kycSelfie
+          ? this.cloudinary.uploadKycFile({ file: files.kycSelfie, userId: uid, folder: 'kyc/selfie', publicIdPrefix: 'kyc_selfie' })
+          : null,
+        files?.matricula
+          ? this.cloudinary.uploadKycFile({ file: files.matricula, userId: uid, folder: 'kyc/matricula', publicIdPrefix: 'matricula' })
+          : null,
+        files?.tituloProfesional
+          ? this.cloudinary.uploadKycFile({ file: files.tituloProfesional, userId: uid, folder: 'kyc/titulo', publicIdPrefix: 'titulo' })
+          : null,
+      ]);
+
+    // Automatic face comparison: selfie thumbnail vs ID document
+    let faceMatchScore: number | null = null;
+    let kycFaceMatchStatus: 'PENDING' | 'PASSED' | 'FAILED' | 'SKIPPED' = 'PENDING';
+
+    if (files?.kycSelfie && files?.idDoc) {
+      const isIdDocImage = files.idDoc.mimetype.startsWith('image/');
+      if (isIdDocImage) {
+        const result = await this.faceMatch.compareFaces(
+          files.kycSelfie.buffer,
+          files.idDoc.buffer,
+        );
+        faceMatchScore = result.score;
+        kycFaceMatchStatus = result.status;
+      } else {
+        kycFaceMatchStatus = 'SKIPPED';
+      }
+    } else {
+      kycFaceMatchStatus = 'SKIPPED';
     }
 
     const profile = await this.prisma.professionalProfile.create({
       data: {
-        userId: newUser.id,
+        userId: uid,
         dateOfBirth: new Date(dto.dateOfBirth),
         cedula: dto.cedula,
         username: dto.username,
-        idDocUrl,
-        idDocPublicId,
+        idDocUrl: idDocResult?.secureUrl ?? null,
+        idDocPublicId: idDocResult?.publicId ?? null,
+        kycVideoUrl: kycVideoResult?.secureUrl ?? null,
+        kycVideoPublicId: kycVideoResult?.publicId ?? null,
+        kycSelfieUrl: kycSelfieResult?.secureUrl ?? null,
+        kycSelfiePublicId: kycSelfieResult?.publicId ?? null,
+        matriculaUrl: matriculaResult?.secureUrl ?? null,
+        matriculaPublicId: matriculaResult?.publicId ?? null,
+        tituloProfesionalUrl: tituloResult?.secureUrl ?? null,
+        tituloProfesionalPublicId: tituloResult?.publicId ?? null,
+        kycFaceMatchScore: faceMatchScore,
+        kycFaceMatchStatus,
         reviewStatus: 'PENDING',
       },
     });
 
     if (requestedReferralCode) {
-      await this.referralsService.createReferralLink(newUser.id, requestedReferralCode);
+      await this.referralsService.createReferralLink(uid, requestedReferralCode);
     }
 
     const { password: _, ...userWithoutPass } = newUser;

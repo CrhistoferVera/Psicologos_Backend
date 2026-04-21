@@ -6,9 +6,9 @@
   HttpCode,
   HttpStatus,
   UseInterceptors,
-  UploadedFile,
+  UploadedFiles,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -42,12 +42,33 @@ export class AuthController {
 
   @Post('complete-professional-registration')
   @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FileInterceptor('idDoc'))
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'idDoc', maxCount: 1 },
+      { name: 'kycVideo', maxCount: 1 },
+      { name: 'kycSelfie', maxCount: 1 },
+      { name: 'matricula', maxCount: 1 },
+      { name: 'tituloProfesional', maxCount: 1 },
+    ]),
+  )
   async completeProfessionalRegistration(
     @Body() dto: CompleteProfessionalRegistrationDto,
-    @UploadedFile() idDoc?: Express.Multer.File,
+    @UploadedFiles()
+    files?: {
+      idDoc?: Express.Multer.File[];
+      kycVideo?: Express.Multer.File[];
+      kycSelfie?: Express.Multer.File[];
+      matricula?: Express.Multer.File[];
+      tituloProfesional?: Express.Multer.File[];
+    },
   ) {
-    return this.authService.completeProfessionalRegistration(dto, idDoc);
+    return this.authService.completeProfessionalRegistration(dto, {
+      idDoc: files?.idDoc?.[0],
+      kycVideo: files?.kycVideo?.[0],
+      kycSelfie: files?.kycSelfie?.[0],
+      matricula: files?.matricula?.[0],
+      tituloProfesional: files?.tituloProfesional?.[0],
+    });
   }
   @Post('login')
   @HttpCode(HttpStatus.OK)

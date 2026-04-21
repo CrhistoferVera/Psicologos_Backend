@@ -20,7 +20,14 @@ export class UpdateSystemConfigDto {
   @IsString()
   minAppVersion?: string;
 
-  @ApiPropertyOptional({ example: 10, description: 'Créditos de recompensa por referido válido.' })
+  @ApiPropertyOptional({ example: 2.5, description: 'Porcentaje de ganancias del profesional referido que recibe el referente (0-100).' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  referralPercentage?: number;
+
+  @ApiPropertyOptional({ example: 10, description: 'Créditos de recompensa por referido válido (legado, no usar).' })
   @IsOptional()
   @IsNumber()
   @Min(0)

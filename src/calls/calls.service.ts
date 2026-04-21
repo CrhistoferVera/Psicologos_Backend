@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma.service';
 import { ServicePricesService } from '../service-prices/service-prices.service';
 import { allocateCreditDebit } from '../wallet/utils/credit-allocation.util';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { ReferralsService } from '../referrals/referrals.service';
 
 @Injectable()
 export class CallsService {
@@ -14,6 +15,7 @@ export class CallsService {
     private readonly prisma: PrismaService,
     private readonly servicePricesService: ServicePricesService,
     private readonly systemConfigService: SystemConfigService,
+    private readonly referralsService: ReferralsService,
   ) {}
 
   generateToken(channelName: string, uid: number): { token: string; appId: string } {
@@ -98,12 +100,9 @@ export class CallsService {
       clientWalletUpdate.promotionalBalance = { decrement: debit.promotionalDebited };
     }
 
-    const operations: Prisma.PrismaPromise<unknown>[] = [
-      this.prisma.wallet.update({
-        where: { userId: callerId },
-        data: clientWalletUpdate,
-      }),
-      this.prisma.transaction.create({
+    await this.prisma.$transaction(async (tx) => {
+      await tx.wallet.update({ where: { userId: callerId }, data: clientWalletUpdate });
+      await tx.transaction.create({
         data: {
           walletId: clientWallet.id,
           type: TransactionType.CALL_PAYMENT,
@@ -111,18 +110,16 @@ export class CallsService {
           promotionalAmount: debit.promotionalDebited,
           realAmount: debit.realDebited,
           isPromotional: debit.realDebited === 0,
-          description: `${label} · ${minutes} min`,
+          description: `${label} - ${minutes} min`,
         },
-      }),
-    ];
+      });
 
-    if (professionalShare > 0) {
-      operations.push(
-        this.prisma.wallet.update({
+      if (professionalShare > 0) {
+        await tx.wallet.update({
           where: { userId: professionalId },
           data: { balance: { increment: professionalShare } },
-        }),
-        this.prisma.transaction.create({
+        });
+        const earningTx = await tx.transaction.create({
           data: {
             walletId: professionalWallet.id,
             type: TransactionType.EARNING,
@@ -132,17 +129,17 @@ export class CallsService {
             isPromotional: false,
             description: JSON.stringify({ service: label, minutes }),
           },
-        }),
-      );
-    }
+        });
+        await this.referralsService.maybeRewardReferralOnProfessionalEarning(tx, {
+          professionalUserId: professionalId,
+          earningTransactionId: earningTx.id,
+          earningRealAmount: professionalShare,
+        });
+      }
 
-    if (adminWallet && adminShare > 0) {
-      operations.push(
-        this.prisma.wallet.update({
-          where: { id: adminWallet.id },
-          data: { balance: { increment: adminShare } },
-        }),
-        this.prisma.transaction.create({
+      if (adminWallet && adminShare > 0) {
+        await tx.wallet.update({ where: { id: adminWallet.id }, data: { balance: { increment: adminShare } } });
+        await tx.transaction.create({
           data: {
             walletId: adminWallet.id,
             type: TransactionType.EARNING,
@@ -152,11 +149,9 @@ export class CallsService {
             isPromotional: false,
             description: JSON.stringify({ service: `Comision ${label}`, minutes }),
           },
-        }),
-      );
-    }
-
-    await this.prisma.$transaction(operations);
+        });
+      }
+    });
 
     return {
       creditsCharged: debit.totalDebited,

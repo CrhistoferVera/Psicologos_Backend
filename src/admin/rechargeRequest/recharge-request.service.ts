@@ -3,14 +3,12 @@ import { DepositStatus, Prisma, UserRole, TransactionType } from '@prisma/client
 import { PrismaService } from '../../../prisma/prisma.service';
 import { UpdateDepositStatusDto } from './dto/update-depositsRequest.dto';
 import { MailService } from 'src/mail/mail.service';
-import { ReferralsService } from '../../referrals/referrals.service';
 
 @Injectable()
 export class RechargeRequestService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
-    private readonly referralsService: ReferralsService,
   ) {}
 
   async getAllRechargeRequests(search?: string, cursor?: string, limit = 10) {
@@ -158,12 +156,6 @@ export class RechargeRequestService {
             type: TransactionType.DEPOSIT,
             description: `Recarga aprobada: ${creditsToSum} creditos - Paquete ${packageName}`,
           },
-        });
-
-        await this.referralsService.maybeRewardReferralOnApprovedDeposit(tx, {
-          id: depositRequest.id,
-          userId: depositRequest.userId,
-          amount: depositRequest.amount,
         });
 
         return {
