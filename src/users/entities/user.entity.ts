@@ -15,6 +15,7 @@ export class UserEntity implements User {
   lastLogin: Date | null;
 
   isActive: boolean;
+  stripeCustomerId: string | null;
 
   wallet?: Wallet | null;
   userProfile?: UserProfile | null;

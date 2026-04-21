@@ -24,6 +24,7 @@ import { SystemConfigModule } from './system-config/system-config.module';
 import { AdminConfigModule } from './admin/config/admin-config.module';
 import { ReferralsModule } from './referrals/referrals.module';
 import { FlowModule } from './flow/flow.module';
+import { StripeModule } from './stripe/stripe.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { FlowModule } from './flow/flow.module';
     SpecialtyModule,
     ReferralsModule,
     FlowModule,
+    StripeModule,
   ],
   controllers: [],
   providers: [],
