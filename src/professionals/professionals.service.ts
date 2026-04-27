@@ -187,6 +187,12 @@ export class ProfessionalsService {
               rateCredits: true,
               isOnline: true,
               coverUrl: true,
+              servicePrices: {
+                select: {
+                  serviceType: true,
+                  price: true,
+                },
+              },
             },
           },
           professionalSpecialties: {
@@ -221,6 +227,10 @@ export class ProfessionalsService {
         images: mainImage ? [mainImage] : [],
         isOnline: profile?.isOnline ?? false,
         specialties: u.professionalSpecialties.map((ps) => ps.specialty),
+        servicePrices: (profile?.servicePrices ?? []).map((sp) => ({
+          serviceType: String(sp.serviceType),
+          price: Number(sp.price),
+        })),
       };
     });
 
