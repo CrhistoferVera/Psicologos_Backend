@@ -9,7 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import * as bcrypt from 'bcrypt';
-import { randomInt } from 'crypto';
+import { randomInt, randomUUID } from 'crypto';
 import { User } from '@prisma/client';
 import { UsersService } from '../users/users.service';
 import { UserEntity } from '../users/entities/user.entity';
@@ -146,12 +146,31 @@ export class AuthService {
       throw new BadRequestException('Las contrasenas no coinciden');
     }
 
-    const [existingCedula, existingUsername, existingEmail] = await Promise.all([
+    const [existingPhone, existingCedula, existingUsername, existingEmail] = await Promise.all([
+      this.prisma.user.findUnique({ where: { phoneNumber: payload.sub } }),
       this.prisma.professionalProfile.findUnique({ where: { cedula: dto.cedula } }),
       this.prisma.professionalProfile.findUnique({ where: { username: dto.username } }),
       dto.email ? this.usersService.findOneByEmail(dto.email.trim().toLowerCase()) : null,
     ]);
 
+    if (existingPhone) {
+      // Si ya es profesional pendiente de revisión, el registro se completó antes pero
+      // el cliente no recibió la respuesta (network error). Devolvemos el token sin error.
+      const isPendingProfessional =
+        PROFESSIONAL_ROLE === existingPhone.role ||
+        existingPhone.role === 'ANFITRIONA' as any;
+
+      const existingProfile = isPendingProfessional
+        ? await this.prisma.professionalProfile.findUnique({ where: { userId: existingPhone.id } })
+        : null;
+
+      if (existingProfile) {
+        const { password: _, ...userWithoutPass } = existingPhone;
+        return { ...this.generateTokenResponse(userWithoutPass), profile: existingProfile };
+      }
+
+      throw new ConflictException('Este número de teléfono ya tiene una cuenta registrada.');
+    }
     if (existingCedula) throw new ConflictException('La cedula ya esta registrada.');
     if (existingUsername) throw new ConflictException('El nombre de usuario ya esta en uso.');
     if (existingEmail) throw new ConflictException('El email ya esta registrado.');
@@ -164,24 +183,11 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(dto.password, 10);
     const email = dto.email?.trim().toLowerCase();
     const referralCode = await createUniqueReferralCode(this.prisma, dto.firstName ?? dto.username);
-    const newUser = await this.prisma.user.create({
-      data: {
-        phoneNumber: payload.sub,
-        email: email ?? null,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        password: hashedPassword,
-        role: PROFESSIONAL_ROLE,
-        referralCode,
-        isProfileComplete: true,
-        isActive: false,
-        wallet: { create: { balance: 0, promotionalBalance: 0 } },
-      },
-    });
 
-    const uid = newUser.id;
+    // Generate ID upfront so Cloudinary uploads can use it before any DB write
+    const uid = randomUUID();
 
-    // Upload all KYC documents in parallel
+    // Upload all KYC files first — if this fails, no user is left in the DB
     const [idDocResult, kycVideoResult, kycSelfieResult, matriculaResult, tituloResult] =
       await Promise.all([
         files?.idDoc
@@ -203,44 +209,58 @@ export class AuthService {
 
     // Automatic face comparison: selfie thumbnail vs ID document
     let faceMatchScore: number | null = null;
-    let kycFaceMatchStatus: 'PENDING' | 'PASSED' | 'FAILED' | 'SKIPPED' = 'PENDING';
+    let kycFaceMatchStatus: 'PENDING' | 'PASSED' | 'FAILED' | 'SKIPPED' = 'SKIPPED';
 
-    if (files?.kycSelfie && files?.idDoc) {
-      const isIdDocImage = files.idDoc.mimetype.startsWith('image/');
-      if (isIdDocImage) {
-        const result = await this.faceMatch.compareFaces(
-          files.kycSelfie.buffer,
-          files.idDoc.buffer,
-        );
-        faceMatchScore = result.score;
-        kycFaceMatchStatus = result.status;
-      } else {
-        kycFaceMatchStatus = 'SKIPPED';
-      }
-    } else {
-      kycFaceMatchStatus = 'SKIPPED';
+    if (files?.kycSelfie && files?.idDoc?.mimetype.startsWith('image/')) {
+      const result = await this.faceMatch.compareFaces(
+        files.kycSelfie.buffer,
+        files.idDoc.buffer,
+      );
+      faceMatchScore = result.score;
+      kycFaceMatchStatus = result.status;
     }
 
-    const profile = await this.prisma.professionalProfile.create({
-      data: {
-        userId: uid,
-        dateOfBirth: new Date(dto.dateOfBirth),
-        cedula: dto.cedula,
-        username: dto.username,
-        idDocUrl: idDocResult?.secureUrl ?? null,
-        idDocPublicId: idDocResult?.publicId ?? null,
-        kycVideoUrl: kycVideoResult?.secureUrl ?? null,
-        kycVideoPublicId: kycVideoResult?.publicId ?? null,
-        kycSelfieUrl: kycSelfieResult?.secureUrl ?? null,
-        kycSelfiePublicId: kycSelfieResult?.publicId ?? null,
-        matriculaUrl: matriculaResult?.secureUrl ?? null,
-        matriculaPublicId: matriculaResult?.publicId ?? null,
-        tituloProfesionalUrl: tituloResult?.secureUrl ?? null,
-        tituloProfesionalPublicId: tituloResult?.publicId ?? null,
-        kycFaceMatchScore: faceMatchScore,
-        kycFaceMatchStatus,
-        reviewStatus: 'PENDING',
-      },
+    // Create user + wallet + profile atomically — if anything fails, nothing is committed
+    const { newUser, profile } = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          id: uid,
+          phoneNumber: payload.sub,
+          email: email ?? null,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          password: hashedPassword,
+          role: PROFESSIONAL_ROLE,
+          referralCode,
+          isProfileComplete: true,
+          isActive: false,
+          wallet: { create: { balance: 0, promotionalBalance: 0 } },
+        },
+      });
+
+      const prof = await tx.professionalProfile.create({
+        data: {
+          userId: uid,
+          dateOfBirth: new Date(dto.dateOfBirth),
+          cedula: dto.cedula,
+          username: dto.username,
+          idDocUrl: idDocResult?.secureUrl ?? null,
+          idDocPublicId: idDocResult?.publicId ?? null,
+          kycVideoUrl: kycVideoResult?.secureUrl ?? null,
+          kycVideoPublicId: kycVideoResult?.publicId ?? null,
+          kycSelfieUrl: kycSelfieResult?.secureUrl ?? null,
+          kycSelfiePublicId: kycSelfieResult?.publicId ?? null,
+          matriculaUrl: matriculaResult?.secureUrl ?? null,
+          matriculaPublicId: matriculaResult?.publicId ?? null,
+          tituloProfesionalUrl: tituloResult?.secureUrl ?? null,
+          tituloProfesionalPublicId: tituloResult?.publicId ?? null,
+          kycFaceMatchScore: faceMatchScore,
+          kycFaceMatchStatus,
+          reviewStatus: 'PENDING',
+        },
+      });
+
+      return { newUser: user, profile: prof };
     });
 
     if (requestedReferralCode) {
