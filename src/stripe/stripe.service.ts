@@ -39,16 +39,17 @@ export class StripeService {
   }
 
   // Crea el PaymentIntent y el DepositRequest en PENDING
-  async createPaymentIntent(userId: string, packageId: string) {
+  async createPaymentIntent(userId: string, packageId: string, saveCard = false) {
     const pkg = await this.prisma.package.findUnique({ where: { id: packageId } });
     if (!pkg || !pkg.isActive) throw new NotFoundException('Paquete no encontrado');
 
     const customerId = await this.getOrCreateCustomer(userId);
 
     const paymentIntent = await this.stripe.paymentIntents.create({
-      amount: Math.round(Number(pkg.price) * 100), // Stripe trabaja en centavos
+      amount: Math.round(Number(pkg.price) * 100),
       currency: 'usd',
       customer: customerId,
+      ...(saveCard && { setup_future_usage: 'off_session' }),
       metadata: { userId, packageId },
     });
 
@@ -122,6 +123,31 @@ export class StripeService {
         },
       }),
     ]);
+  }
+
+  // Lista las tarjetas guardadas del usuario
+  async getSavedPaymentMethods(userId: string) {
+    const customerId = await this.getOrCreateCustomer(userId);
+    const methods = await this.stripe.paymentMethods.list({
+      customer: customerId,
+      type: 'card',
+    });
+    return methods.data.map((pm: any) => ({
+      id: pm.id,
+      brand: pm.card.brand,
+      last4: pm.card.last4,
+      expMonth: pm.card.exp_month,
+      expYear: pm.card.exp_year,
+    }));
+  }
+
+  // Genera una ephemeral key para que el frontend pueda leer las tarjetas guardadas
+  async createEphemeralKey(userId: string) {
+    const customerId = await this.getOrCreateCustomer(userId);
+    return this.stripe.ephemeralKeys.create(
+      { customer: customerId },
+      { apiVersion: this.config.get<string>('STRIPE_API_VERSION') ?? '2023-10-16' },
+    );
   }
 
   // Procesa el evento payment_intent.payment_failed

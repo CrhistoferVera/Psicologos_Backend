@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   Headers,
   Post,
   Req,
@@ -30,8 +31,23 @@ export class StripeController {
   createPaymentIntent(
     @CurrentUser() user: JwtUser,
     @Body('packageId') packageId: string,
+    @Body('saveCard') saveCard = false,
   ) {
-    return this.stripeService.createPaymentIntent(user.userId, packageId);
+    return this.stripeService.createPaymentIntent(user.userId, packageId, saveCard);
+  }
+
+  @Get('payment-methods')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Listar tarjetas guardadas del usuario' })
+  getSavedPaymentMethods(@CurrentUser() user: JwtUser) {
+    return this.stripeService.getSavedPaymentMethods(user.userId);
+  }
+
+  @Post('ephemeral-key')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Generar ephemeral key para el frontend' })
+  createEphemeralKey(@CurrentUser() user: JwtUser) {
+    return this.stripeService.createEphemeralKey(user.userId);
   }
 
   // Stripe llama este endpoint automáticamente cuando ocurre un evento
