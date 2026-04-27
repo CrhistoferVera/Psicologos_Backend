@@ -11,6 +11,14 @@ export class SpecialtySummaryDto {
   slug: string;
 }
 
+export class ServicePricePublicDto {
+  @ApiProperty({ example: 'CALL', description: 'Tipo de servicio: MESSAGE_SEND | CALL | VIDEO_CALL' })
+  serviceType: string;
+
+  @ApiProperty({ example: 20, description: 'Precio en créditos' })
+  price: number;
+}
+
 export class ProfessionalPublicListItemDto {
   @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
   id: string;
@@ -36,7 +44,7 @@ export class ProfessionalPublicListItemDto {
   @ApiProperty({
     example: 'https://res.cloudinary.com/demo/image/upload/v1/main.jpg',
     nullable: true,
-    description: 'Imagen principal del perfil',
+    description: 'Imagen principal del perfil (coverUrl ?? avatarUrl)',
   })
   mainImage: string | null;
 
@@ -56,6 +64,12 @@ export class ProfessionalPublicListItemDto {
     example: [{ id: '550e8400-e29b-41d4-a716-446655440001', name: 'Depresion', slug: 'depresion' }],
   })
   specialties: SpecialtySummaryDto[];
+
+  @ApiProperty({
+    type: [ServicePricePublicDto],
+    description: 'Precios por tipo de servicio (chat, llamada, video)',
+  })
+  servicePrices: ServicePricePublicDto[];
 }
 
 export class ProfessionalPublicListResponseDto {
