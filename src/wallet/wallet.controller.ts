@@ -10,6 +10,8 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { WalletService } from './wallet.service';
+import { AddBankAccountDto } from './dto/add-bank-account.dto';
+import { CreateWithdrawalRequestDto } from './dto/create-withdrawal-request.dto';
 
 interface JwtUser {
   userId: string;
@@ -39,7 +41,7 @@ export class WalletController {
   @Post('me/bank-accounts')
   addBankAccount(
     @CurrentUser() user: JwtUser,
-    @Body() body: { bankId: number; accountNumber: string; accountHolderName?: string },
+    @Body() body: AddBankAccountDto,
   ) {
     return this.walletService.addBankAccount(user.userId, body);
   }
@@ -52,7 +54,7 @@ export class WalletController {
   @Post('me/withdrawal-request')
   createWithdrawalRequest(
     @CurrentUser() user: JwtUser,
-    @Body() body: { credits: number; bankAccountId: string },
+    @Body() body: CreateWithdrawalRequestDto,
   ) {
     return this.walletService.createWithdrawalRequest(user.userId, body);
   }

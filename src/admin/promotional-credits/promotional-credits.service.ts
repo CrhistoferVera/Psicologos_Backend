@@ -71,7 +71,7 @@ export class PromotionalCreditsService {
         promotionalBalance: Number(result.wallet.promotionalBalance),
         realBalance: Number(result.wallet.balance) - Number(result.wallet.promotionalBalance),
       },
-      reason: dto.reason ? dto.reason : null,
+      reason: dto.reason?.trim() || null,
       createdAt: result.grant.createdAt,
     };
   }

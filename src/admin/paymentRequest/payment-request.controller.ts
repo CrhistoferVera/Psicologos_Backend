@@ -15,8 +15,8 @@ import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { UserRole, WithdrawalStatus } from '@prisma/client';
-import { RechargeRequestService } from './payment-request.service';
-import { UpdateWithdrawalRequetsDto } from './dto/update-withdrawalRequest.dto';
+import { PaymentRequestService } from './payment-request.service';
+import { UpdateWithdrawalRequestDto } from './dto/update-withdrawal-request.dto';
 import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 
@@ -32,7 +32,7 @@ export class PaymentRequestController {
   private readonly logger = new Logger(PaymentRequestController.name);
 
   constructor(
-    private readonly paymentRequestService: RechargeRequestService,
+    private readonly paymentRequestService: PaymentRequestService,
     private readonly cloudinaryService: CloudinaryService,
   ) {}
 
@@ -42,7 +42,7 @@ export class PaymentRequestController {
   @UseInterceptors(FileInterceptor('receipt'))
   async updateStatus(
     @Param('id') id: string,
-    @Body() updateDto: UpdateWithdrawalRequetsDto,
+    @Body() updateDto: UpdateWithdrawalRequestDto,
     @CurrentUser() admin: JwtUser,
     @UploadedFile() file?: Express.Multer.File,
   ) {
@@ -62,6 +62,6 @@ export class PaymentRequestController {
       receiptData = { url: uploaded.secureUrl, publicId: uploaded.publicId };
     }
 
-    return this.paymentRequestService.updateDepositStatus(id, updateDto, receiptData);
+    return this.paymentRequestService.updateWithdrawalStatus(id, updateDto, receiptData);
   }
 }

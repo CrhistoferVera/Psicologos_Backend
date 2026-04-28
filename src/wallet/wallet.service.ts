@@ -1,11 +1,10 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { AddBankAccountDto } from './dto/add-bank-account.dto';
+import { CreateWithdrawalRequestDto } from './dto/create-withdrawal-request.dto';
 
 @Injectable()
 export class WalletService {
@@ -14,6 +13,15 @@ export class WalletService {
     private readonly notificationsService: NotificationsService,
     private readonly systemConfigService: SystemConfigService,
   ) {}
+
+  private computeWithdrawableBalance(
+    balance: Prisma.Decimal | number,
+    promotionalBalance: Prisma.Decimal | number,
+  ) {
+    const total = Number(balance ?? 0);
+    const promotional = Number(promotionalBalance ?? 0);
+    return Math.max(total - promotional, 0);
+  }
 
   async getMyEarnings(userId: string) {
     const wallet = await this.prisma.wallet.upsert({
@@ -27,7 +35,7 @@ export class WalletService {
     const startOfWeek = new Date(startOfToday);
     startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
 
-    const [todayResult, weekResult, transactions] = await Promise.all([
+    const [todayResult, weekResult, transactions, withdrawalsEnabled] = await Promise.all([
       this.prisma.transaction.aggregate({
         where: {
           walletId: wallet.id,
@@ -51,6 +59,7 @@ export class WalletService {
         orderBy: { createdAt: 'desc' },
         take: 50,
       }),
+      this.systemConfigService.isWithdrawalsEnabled(),
     ]);
 
     const parsedTransactions = transactions.map((tx) => {
@@ -73,8 +82,15 @@ export class WalletService {
       };
     });
 
+    const promotionalBalance = Number(wallet.promotionalBalance ?? 0);
+    const realBalance = this.computeWithdrawableBalance(wallet.balance, wallet.promotionalBalance ?? 0);
+
     return {
       balance: Number(wallet.balance),
+      promotionalBalance,
+      realBalance,
+      withdrawableBalance: realBalance,
+      withdrawalsEnabled,
       today: Number(todayResult._sum.amount ?? 0),
       thisWeek: Number(weekResult._sum.amount ?? 0),
       total: Number(wallet.balance),
@@ -110,10 +126,7 @@ export class WalletService {
     }));
   }
 
-  async addBankAccount(
-    userId: string,
-    dto: { bankId: number; accountNumber: string; accountHolderName?: string },
-  ) {
+  async addBankAccount(userId: string, dto: AddBankAccountDto) {
     const profile = await this.prisma.professionalProfile.findUnique({
       where: { userId },
     });
@@ -121,13 +134,27 @@ export class WalletService {
       throw new NotFoundException('Perfil profesional no encontrado');
     }
 
+    const normalizedAccountNumber = dto.accountNumber.trim();
+    const normalizedHolderName = dto.accountHolderName?.trim() || null;
+
+    const duplicate = await this.prisma.bankAccount.findFirst({
+      where: {
+        userId,
+        bankId: dto.bankId,
+        accountNumber: normalizedAccountNumber,
+      },
+    });
+    if (duplicate) {
+      throw new BadRequestException('Esta cuenta bancaria ya esta registrada.');
+    }
+
     const account = await this.prisma.bankAccount.create({
       data: {
         userId,
         bankId: dto.bankId,
         professionalProfileId: profile.id,
-        accountNumber: dto.accountNumber,
-        accountHolderName: dto.accountHolderName,
+        accountNumber: normalizedAccountNumber,
+        accountHolderName: normalizedHolderName,
       },
       include: { bank: true },
     });
@@ -149,14 +176,23 @@ export class WalletService {
     if (!account) {
       throw new NotFoundException('Cuenta bancaria no encontrada');
     }
+
+    const hasPendingWithdrawal = await this.prisma.withdrawalRequest.findFirst({
+      where: {
+        bankAccountId: BigInt(accountId),
+        status: 'PENDING',
+      },
+      select: { id: true },
+    });
+    if (hasPendingWithdrawal) {
+      throw new BadRequestException('No puedes eliminar una cuenta con un retiro pendiente.');
+    }
+
     await this.prisma.bankAccount.delete({ where: { id: BigInt(accountId) } });
     return { message: 'Cuenta eliminada' };
   }
 
-  async createWithdrawalRequest(
-    userId: string,
-    dto: { credits: number; bankAccountId: string },
-  ) {
+  async createWithdrawalRequest(userId: string, dto: CreateWithdrawalRequestDto) {
     if (dto.credits <= 0) {
       throw new BadRequestException('El monto debe ser mayor a 0');
     }
@@ -171,8 +207,12 @@ export class WalletService {
       throw new NotFoundException('Wallet no encontrada');
     }
 
-    if (Number(wallet.balance) < dto.credits) {
-      throw new BadRequestException('Saldo insuficiente');
+    const withdrawableBalance = this.computeWithdrawableBalance(
+      wallet.balance,
+      wallet.promotionalBalance ?? 0,
+    );
+    if (withdrawableBalance < dto.credits) {
+      throw new BadRequestException('Saldo disponible para retiro insuficiente.');
     }
 
     const bankAccount = await this.prisma.bankAccount.findFirst({
@@ -185,23 +225,13 @@ export class WalletService {
     const creditValueBs = await this.systemConfigService.getCreditToSolesRate();
     const amountBs = dto.credits * creditValueBs;
 
-    const [, , request] = await this.prisma.$transaction([
-      this.prisma.wallet.update({
+    const request = await this.prisma.$transaction(async (tx) => {
+      await tx.wallet.update({
         where: { id: wallet.id },
         data: { balance: { decrement: dto.credits } },
-      }),
-      this.prisma.transaction.create({
-        data: {
-          walletId: wallet.id,
-          type: 'WITHDRAWAL',
-          amount: dto.credits,
-          isPromotional: false,
-          promotionalAmount: 0,
-          realAmount: dto.credits,
-          description: JSON.stringify({ reason: 'Solicitud de retiro' }),
-        },
-      }),
-      this.prisma.withdrawalRequest.create({
+      });
+
+      const createdRequest = await tx.withdrawalRequest.create({
         data: {
           walletId: wallet.id,
           bankAccountId: BigInt(dto.bankAccountId),
@@ -209,11 +239,31 @@ export class WalletService {
           soles: amountBs,
           status: 'PENDING',
         },
-      }),
-    ]);
+      });
+
+      await tx.transaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'WITHDRAWAL',
+          amount: dto.credits,
+          isPromotional: false,
+          promotionalAmount: 0,
+          realAmount: dto.credits,
+          description: JSON.stringify({
+            event: 'WITHDRAWAL_REQUEST_CREATED',
+            withdrawalRequestId: createdRequest.id,
+            credits: dto.credits,
+            payoutAmountBs: amountBs,
+            bankAccountId: dto.bankAccountId,
+          }),
+        },
+      });
+
+      return createdRequest;
+    });
 
     const created = await this.prisma.withdrawalRequest.findUnique({
-      where: { id: (request as any).id },
+      where: { id: request.id },
       include: { bankAccount: { include: { bank: true } } },
     });
 
@@ -228,14 +278,15 @@ export class WalletService {
       }),
     ]);
 
-    const professionalName = [professional?.firstName, professional?.lastName].filter(Boolean).join(' ') || 'Un profesional';
+    const professionalName =
+      [professional?.firstName, professional?.lastName].filter(Boolean).join(' ') || 'Un profesional';
     const adminTokens = admins.map((a) => a.fcmToken!);
 
     this.notificationsService.sendMulticastNotification(
       adminTokens,
       'Nueva solicitud de retiro',
-      `${professionalName} solicitó un retiro de ${dto.credits} créditos (Bs ${amountBs.toFixed(2)})`,
-      { withdrawalRequestId: (request as any).id, type: 'NEW_WITHDRAWAL_REQUEST' },
+      `${professionalName} solicito un retiro de ${dto.credits} creditos (Bs ${amountBs.toFixed(2)})`,
+      { withdrawalRequestId: request.id, type: 'NEW_WITHDRAWAL_REQUEST' },
     );
 
     return {
@@ -244,9 +295,14 @@ export class WalletService {
       amountBs: Number(created!.soles),
       soles: Number(created!.soles),
       status: created!.status,
+      notes: created!.notes,
+      rejectionReason: created!.rejectionReason,
+      receiptUrl: created!.receiptUrl,
       bankName: created!.bankAccount.bank.name,
       accountNumber: created!.bankAccount.accountNumber,
+      accountHolderName: created!.bankAccount.accountHolderName,
       createdAt: created!.createdAt,
+      updatedAt: created!.updatedAt,
     };
   }
 
@@ -271,9 +327,9 @@ export class WalletService {
       receiptUrl: r.receiptUrl,
       bankName: r.bankAccount.bank.name,
       accountNumber: r.bankAccount.accountNumber,
+      accountHolderName: r.bankAccount.accountHolderName,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     }));
   }
 }
-

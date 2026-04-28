@@ -26,9 +26,9 @@ export class AdminProfessionalsService {
       throw new NotFoundException(`No se encontro un profesional con ID: ${id}`);
     }
 
-    const reviewStatus =
-      updateStatusDto.reviewStatus ?
-      (updateStatusDto.isActive ? ProfessionalReviewStatus.APPROVED : ProfessionalReviewStatus.REJECTED) : undefined;
+    const reviewStatus = updateStatusDto.reviewStatus
+      ? (updateStatusDto.isActive ? ProfessionalReviewStatus.APPROVED : ProfessionalReviewStatus.REJECTED)
+      : undefined;
 
     await this.prisma.$transaction([
       this.prisma.user.update({
@@ -45,7 +45,7 @@ export class AdminProfessionalsService {
         },
         create: {
           userId: id,
-          username: user.professionalProfile?.username ? user.professionalProfile.username : `prof_${id.slice(0, 8)}`,
+          username: user.professionalProfile?.username || `prof_${id.slice(0, 8)}`,
           reviewStatus,
           ...(updateStatusDto.reviewNotes !== undefined
             ? { reviewNotes: updateStatusDto.reviewNotes }
@@ -79,7 +79,7 @@ export class AdminProfessionalsService {
         },
         create: {
           userId: id,
-          username: dto.username ? dto.username : `prof_${id.slice(0, 8)}`,
+          username: dto.username || `prof_${id.slice(0, 8)}`,
           ...(dto.bio !== undefined && { bio: dto.bio }),
         },
       }),
@@ -255,6 +255,7 @@ export class AdminProfessionalsService {
         rejectionReason: r.rejectionReason,
         bankName: r.bankAccount.bank.name,
         accountNumber: r.bankAccount.accountNumber,
+        accountHolderName: r.bankAccount.accountHolderName,
         professional: r.wallet.user,
         currentBalance: Number(r.wallet.balance),
         createdAt: r.createdAt,
@@ -371,6 +372,7 @@ export class AdminProfessionalsService {
         receiptPublicId: r.receiptPublicId,
         bankName: r.bankAccount.bank.name,
         accountNumber: r.bankAccount.accountNumber,
+        accountHolderName: r.bankAccount.accountHolderName,
         professional: r.wallet.user,
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
@@ -379,4 +381,3 @@ export class AdminProfessionalsService {
     };
   }
 }
-

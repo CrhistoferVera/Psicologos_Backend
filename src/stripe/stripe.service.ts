@@ -17,7 +17,9 @@ export class StripeService {
     this.stripe = new Stripe(this.config.get<string>('STRIPE_SECRET_KEY')!);
   }
 
-  // Crea o reutiliza el customer de Stripe para el usuario
+  // Crea o reutiliza el customer de Stripe para el usuario.
+  // Si el ID guardado ya no existe en la cuenta Stripe actual (cuenta vieja/migración),
+  // crea un customer nuevo y lo persiste para no volver a romper el flujo.
   async getOrCreateCustomer(userId: string): Promise<string> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('Usuario no encontrado');
@@ -27,7 +29,7 @@ export class StripeService {
         const existing = await this.stripe.customers.retrieve(user.stripeCustomerId);
         if (!existing.deleted) return user.stripeCustomerId;
       } catch {
-        // El customer no existe en Stripe (ej: ID guardado de modo test en producción)
+        // El customer no existe en Stripe para esta cuenta; limpiar ID y crear uno nuevo abajo.
         await this.prisma.user.update({
           where: { id: userId },
           data: { stripeCustomerId: null },
@@ -93,7 +95,7 @@ export class StripeService {
       },
     });
 
-    return { clientSecret: paymentIntent.client_secret };
+    return { clientSecret: paymentIntent.client_secret, customerId };
   }
 
   // Verifica la firma del webhook y devuelve el evento
@@ -166,7 +168,7 @@ export class StripeService {
     const customerId = await this.getOrCreateCustomer(userId);
     return this.stripe.ephemeralKeys.create(
       { customer: customerId },
-      { apiVersion: this.config.get<string>('STRIPE_API_VERSION') ?? '2026-04-22.dahlia' },
+      { apiVersion: this.config.get<string>('STRIPE_API_VERSION') ?? '2024-06-20' },
     );
   }
 

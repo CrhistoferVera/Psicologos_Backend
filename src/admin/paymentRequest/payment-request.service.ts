@@ -6,21 +6,21 @@ import {
 } from '@nestjs/common';
 import { Prisma, TransactionType, WithdrawalStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { UpdateWithdrawalRequetsDto } from './dto/update-withdrawalRequest.dto';
+import { UpdateWithdrawalRequestDto } from './dto/update-withdrawal-request.dto';
 import { MailService } from 'src/mail/mail.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
 
 @Injectable()
-export class RechargeRequestService {
+export class PaymentRequestService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
     private readonly notificationsService: NotificationsService,
   ) {}
 
-  async updateDepositStatus(
+  async updateWithdrawalStatus(
     id: string,
-    updateDto: UpdateWithdrawalRequetsDto,
+    updateDto: UpdateWithdrawalRequestDto,
     receiptData?: { url: string; publicId: string },
   ) {
     const { status, rejectionReason, notes } = updateDto;
@@ -47,8 +47,14 @@ export class RechargeRequestService {
     }
 
     const credits = Number(withdrawalRequest.credits);
+    const payoutAmountBs = Number(withdrawalRequest.soles);
 
     if (status === WithdrawalStatus.REJECTED) {
+      if (!rejectionReason?.trim()) {
+        throw new BadRequestException('Debes proporcionar un motivo para rechazar la solicitud.');
+      }
+      const normalizedRejectionReason = rejectionReason.trim();
+
       const updated = await this.prisma.$transaction(async (tx) => {
         await tx.wallet.update({
           where: { id: withdrawalRequest.walletId },
@@ -63,7 +69,13 @@ export class RechargeRequestService {
             realAmount: new Prisma.Decimal(credits),
             isPromotional: false,
             type: TransactionType.WITHDRAWAL,
-            description: 'Devolucion por retiro rechazado',
+            description: JSON.stringify({
+              event: 'WITHDRAWAL_REJECTION_REFUND',
+              withdrawalRequestId: id,
+              reason: rejectionReason.trim(),
+              credits,
+              payoutAmountBs,
+            }),
           },
         });
 
@@ -71,8 +83,8 @@ export class RechargeRequestService {
           where: { id },
           data: {
             status: WithdrawalStatus.REJECTED,
-            rejectionReason,
-            notes: notes ? notes : null,
+            rejectionReason: normalizedRejectionReason,
+            notes: notes?.trim() || null,
           },
         });
       });
@@ -83,8 +95,8 @@ export class RechargeRequestService {
           withdrawalRequest.wallet.user.firstName,
           'REJECTED',
           credits,
-          Number(withdrawalRequest.soles),
-          rejectionReason,
+          payoutAmountBs,
+          normalizedRejectionReason,
         );
       }
 
@@ -92,7 +104,7 @@ export class RechargeRequestService {
         this.notificationsService.sendPushNotification(
           withdrawalRequest.wallet.user.fcmToken,
           'Solicitud de retiro rechazada',
-          rejectionReason ? rejectionReason : 'Tu solicitud de retiro fue rechazada.',
+          normalizedRejectionReason,
           { withdrawalRequestId: id, type: 'WITHDRAWAL_REJECTED' },
         );
       }
@@ -115,7 +127,7 @@ export class RechargeRequestService {
           data: {
             status: WithdrawalStatus.APPROVED,
             rejectionReason: null,
-            notes: notes ? notes : null,
+            notes: notes?.trim() || null,
             receiptUrl: receiptData!.url,
             receiptPublicId: receiptData!.publicId,
           },
@@ -129,7 +141,12 @@ export class RechargeRequestService {
             realAmount: new Prisma.Decimal(credits),
             isPromotional: false,
             type: TransactionType.WITHDRAWAL,
-            description: 'Retiro aprobado',
+            description: JSON.stringify({
+              event: 'WITHDRAWAL_APPROVAL',
+              withdrawalRequestId: id,
+              credits,
+              payoutAmountBs,
+            }),
           },
         });
 
@@ -142,7 +159,7 @@ export class RechargeRequestService {
           withdrawalRequest.wallet.user.firstName,
           'APPROVED',
           credits,
-          Number(withdrawalRequest.soles),
+          payoutAmountBs,
           null,
         );
       }

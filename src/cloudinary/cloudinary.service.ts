@@ -170,7 +170,7 @@ export class CloudinaryService {
     }
 
     const resourceType: 'image' | 'raw' = isImage ? 'image' : 'raw';
-    const folder = `pachamama/users/${userId}/withdrawals/${withdrawalId}`;
+    const folder = `sanamente/withdrawals/admin_${userId}/${withdrawalId}`;
     const publicId = `proof_${Date.now()}`;
 
     if (isPrivate) {
@@ -240,7 +240,7 @@ export class CloudinaryService {
           resolve({
             publicId: result.public_id,
             resourceType: resourceType,
-            bytes: result.bytes ? result.bytes : 0,
+            bytes: result.bytes ?? 0,
             format: result.format,
           });
         },
@@ -565,4 +565,3 @@ export class CloudinaryService {
     }
   }
 }
-

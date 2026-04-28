@@ -117,7 +117,7 @@ export class UsersController {
       phoneNumber: body.phoneNumber,
       userName: body.userName,
       bio: body.bio,
-      ...(avatarPayload ? avatarPayload : {}),
+      ...(avatarPayload ?? {}),
     });
 
     return new UserEntity(updated);

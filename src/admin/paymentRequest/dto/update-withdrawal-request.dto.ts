@@ -8,7 +8,7 @@ import {
 } from 'class-validator';
 import { WithdrawalStatus } from '@prisma/client';
 
-export class UpdateWithdrawalRequetsDto {
+export class UpdateWithdrawalRequestDto {
   @ApiProperty({
     example: WithdrawalStatus.APPROVED,
     description: 'Nuevo estado de la solicitud de pago',
