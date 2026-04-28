@@ -170,6 +170,79 @@ export class UsersService {
     return user;
   }
 
+  async updateMyUserProfile(
+    userId: string,
+    payload: {
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+      phoneNumber?: string;
+      userName?: string;
+      bio?: string;
+      avatarUrl?: string;
+      avatarPublicId?: string;
+    },
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, role: UserRole.USER },
+      include: { userProfile: true, wallet: true },
+    });
+
+    if (!user) throw new NotFoundException('Perfil de usuario no encontrado');
+
+    const email = payload.email?.trim().toLowerCase();
+    const phoneNumber = payload.phoneNumber?.trim();
+    const userName = payload.userName?.trim();
+
+    if (email && email !== user.email) {
+      const existingEmail = await this.prisma.user.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' }, NOT: { id: userId } },
+        select: { id: true },
+      });
+      if (existingEmail) throw new ConflictException('El email ya está registrado.');
+    }
+
+    if (phoneNumber && phoneNumber !== user.phoneNumber) {
+      const existingPhone = await this.prisma.user.findFirst({
+        where: { phoneNumber, NOT: { id: userId } },
+        select: { id: true },
+      });
+      if (existingPhone) throw new ConflictException('El número de teléfono ya está registrado.');
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(payload.firstName !== undefined ? { firstName: payload.firstName } : {}),
+        ...(payload.lastName !== undefined ? { lastName: payload.lastName } : {}),
+        ...(email !== undefined ? { email } : {}),
+        ...(phoneNumber !== undefined ? { phoneNumber } : {}),
+        userProfile: {
+          upsert: {
+            create: {
+              userName: userName ?? user.firstName ?? `user_${userId.slice(0, 8)}`,
+              ...(payload.bio !== undefined ? { bio: payload.bio } : {}),
+              ...(payload.avatarUrl !== undefined ? { avatarUrl: payload.avatarUrl } : {}),
+              ...(payload.avatarPublicId !== undefined ? { avatarPublicId: payload.avatarPublicId } : {}),
+            },
+            update: {
+              ...(userName !== undefined ? { userName } : {}),
+              ...(payload.bio !== undefined ? { bio: payload.bio } : {}),
+              ...(payload.avatarUrl !== undefined ? { avatarUrl: payload.avatarUrl } : {}),
+              ...(payload.avatarPublicId !== undefined ? { avatarPublicId: payload.avatarPublicId } : {}),
+            },
+          },
+        },
+      },
+      include: {
+        wallet: true,
+        userProfile: true,
+      },
+    });
+
+    return updated;
+  }
+
   async update(id: string, data: Prisma.UserUpdateInput): Promise<User> {
     return this.prisma.user.update({ where: { id }, data });
   }

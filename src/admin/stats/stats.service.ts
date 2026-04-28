@@ -20,7 +20,7 @@ export class StatsService {
     if (!wallet) return null;
 
     const runtimeConfig = await this.systemConfigService.getRuntimeConfig();
-    const creditToSoles = runtimeConfig.creditToSolesRate;
+    const creditValueBs = runtimeConfig.creditToSolesRate;
 
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -51,7 +51,7 @@ export class StatsService {
       }),
     ]);
 
-    const toSoles = (credits: number) => +(credits * creditToSoles).toFixed(2);
+    const toBs = (credits: number) => +(credits * creditValueBs).toFixed(2);
 
     const totalCredits = this.decimal(totalEarnings._sum.amount);
     const todayCredits = this.decimal(todayEarnings._sum.amount);
@@ -61,12 +61,13 @@ export class StatsService {
     return {
       balance: {
         credits: balanceCredits,
-        soles: toSoles(balanceCredits),
+        amountBs: toBs(balanceCredits),
+        soles: toBs(balanceCredits),
       },
       earnings: {
-        total: { credits: totalCredits, soles: toSoles(totalCredits) },
-        today: { credits: todayCredits, soles: toSoles(todayCredits) },
-        thisMonth: { credits: monthCredits, soles: toSoles(monthCredits) },
+        total: { credits: totalCredits, amountBs: toBs(totalCredits), soles: toBs(totalCredits) },
+        today: { credits: todayCredits, amountBs: toBs(todayCredits), soles: toBs(todayCredits) },
+        thisMonth: { credits: monthCredits, amountBs: toBs(monthCredits), soles: toBs(monthCredits) },
       },
     };
   }

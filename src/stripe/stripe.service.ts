@@ -25,7 +25,7 @@ export class StripeService {
     if (user.stripeCustomerId) return user.stripeCustomerId;
 
     const customer = await this.stripe.customers.create({
-      email: user.email ?? undefined,
+      email: user.email ? undefined,
       name: [user.firstName, user.lastName].filter(Boolean).join(' ') || undefined,
       metadata: { userId },
     });
@@ -146,7 +146,7 @@ export class StripeService {
     const customerId = await this.getOrCreateCustomer(userId);
     return this.stripe.ephemeralKeys.create(
       { customer: customerId },
-      { apiVersion: this.config.get<string>('STRIPE_API_VERSION') ?? '2023-10-16' },
+      { apiVersion: this.config.get<string>('STRIPE_API_VERSION') ? '2023-10-16' },
     );
   }
 

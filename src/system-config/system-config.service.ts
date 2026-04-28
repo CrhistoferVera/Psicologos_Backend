@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma.service';
 
 export type RuntimeSystemConfig = {
   platformFeePercent: number;
+  creditValueBs: number;
   creditToSolesRate: number;
   minAppVersion: string;
   referralPercentage: number;
@@ -19,9 +20,11 @@ export class SystemConfigService {
   constructor(private readonly prisma: PrismaService) {}
 
   private fromEnvDefaults() {
+    const creditValueBs = Number(process.env.CREDIT_VALUE_BS ?? process.env.CREDIT_TO_SOLES_RATE ?? '1');
+
     return {
       platformFeePercent: Number(process.env.PLATFORM_FEE_PERCENT ?? '50'),
-      creditToSolesRate: Number(process.env.CREDIT_TO_SOLES_RATE ?? '1'),
+      creditValueBs,
       minAppVersion: process.env.MIN_APP_VERSION ?? '1.0',
       referralPercentage: Number(process.env.REFERRAL_PERCENTAGE ?? '2.5'),
       referralRewardCredits: Number(process.env.REFERRAL_REWARD_CREDITS ?? '10'),
@@ -43,7 +46,7 @@ export class SystemConfigService {
         data: {
           id: 'global',
           platformFeePercent: defaults.platformFeePercent,
-          creditToSolesRate: defaults.creditToSolesRate,
+          creditToSolesRate: defaults.creditValueBs,
           minAppVersion: defaults.minAppVersion,
           referralRewardCredits: defaults.referralRewardCredits,
           referralMinDepositAmount: defaults.referralMinDepositAmount,
@@ -66,9 +69,12 @@ export class SystemConfigService {
   }
 
   toRuntime(config: Awaited<ReturnType<SystemConfigService['getOrCreateRaw']>>): RuntimeSystemConfig {
+    const creditValueBs = Number(config.creditToSolesRate);
+
     return {
       platformFeePercent: Number(config.platformFeePercent),
-      creditToSolesRate: Number(config.creditToSolesRate),
+      creditValueBs,
+      creditToSolesRate: creditValueBs,
       minAppVersion: config.minAppVersion,
       referralPercentage: Number(config.referralPercentage),
       referralRewardCredits: Number(config.referralRewardCredits),
@@ -86,12 +92,13 @@ export class SystemConfigService {
 
   async updateConfig(payload: Partial<RuntimeSystemConfig>) {
     await this.getOrCreateRaw();
+    const creditValueBs = payload.creditValueBs ?? payload.creditToSolesRate;
 
     const updated = await this.prisma.systemConfig.update({
       where: { id: 'global' },
       data: {
         ...(payload.platformFeePercent !== undefined ? { platformFeePercent: payload.platformFeePercent } : {}),
-        ...(payload.creditToSolesRate !== undefined ? { creditToSolesRate: payload.creditToSolesRate } : {}),
+        ...(creditValueBs !== undefined ? { creditToSolesRate: creditValueBs } : {}),
         ...(payload.minAppVersion !== undefined ? { minAppVersion: payload.minAppVersion } : {}),
         ...(payload.referralPercentage !== undefined ? { referralPercentage: payload.referralPercentage } : {}),
         ...(payload.referralRewardCredits !== undefined ? { referralRewardCredits: payload.referralRewardCredits } : {}),
@@ -108,6 +115,7 @@ export class SystemConfigService {
   async getPublicConfig() {
     const config = await this.getRuntimeConfig();
     return {
+      creditValueBs: config.creditValueBs,
       creditToSolesRate: config.creditToSolesRate,
       minVersion: config.minAppVersion,
       paymentsEnabled: config.paymentsEnabled,
@@ -126,7 +134,7 @@ export class SystemConfigService {
 
   async getCreditToSolesRate() {
     const config = await this.getRuntimeConfig();
-    return config.creditToSolesRate;
+    return config.creditValueBs;
   }
 
   async isPaymentsEnabled() {

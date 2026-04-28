@@ -89,7 +89,7 @@ export class BanecoQrService {
         transactionId: deposit.id,
         amount,
         currency: this.currency,
-        description: `PsyConnect - ${pkg.name}`,
+        description: `Sanamente - ${pkg.name}`,
         dueDate: this.buildDueDate(),
         singleUse: true,
         modifyAmount: false,
@@ -241,7 +241,7 @@ export class BanecoQrService {
       return { ok: true, alreadyApplied: true };
     }
 
-    // Intentamos cancelar: si el banco responde "ya pagado" → confirmamos el pago.
+    // Intentamos cancelar: si el banco responde "ya pagado" -> confirmamos el pago.
     const res = await this.banecoApi.cancelQR(qrId);
     if (res.responseCode !== 0 && /pagado/i.test(res.message ?? '')) {
       await this.applyPaymentByQrId(qrId, null);

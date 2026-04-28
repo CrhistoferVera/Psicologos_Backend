@@ -9,7 +9,10 @@ import {
   Body,
   BadRequestException,
   Patch,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { UsersService } from './users.service';
 import { UserEntity } from './entities/user.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -18,8 +21,10 @@ import { UserRole } from '@prisma/client';
 import { EditPhoneNumberDto } from './dto/edit-phone-number.dto';
 import { EditPasswordDto } from './dto/edit-password.dto';
 import { UpdateFcmTokenDto } from './dto/update-fcm-token.dto';
+import { UpdateMyProfileDto } from './dto/update-my-profile.dto';
 import * as bcrypt from 'bcrypt';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 
 interface JwtUser {
   userId: string;
@@ -35,6 +40,7 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly systemConfigService: SystemConfigService,
+    private readonly cloudinaryService: CloudinaryService,
   ) {}
 
   @Get('config')
@@ -84,6 +90,40 @@ export class UsersController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Patch('my/profile')
+  @UseInterceptors(FileInterceptor('avatar', { storage: memoryStorage() }))
+  async updateMyProfileData(
+    @CurrentUser() user: JwtUser,
+    @Body() body: UpdateMyProfileDto,
+    @UploadedFile() avatar?: Express.Multer.File,
+  ) {
+    let avatarPayload: { avatarUrl: string; avatarPublicId: string } | undefined;
+
+    if (avatar) {
+      const uploaded = await this.cloudinaryService.uploadUserAvatar({
+        file: avatar,
+        userId: user.userId,
+      });
+      avatarPayload = {
+        avatarUrl: uploaded.secureUrl,
+        avatarPublicId: uploaded.publicId,
+      };
+    }
+
+    const updated = await this.usersService.updateMyUserProfile(user.userId, {
+      firstName: body.firstName,
+      lastName: body.lastName,
+      email: body.email,
+      phoneNumber: body.phoneNumber,
+      userName: body.userName,
+      bio: body.bio,
+      ...(avatarPayload ? {}),
+    });
+
+    return new UserEntity(updated);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get('wallet')
   async getMyWallet(@CurrentUser() user: JwtUser) {
     const wallet = await this.usersService.findWalletByUserId(user.userId);
@@ -95,8 +135,8 @@ export class UsersController {
     return {
       success: true,
       balance: Number(wallet.balance),
-      promotionalBalance: Number(wallet.promotionalBalance ?? 0),
-      realBalance: Number(wallet.balance) - Number(wallet.promotionalBalance ?? 0),
+      promotionalBalance: Number(wallet.promotionalBalance ? 0),
+      realBalance: Number(wallet.balance) - Number(wallet.promotionalBalance ? 0),
       userId: wallet.userId,
       updatedAt: wallet.updatedAt,
     };

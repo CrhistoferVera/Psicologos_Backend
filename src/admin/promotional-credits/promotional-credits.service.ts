@@ -9,7 +9,7 @@ export class PromotionalCreditsService {
 
   async grantCredits(adminUserId: string, dto: GrantPromotionalCreditsDto) {
     if (adminUserId === dto.userId) {
-      throw new BadRequestException('No puedes autoasignarte créditos promocionales.');
+      throw new BadRequestException('No puedes autoasignarte crÃ©ditos promocionales.');
     }
 
     const recipient = await this.prisma.user.findFirst({
@@ -45,7 +45,7 @@ export class PromotionalCreditsService {
           promotionalAmount: amount,
           realAmount: 0,
           isPromotional: true,
-          description: dto.reason?.trim() || 'Créditos promocionales otorgados por administrador',
+          description: dto.reason?.trim() || 'CrÃ©ditos promocionales otorgados por administrador',
         },
       });
 
@@ -71,7 +71,7 @@ export class PromotionalCreditsService {
         promotionalBalance: Number(result.wallet.promotionalBalance),
         realBalance: Number(result.wallet.balance) - Number(result.wallet.promotionalBalance),
       },
-      reason: dto.reason ?? null,
+      reason: dto.reason ? null,
       createdAt: result.grant.createdAt,
     };
   }

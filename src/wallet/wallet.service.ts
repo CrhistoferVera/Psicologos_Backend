@@ -182,8 +182,8 @@ export class WalletService {
       throw new NotFoundException('Cuenta bancaria no encontrada');
     }
 
-    const RATE = await this.systemConfigService.getCreditToSolesRate();
-    const soles = dto.credits * RATE;
+    const creditValueBs = await this.systemConfigService.getCreditToSolesRate();
+    const amountBs = dto.credits * creditValueBs;
 
     const [, , request] = await this.prisma.$transaction([
       this.prisma.wallet.update({
@@ -206,7 +206,7 @@ export class WalletService {
           walletId: wallet.id,
           bankAccountId: BigInt(dto.bankAccountId),
           credits: dto.credits,
-          soles,
+          soles: amountBs,
           status: 'PENDING',
         },
       }),
@@ -234,13 +234,14 @@ export class WalletService {
     this.notificationsService.sendMulticastNotification(
       adminTokens,
       'Nueva solicitud de retiro',
-      `${professionalName} solicito un retiro de ${dto.credits} creditos (S/ ${soles.toFixed(2)})`,
+      `${professionalName} solicitó un retiro de ${dto.credits} créditos (Bs ${amountBs.toFixed(2)})`,
       { withdrawalRequestId: (request as any).id, type: 'NEW_WITHDRAWAL_REQUEST' },
     );
 
     return {
       id: created!.id,
       credits: Number(created!.credits),
+      amountBs: Number(created!.soles),
       soles: Number(created!.soles),
       status: created!.status,
       bankName: created!.bankAccount.bank.name,
@@ -262,6 +263,7 @@ export class WalletService {
     return requests.map((r) => ({
       id: r.id,
       credits: Number(r.credits),
+      amountBs: Number(r.soles),
       soles: Number(r.soles),
       status: r.status,
       notes: r.notes,

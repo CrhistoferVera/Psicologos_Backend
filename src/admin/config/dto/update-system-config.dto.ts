@@ -1,4 +1,4 @@
-﻿import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class UpdateSystemConfigDto {
@@ -14,6 +14,12 @@ export class UpdateSystemConfigDto {
   @IsNumber()
   @Min(0)
   creditToSolesRate?: number;
+
+  @ApiPropertyOptional({ example: 2.5, description: 'Valor de 1 crédito expresado en Bs.' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  creditValueBs?: number;
 
   @ApiPropertyOptional({ example: '1.0.0' })
   @IsOptional()
