@@ -56,8 +56,12 @@ export class StripeService {
 
     const customerId = await this.getOrCreateCustomer(userId);
 
+    // Convertir BOB a USD usando la tasa de cambio del .env
+    const bobToUsdRate = Number(this.config.get<string>('BOB_TO_USD_RATE')) || 7;
+    const priceInUSD = Number(pkg.price) / bobToUsdRate;
+
     const paymentIntent = await this.stripe.paymentIntents.create({
-      amount: Math.round(Number(pkg.price) * 100),
+      amount: Math.round(priceInUSD * 100),
       currency: 'usd',
       customer: customerId,
       ...(saveCard && { setup_future_usage: 'off_session' }),
@@ -114,6 +118,11 @@ export class StripeService {
     const wallet = deposit.user.wallet;
     if (!wallet) return;
 
+    // Bonus configurable desde .env para pagos con Stripe
+    const bonusPercentage = Number(this.config.get<string>('STRIPE_BONUS_PERCENTAGE')) || 0.35;
+    const bonusCredits = Math.round(deposit.creditsToDeliver * bonusPercentage);
+    const totalCredits = deposit.creditsToDeliver + bonusCredits;
+
     await this.prisma.$transaction([
       this.prisma.depositRequest.update({
         where: { id: deposit.id },
@@ -121,7 +130,7 @@ export class StripeService {
       }),
       this.prisma.wallet.update({
         where: { id: wallet.id },
-        data: { balance: { increment: deposit.creditsToDeliver } },
+        data: { balance: { increment: totalCredits } },
       }),
       this.prisma.transaction.create({
         data: {
@@ -130,7 +139,7 @@ export class StripeService {
           type: 'DEPOSIT',
           amount: deposit.amount,
           realAmount: deposit.amount,
-          description: `Recarga Stripe: ${deposit.packageNameAtMoment}`,
+          description: `Recarga Stripe: ${deposit.packageNameAtMoment} (${deposit.creditsToDeliver} + ${bonusCredits} bonus)`,
         },
       }),
     ]);

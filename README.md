@@ -26,6 +26,17 @@ CLOUDINARY_URL=cloudinary://api_key:api_secret@cloud_name
 # CLOUDINARY_CLOUD_NAME=tu_cloud_name
 # CLOUDINARY_API_KEY=tu_api_key
 # CLOUDINARY_API_SECRET=tu_api_secret
+
+# Stripe
+STRIPE_SECRET_KEY=sk_test_tu_clave
+STRIPE_WEBHOOK_SECRET=whsec_tu_webhook_secret
+STRIPE_API_VERSION=2026-04-22.dahlia
+
+# Tasa de cambio BOB a USD (1 USD = 7 BOB)
+BOB_TO_USD_RATE=7
+
+# Bonus de créditos para pagos con Stripe (35% = 0.35)
+STRIPE_BONUS_PERCENTAGE=0.35
 ```
 
 ## Correr el proyecto
