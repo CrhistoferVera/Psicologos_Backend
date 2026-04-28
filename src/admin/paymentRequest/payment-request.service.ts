@@ -72,7 +72,7 @@ export class RechargeRequestService {
           data: {
             status: WithdrawalStatus.REJECTED,
             rejectionReason,
-            notes: notes ? null,
+            notes: notes ? notes : null,
           },
         });
       });
@@ -92,7 +92,7 @@ export class RechargeRequestService {
         this.notificationsService.sendPushNotification(
           withdrawalRequest.wallet.user.fcmToken,
           'Solicitud de retiro rechazada',
-          rejectionReason ? 'Tu solicitud de retiro fue rechazada.',
+          rejectionReason ? rejectionReason : 'Tu solicitud de retiro fue rechazada.',
           { withdrawalRequestId: id, type: 'WITHDRAWAL_REJECTED' },
         );
       }
@@ -115,7 +115,7 @@ export class RechargeRequestService {
           data: {
             status: WithdrawalStatus.APPROVED,
             rejectionReason: null,
-            notes: notes ? null,
+            notes: notes ? notes : null,
             receiptUrl: receiptData!.url,
             receiptPublicId: receiptData!.publicId,
           },

@@ -66,7 +66,7 @@ export class UsersController {
         success: true,
         data: expenseHistory,
       };
-    } catch (error) {
+    } catch (error: any) {
       return {
         success: false,
         message: error.message || 'Error al obtener el historial de gastos',
@@ -117,7 +117,7 @@ export class UsersController {
       phoneNumber: body.phoneNumber,
       userName: body.userName,
       bio: body.bio,
-      ...(avatarPayload ? {}),
+      ...(avatarPayload ? avatarPayload : {}),
     });
 
     return new UserEntity(updated);
@@ -135,8 +135,8 @@ export class UsersController {
     return {
       success: true,
       balance: Number(wallet.balance),
-      promotionalBalance: Number(wallet.promotionalBalance ? 0),
-      realBalance: Number(wallet.balance) - Number(wallet.promotionalBalance ? 0),
+      promotionalBalance: Number(wallet.promotionalBalance ?? 0),
+      realBalance: Number(wallet.balance) - Number(wallet.promotionalBalance ?? 0),
       userId: wallet.userId,
       updatedAt: wallet.updatedAt,
     };

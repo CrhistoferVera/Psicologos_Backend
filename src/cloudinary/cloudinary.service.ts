@@ -240,7 +240,7 @@ export class CloudinaryService {
           resolve({
             publicId: result.public_id,
             resourceType: resourceType,
-            bytes: result.bytes ? 0,
+            bytes: result.bytes ? result.bytes : 0,
             format: result.format,
           });
         },

@@ -28,7 +28,7 @@ export class AdminProfessionalsService {
 
     const reviewStatus =
       updateStatusDto.reviewStatus ?
-      (updateStatusDto.isActive ? ProfessionalReviewStatus.APPROVED : ProfessionalReviewStatus.REJECTED);
+      (updateStatusDto.isActive ? ProfessionalReviewStatus.APPROVED : ProfessionalReviewStatus.REJECTED) : undefined;
 
     await this.prisma.$transaction([
       this.prisma.user.update({
@@ -45,7 +45,7 @@ export class AdminProfessionalsService {
         },
         create: {
           userId: id,
-          username: user.professionalProfile?.username ? `prof_${id.slice(0, 8)}`,
+          username: user.professionalProfile?.username ? user.professionalProfile.username : `prof_${id.slice(0, 8)}`,
           reviewStatus,
           ...(updateStatusDto.reviewNotes !== undefined
             ? { reviewNotes: updateStatusDto.reviewNotes }
@@ -79,7 +79,7 @@ export class AdminProfessionalsService {
         },
         create: {
           userId: id,
-          username: dto.username ? `prof_${id.slice(0, 8)}`,
+          username: dto.username ? dto.username : `prof_${id.slice(0, 8)}`,
           ...(dto.bio !== undefined && { bio: dto.bio }),
         },
       }),
