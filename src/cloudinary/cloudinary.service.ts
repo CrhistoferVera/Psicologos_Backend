@@ -240,7 +240,7 @@ export class CloudinaryService {
           resolve({
             publicId: result.public_id,
             resourceType: resourceType,
-            bytes: result.bytes ?? 0,
+            bytes: result.bytes ? 0,
             format: result.format,
           });
         },
@@ -346,7 +346,7 @@ export class CloudinaryService {
     return { secureUrl: signedUrl, publicId: uploaded.publicId };
   }
 
-  // SERVICIO PARA SUBIR COMPROBANTES DE DEPÓSITO
+  // SERVICIO PARA SUBIR COMPROBANTES DE DEPSITO
   async uploadDepositPaymentProof(params: {
     file: Express.Multer.File;
     userId: string;
@@ -487,6 +487,35 @@ export class CloudinaryService {
     });
   }
 
+  async uploadUserAvatar(params: {
+    file: Express.Multer.File;
+    userId: string;
+  }): Promise<{ secureUrl: string; publicId: string }> {
+    const { file, userId } = params;
+
+    if (!file.mimetype.startsWith('image/')) {
+      throw new InternalServerErrorException('Solo se permiten imágenes para el avatar.');
+    }
+
+    const folder = `sanamente/users/${userId}/avatar`;
+    const publicId = `avatar_${Date.now()}`;
+
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder, public_id: publicId, resource_type: 'image' },
+        (error, result) => {
+          if (error || !result?.secure_url) {
+            return reject(
+              new InternalServerErrorException('Error al subir el avatar a Cloudinary.'),
+            );
+          }
+          resolve({ secureUrl: result.secure_url, publicId: result.public_id });
+        },
+      );
+      uploadStream.end(file.buffer);
+    });
+  }
+
   //ELIMINAR UNA HISTORIA DE UN PROFESIONAL
   async deleteHistoryMedia(publicId: string, type: 'image' | 'video') {
     try {
@@ -497,7 +526,7 @@ export class CloudinaryService {
     }
   }
 
-  // ─── Galeria permanente de profesional ────────────────────────────────────
+  // --- Galeria permanente de profesional ------------------------------------
 
   async uploadGalleryImage(params: {
     file: Express.Multer.File;

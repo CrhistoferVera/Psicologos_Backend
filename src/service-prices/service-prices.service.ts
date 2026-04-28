@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ServiceType } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { UpsertServicePriceDto } from './dto/upsert-service-price.dto';
@@ -6,6 +6,11 @@ import { UpsertServicePriceDto } from './dto/upsert-service-price.dto';
 @Injectable()
 export class ServicePricesService {
   constructor(private readonly prisma: PrismaService) {}
+  private readonly minPriceByService: Record<ServiceType, number> = {
+    [ServiceType.MESSAGE_SEND]: 0.1,
+    [ServiceType.CALL]: 0.5,
+    [ServiceType.VIDEO_CALL]: 1,
+  };
 
   // Obtiene todos los precios del profesional autenticado.
   async getMyPrices(userId: string) {
@@ -21,6 +26,19 @@ export class ServicePricesService {
 
   // Crea o actualiza un precio para un tipo de servicio.
   async upsertPrice(userId: string, dto: UpsertServicePriceDto) {
+    const minPrice = this.minPriceByService[dto.serviceType] ?? 0;
+    if (dto.price <= minPrice) {
+      const label =
+        dto.serviceType === ServiceType.MESSAGE_SEND
+          ? 'mensajes'
+          : dto.serviceType === ServiceType.CALL
+            ? 'llamadas'
+            : 'videollamadas';
+      throw new BadRequestException(
+        `La tarifa para ${label} debe ser mayor a ${minPrice} créditos.`,
+      );
+    }
+
     const profile = await this.prisma.professionalProfile.findUnique({
       where: { userId },
     });

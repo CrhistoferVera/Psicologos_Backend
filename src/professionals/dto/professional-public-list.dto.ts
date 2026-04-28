@@ -44,7 +44,7 @@ export class ProfessionalPublicListItemDto {
   @ApiProperty({
     example: 'https://res.cloudinary.com/demo/image/upload/v1/main.jpg',
     nullable: true,
-    description: 'Imagen principal del perfil (coverUrl ?? avatarUrl)',
+    description: 'Imagen principal del perfil (coverUrl ? avatarUrl)',
   })
   mainImage: string | null;
 

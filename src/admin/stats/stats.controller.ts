@@ -1,4 +1,4 @@
-﻿import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { StatsService } from './stats.service';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
@@ -20,7 +20,7 @@ export class StatsController {
   }
 
   @Get('professional/:id')
-  @ApiOperation({ summary: 'Obtener ganancias en creditos y soles de un profesional' })
+  @ApiOperation({ summary: 'Obtener ganancias en créditos y Bs de un profesional' })
   getProfessionalStats(@Param('id') id: string) {
     return this.statsService.getProfessionalStats(id);
   }

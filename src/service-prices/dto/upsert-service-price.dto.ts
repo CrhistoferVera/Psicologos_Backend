@@ -7,6 +7,6 @@ export class UpsertServicePriceDto {
   serviceType: ServiceType;
 
   @IsNumber()
-  @Min(0.01)
+  @Min(0)
   price: number;
 }

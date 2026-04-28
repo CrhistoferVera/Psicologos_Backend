@@ -66,7 +66,10 @@ export class RechargeRequestService {
       }
 
       return {
-        requests: solicitudesRecharge,
+        requests: solicitudesRecharge.map((item) => ({
+          ...item,
+          amountBs: Number(item.amount),
+        })),
         nextCursor,
       };
     } catch (error) {

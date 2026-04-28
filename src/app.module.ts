@@ -25,6 +25,7 @@ import { AdminConfigModule } from './admin/config/admin-config.module';
 import { ReferralsModule } from './referrals/referrals.module';
 import { FlowModule } from './flow/flow.module';
 import { StripeModule } from './stripe/stripe.module';
+import { BanecoQrModule } from './baneco-qr/baneco-qr.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { StripeModule } from './stripe/stripe.module';
     ReferralsModule,
     FlowModule,
     StripeModule,
+    BanecoQrModule,
   ],
   controllers: [],
   providers: [],
