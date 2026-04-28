@@ -165,6 +165,7 @@ model DepositRequest {
   receiptUrl                String?
   receiptPublicId           String?
   stripePaymentIntentId     String?                 @unique
+  bancoQrId                 String?                 @unique
   status              DepositStatus   @default(PENDING)
   rejectionReason     String?
   creditsToDeliver    Int             @default(0)
