@@ -22,7 +22,18 @@ export class StripeService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
-    if (user.stripeCustomerId) return user.stripeCustomerId;
+    if (user.stripeCustomerId) {
+      try {
+        const existing = await this.stripe.customers.retrieve(user.stripeCustomerId);
+        if (!existing.deleted) return user.stripeCustomerId;
+      } catch {
+        // El customer no existe en Stripe (ej: ID guardado de modo test en producción)
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: { stripeCustomerId: null },
+        });
+      }
+    }
 
     const customer = await this.stripe.customers.create({
       email: user.email ?? undefined,
@@ -146,7 +157,7 @@ export class StripeService {
     const customerId = await this.getOrCreateCustomer(userId);
     return this.stripe.ephemeralKeys.create(
       { customer: customerId },
-      { apiVersion: this.config.get<string>('STRIPE_API_VERSION') ?? '2023-10-16' },
+      { apiVersion: this.config.get<string>('STRIPE_API_VERSION') ?? '2026-04-22.dahlia' },
     );
   }
 
