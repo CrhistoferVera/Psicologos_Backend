@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
@@ -24,6 +25,22 @@ import { PROFESSIONAL_ROLE } from '../common/professional-role';
 import { ReferralsService } from '../referrals/referrals.service';
 import { createUniqueReferralCode } from '../referrals/utils/referral-code.util';
 import { FaceMatchService } from '../kyc/face-match.service';
+
+type GoogleTokenInfo = {
+  iss?: string;
+  aud?: string;
+  sub?: string;
+  email?: string;
+  email_verified?: string;
+  name?: string;
+  given_name?: string;
+  family_name?: string;
+  exp?: string;
+};
+
+type GoogleVerifiedTokenInfo = GoogleTokenInfo & {
+  sub: string;
+};
 
 @Injectable()
 export class AuthService {
@@ -287,6 +304,77 @@ export class AuthService {
     return this.generateTokenResponse(user);
   }
 
+  async loginWithGoogle(idToken: string) {
+    const tokenInfo = await this.verifyGoogleIdToken(idToken);
+
+    const normalizedEmail = tokenInfo.email?.trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new BadRequestException('La cuenta de Google no incluye email');
+    }
+
+    if (tokenInfo.email_verified !== 'true') {
+      throw new UnauthorizedException('Debes verificar tu email en Google');
+    }
+
+    const googlePhoneNumber = this.buildGooglePhoneNumber(tokenInfo.sub);
+    const [userByGooglePhone, userByEmail] = await Promise.all([
+      this.usersService.findOneByPhone(googlePhoneNumber),
+      this.usersService.findOneByEmail(normalizedEmail),
+    ]);
+
+    let user: User | null = null;
+
+    if (userByGooglePhone) {
+      const needsEmailUpdate =
+        !userByGooglePhone.email ||
+        userByGooglePhone.email.toLowerCase() !== normalizedEmail;
+
+      if (needsEmailUpdate && userByEmail && userByEmail.id !== userByGooglePhone.id) {
+        throw new ConflictException(
+          'El email de Google ya esta asociado a otra cuenta',
+        );
+      }
+
+      if (needsEmailUpdate) {
+        user = await this.usersService.update(userByGooglePhone.id, {
+          email: normalizedEmail,
+        });
+      } else {
+        user = userByGooglePhone;
+      }
+    } else if (userByEmail) {
+      user = userByEmail;
+    } else {
+      const [firstName, lastName] = this.extractNames(tokenInfo);
+      user = await this.usersService.create({
+        phoneNumber: googlePhoneNumber,
+        email: normalizedEmail,
+        firstName,
+        lastName,
+        isProfileComplete: true,
+      });
+    }
+
+    if (!user) {
+      throw new UnauthorizedException('No se pudo autenticar con Google');
+    }
+
+    const shouldSyncName =
+      (!user.firstName || !user.lastName) &&
+      (tokenInfo.given_name || tokenInfo.family_name || tokenInfo.name);
+
+    if (shouldSyncName) {
+      const [firstName, lastName] = this.extractNames(tokenInfo);
+      user = await this.usersService.update(user.id, {
+        ...(firstName ? { firstName } : {}),
+        ...(lastName ? { lastName } : {}),
+      });
+    }
+
+    const { password: _, ...userWithoutPass } = user;
+    return this.generateTokenResponse(userWithoutPass);
+  }
+
   async forgotPassword(email: string) {
     const normalizedEmail = email.trim().toLowerCase();
     const user = await this.usersService.findOneByEmail(normalizedEmail);
@@ -340,6 +428,74 @@ export class AuthService {
       access_token: this.jwtService.sign(payload),
       user: new UserEntity(user),
     };
+  }
+
+  private async verifyGoogleIdToken(idToken: string): Promise<GoogleVerifiedTokenInfo> {
+    const verifyUrl = new URL('https://oauth2.googleapis.com/tokeninfo');
+    verifyUrl.searchParams.set('id_token', idToken);
+
+    const response = await fetch(verifyUrl.toString());
+    if (!response.ok) {
+      throw new UnauthorizedException('Token de Google invalido o expirado');
+    }
+
+    const tokenInfo = (await response.json()) as GoogleTokenInfo;
+    if (!tokenInfo.sub) {
+      throw new UnauthorizedException('Token de Google invalido');
+    }
+
+    const issuer = tokenInfo.iss ?? '';
+    const isValidIssuer =
+      issuer === 'https://accounts.google.com' || issuer === 'accounts.google.com';
+    if (!isValidIssuer) {
+      throw new UnauthorizedException('Issuer de Google no valido');
+    }
+
+    const allowedAudiences = this.getAllowedGoogleAudiences();
+    if (allowedAudiences.length === 0) {
+      throw new UnauthorizedException(
+        'Google Login no esta configurado en el servidor',
+      );
+    }
+
+    if (
+      (!tokenInfo.aud || !allowedAudiences.includes(tokenInfo.aud))
+    ) {
+      throw new UnauthorizedException('Google Client ID no autorizado');
+    }
+
+    return tokenInfo as GoogleVerifiedTokenInfo;
+  }
+
+  private getAllowedGoogleAudiences() {
+    const raw = process.env.GOOGLE_CLIENT_IDS ?? process.env.GOOGLE_CLIENT_ID ?? '';
+    return raw
+      .split(',')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+  }
+
+  private buildGooglePhoneNumber(googleSub?: string) {
+    if (!googleSub) {
+      throw new UnauthorizedException('No se pudo identificar la cuenta de Google');
+    }
+    return `google_${googleSub}`;
+  }
+
+  private extractNames(tokenInfo: GoogleTokenInfo): [string | undefined, string | undefined] {
+    const firstName = tokenInfo.given_name?.trim();
+    const familyName = tokenInfo.family_name?.trim();
+
+    if (firstName || familyName) {
+      return [firstName || undefined, familyName || undefined];
+    }
+
+    const fullName = tokenInfo.name?.trim();
+    if (!fullName) return [undefined, undefined];
+
+    const [first, ...rest] = fullName.split(' ').filter(Boolean);
+    const last = rest.join(' ').trim();
+    return [first || undefined, last || undefined];
   }
 }
 

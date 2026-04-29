@@ -179,6 +179,11 @@ export class ProfessionalsService {
           id: true,
           firstName: true,
           lastName: true,
+          userProfile: {
+            select: {
+              bio: true,
+            },
+          },
           professionalProfile: {
             select: {
               username: true,
@@ -221,7 +226,7 @@ export class ProfessionalsService {
         name: [u.firstName, u.lastName].filter(Boolean).join(' '),
         username: profile?.username ?? null,
         avatar: profile?.avatarUrl ?? null,
-        shortDescription: profile?.bio ?? null,
+        shortDescription: profile?.bio ?? u.userProfile?.bio ?? null,
         rateCredits: profile?.rateCredits ?? null,
         mainImage,
         images: mainImage ? [mainImage] : [],
@@ -249,6 +254,11 @@ export class ProfessionalsService {
         id: true,
         firstName: true,
         lastName: true,
+        userProfile: {
+          select: {
+            bio: true,
+          },
+        },
         professionalProfile: {
           select: {
             username: true,
@@ -286,7 +296,7 @@ export class ProfessionalsService {
       name: [user.firstName, user.lastName].filter(Boolean).join(' '),
       username: profile?.username ?? '',
       age,
-      bio: profile?.bio ?? null,
+      bio: profile?.bio ?? user.userProfile?.bio ?? null,
       avatar: profile?.avatarUrl ?? null,
       coverImage,
       images: coverImage ? [coverImage] : [],

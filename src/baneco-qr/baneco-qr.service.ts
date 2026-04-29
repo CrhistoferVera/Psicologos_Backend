@@ -89,7 +89,7 @@ export class BanecoQrService {
         transactionId: deposit.id,
         amount,
         currency: this.currency,
-        description: `Sanamente - ${pkg.name}`,
+        description: `SanaMente - ${pkg.name}`,
         dueDate: this.buildDueDate(),
         singleUse: true,
         modifyAmount: false,

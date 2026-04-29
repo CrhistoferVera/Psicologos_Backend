@@ -18,6 +18,7 @@ import { CompleteRegistrationDto } from './dto/complete-registration.dto';
 import { CompleteProfessionalRegistrationDto } from './dto/complete-professional-registration.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { GoogleLoginDto } from './dto/google-login.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -81,6 +82,12 @@ export class AuthController {
       throw new UnauthorizedException('Email o contrasena incorrectos');
     }
     return this.authService.login(user);
+  }
+
+  @Post('google')
+  @HttpCode(HttpStatus.OK)
+  async loginWithGoogle(@Body() dto: GoogleLoginDto) {
+    return this.authService.loginWithGoogle(dto.idToken);
   }
 
   @Post('forgot-password')
