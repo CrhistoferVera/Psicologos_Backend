@@ -1,10 +1,12 @@
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+﻿import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as https from 'node:https';
 import * as http from 'node:http';
 import { URL } from 'node:url';
 
 const BANECO_TIMEOUT_MS = 12_000;
+const DEFAULT_TOKEN_TTL_MS = 14 * 60 * 1_000;
+const TOKEN_EXPIRY_SKEW_MS = 45 * 1_000;
 
 interface RawResponse {
   status: number;
@@ -65,6 +67,7 @@ export interface GenerateQrParams {
   dueDate: string;
   singleUse?: boolean;
   modifyAmount?: boolean;
+  reqId?: string;
 }
 
 export interface GenerateQrResponse {
@@ -90,10 +93,9 @@ export interface StatusQrResponse {
   payment?: PaymentQR;
 }
 
-function mask(value: string, keep = 4): string {
-  if (!value) return '(vacio)';
-  if (value.length <= keep) return '*'.repeat(value.length);
-  return `${value.slice(0, keep)}...(${value.length})`;
+interface TokenContext {
+  token: string;
+  source: 'cached' | 'new';
 }
 
 @Injectable()
@@ -109,28 +111,77 @@ export class BanecoApiService {
 
   private token: string | null = null;
   private tokenLoadedAt = 0;
+  private tokenExpiresAt = 0;
+  private loginInFlight: Promise<TokenContext> | null = null;
 
   constructor(private readonly config: ConfigService) {
-    this.base = this.config.get<string>('BANECO_API_BASE') ?? '';
-    this.aesKey = this.config.get<string>('BANECO_AES_KEY') ?? '';
-    this.username = this.config.get<string>('BANECO_USERNAME') ?? '';
-    this.password = this.config.get<string>('BANECO_PASSWORD') ?? '';
-    this.accountCredit = this.config.get<string>('BANECO_ACCOUNT_CREDIT') ?? '';
-    this.currency = (this.config.get<string>('BANECO_CURRENCY') as 'BOB' | 'USD') ?? 'BOB';
+    this.base = this.readNormalizedEnv('BANECO_API_BASE');
+    this.aesKey = this.readNormalizedEnv('BANECO_AES_KEY');
+    this.username = this.readNormalizedEnv('BANECO_USERNAME');
+    this.password = this.readNormalizedEnv('BANECO_PASSWORD');
+    this.accountCredit = this.readNormalizedEnv('BANECO_ACCOUNT_CREDIT');
+    const rawCurrency = this.readNormalizedEnv('BANECO_CURRENCY').toUpperCase();
+    this.currency = rawCurrency === 'USD' ? 'USD' : 'BOB';
 
-    this.logger.log('=== Baneco config cargada ===');
-    this.logger.log(`base: ${this.base || '(vacio)'}`);
-    this.logger.log(`username: ${this.username || '(vacio)'}`);
-    this.logger.log(`aesKey: ${mask(this.aesKey, 4)} (len=${this.aesKey.length})`);
-    this.logger.log(`password: ${this.password ? `(len=${this.password.length})` : '(vacio)'}`);
-    this.logger.log(`accountCredit: ${mask(this.accountCredit, 3)}`);
-    this.logger.log(`currency: ${this.currency}`);
+    this.logEnvDiagnostics();
+  }
+
+  private newReqId() {
+    return Math.random().toString(36).slice(2, 9);
+  }
+
+  private readNormalizedEnv(key: string): string {
+    const raw = this.config.get<string>(key) ?? '';
+    const trimmed = raw.trim();
+    const quoteWrapped =
+      (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'"));
+    const withoutQuotes =
+      quoteWrapped && trimmed.length >= 2 ? trimmed.slice(1, -1).trim() : trimmed;
+    return withoutQuotes.replace(/[\r\n]+/g, '');
+  }
+
+  private logEnvDiagnostics() {
+    const keys = [
+      'BANECO_API_BASE',
+      'BANECO_AES_KEY',
+      'BANECO_USERNAME',
+      'BANECO_PASSWORD',
+      'BANECO_ACCOUNT_CREDIT',
+      'BANECO_CURRENCY',
+      'BANECO_USD_TO_BOB',
+      'BANECO_QR_TTL_DAYS',
+    ] as const;
+
+    this.logger.log('[QR][config] Baneco env diagnostics start');
+    for (const key of keys) {
+      const raw = this.config.get<string>(key) ?? '';
+      const trimmed = raw.trim();
+      const quoteWrapped =
+        (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+        (trimmed.startsWith("'") && trimmed.endsWith("'"));
+      const hasNewLines = /[\r\n]/.test(raw);
+      const changedByTrim = raw !== trimmed;
+      this.logger.log(
+        `[QR][config] ${key} present=${raw.length > 0 ? 'yes' : 'no'} len=${trimmed.length} trimChanged=${changedByTrim ? 'yes' : 'no'} quoteWrapped=${quoteWrapped ? 'yes' : 'no'} multiline=${hasNewLines ? 'yes' : 'no'}`,
+      );
+    }
+
+    let baseHost = '(invalid-url)';
+    try {
+      baseHost = this.base ? new URL(this.base).host : '(empty)';
+    } catch {
+      baseHost = '(invalid-url)';
+    }
+    this.logger.log(
+      `[QR][config] BANECO_API_BASE host=${baseHost} envGuess=${this.base.includes('apimkt') ? 'test/sandbox' : 'unknown-or-prod'}`,
+    );
   }
 
   private ensureConfig() {
     if (!this.base || !this.aesKey || !this.username || !this.password || !this.accountCredit) {
       this.logger.error(
-        `Config incompleta — base:${!!this.base} aesKey:${!!this.aesKey} user:${!!this.username} pass:${!!this.password} account:${!!this.accountCredit}`,
+        `[QR][config] Config incompleta base=${!!this.base} aesKey=${!!this.aesKey} user=${!!this.username} pass=${!!this.password} account=${!!this.accountCredit}`,
       );
       throw new ServiceUnavailableException('Baneco QR no esta configurado.');
     }
@@ -142,33 +193,76 @@ export class BanecoApiService {
       `${this.base}/api/authentication/encrypt` +
       `?text=${encodeURIComponent(text)}&aesKey=${encodeURIComponent(this.aesKey)}`;
 
-    this.logger.log(`[encrypt] GET ${this.base}/api/authentication/encrypt?text=${mask(text, 2)}&aesKey=${mask(this.aesKey, 4)}`);
+    this.logger.log(
+      `[QR][encrypt] endpoint=/api/authentication/encrypt textLen=${text.length} aesKeyLen=${this.aesKey.length}`,
+    );
 
     let res: RawResponse;
     try {
       res = await rawRequest(url, 'GET', {});
     } catch (err: any) {
-      this.logger.error(`[encrypt] error de red: ${err?.message ?? err}`);
+      this.logger.error(`[QR][encrypt] networkError=${err?.message ?? err}`);
       throw new ServiceUnavailableException('Baneco encrypt: error de red.');
     }
 
-    this.logger.log(`[encrypt] status=${res.status} bodyLen=${res.body.length} preview=${mask(res.body, 12)}`);
+    this.logger.log(
+      `[QR][encrypt] status=${res.status} contentType=${res.contentType || '(none)'} bodyLen=${res.body.length}`,
+    );
 
     if (res.status < 200 || res.status >= 300) {
-      this.logger.error(`[encrypt] HTTP ${res.status} body=${res.body}`);
+      this.logger.error(`[QR][encrypt] HTTP ${res.status}`);
       throw new ServiceUnavailableException('Baneco encrypt fallo.');
     }
     return res.body.trim().replace(/^"|"$/g, '');
   }
 
-  async login(): Promise<string> {
+  private getTokenExpiryFromLogin(data: any): number | null {
+    const now = Date.now();
+    const absoluteCandidates = [
+      data?.expiresAt,
+      data?.expireAt,
+      data?.expirationDate,
+      data?.tokenExpiration,
+    ];
+
+    for (const value of absoluteCandidates) {
+      if (typeof value !== 'string' || !value.trim()) continue;
+      const ms = Date.parse(value);
+      if (Number.isFinite(ms) && ms > now) return ms;
+    }
+
+    const ttlCandidates = [data?.expiresIn, data?.expireIn, data?.expiresInSeconds];
+    for (const value of ttlCandidates) {
+      const ttl = Number(value);
+      if (Number.isFinite(ttl) && ttl > 0) {
+        return now + ttl * 1_000;
+      }
+    }
+
+    return null;
+  }
+
+  private invalidateToken(reqId: string, reason: string) {
+    const hadToken = !!this.token;
+    this.token = null;
+    this.tokenLoadedAt = 0;
+    this.tokenExpiresAt = 0;
+    this.logger.warn(
+      `[QR][${reqId}] Baneco token invalidated reason=${reason} hadToken=${hadToken ? 'yes' : 'no'}`,
+    );
+  }
+
+  private async login(reqId: string): Promise<TokenContext> {
     this.ensureConfig();
-    this.logger.log(`[login] iniciando para userName=${this.username}`);
+    const authPath = '/api/authentication/authenticate';
+    this.logger.log(`[QR][${reqId}] Baneco auth start endpoint=${authPath}`);
 
     const encPass = await this.encrypt(this.password);
-    this.logger.log(`[login] password cifrada OK (len=${encPass.length}, preview=${mask(encPass, 12)})`);
+    this.logger.log(
+      `[QR][${reqId}] Baneco auth encryptedPassword=yes encryptedPasswordLen=${encPass.length}`,
+    );
 
-    const url = `${this.base}/api/authentication/authenticate`;
+    const url = `${this.base}${authPath}`;
     const body = { userName: this.username, password: encPass };
 
     let res: RawResponse;
@@ -180,64 +274,153 @@ export class BanecoApiService {
         JSON.stringify(body),
       );
     } catch (err: any) {
-      this.logger.error(`[login] error de red: ${err?.message ?? err}`);
+      this.logger.error(`[QR][${reqId}] Baneco auth networkError=${err?.message ?? err}`);
       throw new ServiceUnavailableException('Baneco login: error de red.');
     }
 
-    const raw = res.body;
-    this.logger.log(`[login] status=${res.status} bodyLen=${raw.length}`);
-    this.logger.log(`[login] body crudo: ${raw}`);
+    this.logger.log(
+      `[QR][${reqId}] Baneco auth response status=${res.status} contentType=${res.contentType || '(none)'} bodyLen=${res.body.length}`,
+    );
+
+    if (res.status === 401 || res.status === 403) {
+      this.logger.error(`[QR][${reqId}] Baneco auth unauthorized status=${res.status}`);
+      throw new ServiceUnavailableException({
+        message: 'No se pudo generar el QR en este momento. Intenta nuevamente en unos minutos.',
+        code: 'QR_PROVIDER_UNAUTHORIZED',
+        providerStatus: res.status,
+        providerLabel: 'credenciales/permisos',
+      });
+    }
 
     let data: { responseCode?: number; message?: string; token?: string };
     try {
-      data = JSON.parse(raw);
+      data = JSON.parse(res.body);
     } catch {
-      this.logger.error('[login] respuesta no es JSON valido');
+      this.logger.error(`[QR][${reqId}] Baneco auth invalid JSON response`);
       throw new ServiceUnavailableException('Baneco login: respuesta invalida.');
     }
 
+    const expiry = this.getTokenExpiryFromLogin(data);
     this.logger.log(
-      `[login] responseCode=${data.responseCode} message="${data.message ?? ''}" token=${data.token ? 'OK' : 'NO'}`,
+      `[QR][${reqId}] Baneco auth parsed responseCode=${data.responseCode} token=${data.token ? 'yes' : 'no'} tokenLen=${data.token?.length ?? 0} expiry=${expiry ? new Date(expiry).toISOString() : `default_${DEFAULT_TOKEN_TTL_MS}ms`}`,
     );
 
     if (data.responseCode !== 0 || !data.token) {
+      this.logger.error(
+        `[QR][${reqId}] Baneco auth failed responseCode=${data.responseCode} message="${data.message ?? 'sin detalle'}"`,
+      );
       throw new ServiceUnavailableException(`Baneco login fallo: ${data.message ?? 'sin detalle'}`);
     }
+
+    const now = Date.now();
     this.token = data.token;
-    this.tokenLoadedAt = Date.now();
-    return data.token;
+    this.tokenLoadedAt = now;
+    this.tokenExpiresAt = expiry ?? now + DEFAULT_TOKEN_TTL_MS;
+    return { token: data.token, source: 'new' };
   }
 
-  private async ensureToken(): Promise<string> {
-    if (!this.token) return this.login();
-    return this.token;
+  private isTokenValid() {
+    if (!this.token) return false;
+    return this.tokenExpiresAt - TOKEN_EXPIRY_SKEW_MS > Date.now();
+  }
+
+  private async ensureToken(reqId: string): Promise<TokenContext> {
+    if (this.isTokenValid()) {
+      const ageMs = Date.now() - this.tokenLoadedAt;
+      const remainingMs = this.tokenExpiresAt - Date.now();
+      this.logger.log(
+        `[QR][${reqId}] using cached Baneco token ageMs=${ageMs} remainingMs=${remainingMs}`,
+      );
+      return { token: this.token!, source: 'cached' };
+    }
+
+    if (this.loginInFlight) {
+      this.logger.log(`[QR][${reqId}] waiting in-flight Baneco auth`);
+      return this.loginInFlight;
+    }
+
+    this.loginInFlight = this.login(reqId).finally(() => {
+      this.loginInFlight = null;
+    });
+
+    return this.loginInFlight;
+  }
+
+  private unauthorizedException(
+    reqId: string,
+    path: string,
+    status: number,
+  ): ServiceUnavailableException {
+    this.logger.error(`[QR][${reqId}] failed reason=QR_PROVIDER_UNAUTHORIZED path=${path}`);
+    this.logger.error(`[QR][${reqId}] failed providerLabel=credenciales/permisos path=${path}`);
+    return new ServiceUnavailableException({
+      message: 'No se pudo generar el QR en este momento. Intenta nuevamente en unos minutos.',
+      code: 'QR_PROVIDER_UNAUTHORIZED',
+      providerStatus: status,
+      providerLabel: 'credenciales/permisos',
+    });
+  }
+
+  private nonJsonException(
+    reqId: string,
+    path: string,
+    status: number,
+    contentType: string,
+    body: string,
+  ): ServiceUnavailableException {
+    const preview = body.slice(0, 500).replace(/[\r\n]+/g, ' ');
+    this.logger.error(
+      `[QR][${reqId}] Non-JSON response path=${path} status=${status} contentType=${contentType || '(none)'} preview="${preview}"`,
+    );
+    this.logger.error(`[QR][${reqId}] failed reason=NON_JSON_RESPONSE path=${path}`);
+
+    const providerLabel =
+      status >= 500 ? 'proveedor caido' : status === 0 ? 'timeout' : `status=${status}`;
+
+    this.logger.error(`[QR][${reqId}] failed providerLabel=${providerLabel} path=${path}`);
+    return new ServiceUnavailableException({
+      message: 'No se pudo generar el QR en este momento. Intenta nuevamente en unos minutos.',
+      code: 'QR_PROVIDER_NON_JSON_RESPONSE',
+      providerStatus: status,
+      providerLabel,
+    });
   }
 
   private async authedCall<T>(
     path: string,
     method: 'GET' | 'POST' | 'DELETE',
     body?: Record<string, unknown>,
-    opts?: { tolerateError?: boolean },
+    opts?: { tolerateError?: boolean; reqId?: string; retryUnauthorizedOnce?: boolean },
   ): Promise<T> {
     this.ensureConfig();
-    let token = await this.ensureToken();
 
+    const reqId = opts?.reqId ?? this.newReqId();
+    const retryUnauthorizedOnce = opts?.retryUnauthorizedOnce ?? true;
+
+    let token = await this.ensureToken(reqId);
     const url = `${this.base}${path}`;
     const sendBody = body ? JSON.stringify(body) : undefined;
-    const reqId = Math.random().toString(36).slice(2, 9);
 
-    this.logger.log(`[QR][${reqId}] calling path=${path} method=${method}`);
+    this.logger.log(`[QR][${reqId}] calling path=${path} method=${method} tokenSource=${token.source}`);
 
-    const exec = async () => {
+    const exec = async (
+      tokenCtx: TokenContext,
+      attempt: 1 | 2,
+    ): Promise<{ kind: 'success'; data: T; status: number } | { kind: 'unauthorized'; status: number }> => {
       const startMs = Date.now();
       let r: RawResponse;
+
       try {
+        this.logger.log(
+          `[QR][${reqId}] sending path=${path} attempt=${attempt} authorizationHeader=yes authType=Bearer tokenSource=${tokenCtx.source}`,
+        );
+
         r = await rawRequest(
           url,
           method,
           {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${tokenCtx.token}`,
           },
           sendBody,
         );
@@ -252,105 +435,92 @@ export class BanecoApiService {
       }
 
       const durationMs = Date.now() - startMs;
-      const isJsonContent =
-        r.contentType === '' ||
-        r.contentType === 'application/json' ||
-        r.contentType.includes('application/json');
-
       this.logger.log(
-        `[QR][${reqId}] Baneco response path=${path} status=${r.status} contentType=${r.contentType || '(none)'} durationMs=${durationMs}`,
+        `[QR][${reqId}] Baneco response path=${path} attempt=${attempt} status=${r.status} contentType=${r.contentType || '(none)'} durationMs=${durationMs}`,
       );
+
+      if (r.status === 401 || r.status === 403) {
+        this.logger.error(
+          `[QR][${reqId}] unauthorized response path=${path} status=${r.status} contentType=${r.contentType || '(none)'}`,
+        );
+        return { kind: 'unauthorized', status: r.status };
+      }
 
       let parsed: any;
       try {
         parsed = JSON.parse(r.body);
       } catch {
-        const preview = r.body.slice(0, 500).replace(/[\r\n]+/g, ' ');
-        this.logger.error(
-          `[QR][${reqId}] Non-JSON response path=${path} status=${r.status} contentType=${r.contentType || '(none)'} preview="${preview}"`,
-        );
-        this.logger.error(`[QR][${reqId}] failed reason=NON_JSON_RESPONSE path=${path}`);
-
-        // Si tolerateError está activo (ej: cancelQR) devolvemos placeholder sin lanzar
         if (opts?.tolerateError) {
           return {
-            res: r,
-            data: { responseCode: -1, message: 'NON_JSON_RESPONSE' } as any,
+            kind: 'success',
+            data: { responseCode: -1, message: 'NON_JSON_RESPONSE' } as T,
+            status: r.status,
           };
         }
 
-        const providerLabel =
-          r.status === 401 || r.status === 403
-            ? 'credenciales/permisos'
-            : r.status >= 500
-              ? 'proveedor caido'
-              : r.status === 0
-                ? 'timeout'
-                : `status=${r.status}`;
-
-        this.logger.error(
-          `[QR][${reqId}] failed providerLabel=${providerLabel} path=${path}`,
-        );
-
-        throw new ServiceUnavailableException({
-          message:
-            'No se pudo generar el QR en este momento. Intenta nuevamente en unos minutos.',
-          code: 'QR_PROVIDER_NON_JSON_RESPONSE',
-          providerStatus: r.status,
-          providerLabel,
-        });
+        throw this.nonJsonException(reqId, path, r.status, r.contentType, r.body);
       }
 
-      // Truncar log para no registrar base64 completo (qrImage puede ser enorme)
       const bodyPreview = JSON.stringify(parsed).slice(0, 300);
       this.logger.log(
         `[QR][${reqId}] parsed path=${path} responseCode=${parsed?.responseCode} bodyPreview=${bodyPreview}`,
       );
 
-      // Advertir si status HTTP no-OK aunque haya JSON
-      if (!isJsonContent && r.status >= 400) {
-        const preview = r.body.slice(0, 200).replace(/[\r\n]+/g, ' ');
-        this.logger.warn(
-          `[QR][${reqId}] non-json content-type with status=${r.status} preview="${preview}"`,
+      if (parsed?.responseCode !== 0) {
+        const looksLikeAuth =
+          parsed?.responseCode === 401 ||
+          /token|autentic|credencial|no valid|unauthor/i.test(String(parsed?.message ?? ''));
+
+        if (looksLikeAuth) {
+          return { kind: 'unauthorized', status: r.status || 401 };
+        }
+
+        if (opts?.tolerateError) {
+          return { kind: 'success', data: parsed as T, status: r.status };
+        }
+
+        this.logger.error(
+          `[QR][${reqId}] failed path=${path} responseCode=${parsed?.responseCode} msg="${parsed?.message ?? 'sin detalle'}"`,
         );
+        throw new ServiceUnavailableException(`Baneco ${path} fallo: ${parsed?.message ?? 'sin detalle'}`);
       }
 
-      return { res: r, data: parsed as T & { responseCode?: number; message?: string } };
+      return { kind: 'success', data: parsed as T, status: r.status };
     };
 
-    let { data } = await exec();
+    let result = await exec(token, 1);
 
-    if (data?.responseCode !== 0) {
-      const looksLikeAuth =
-        data?.responseCode === 401 ||
-        /token|autentic|no valid/i.test(String(data?.message ?? ''));
-
-      if (looksLikeAuth) {
-        this.logger.warn(
-          `[QR][${reqId}] responseCode=${data?.responseCode} msg="${data?.message}", renovando token y reintentando`,
-        );
-        token = await this.login();
-        const retry = await exec();
-        data = retry.data;
+    if (result.kind === 'unauthorized') {
+      if (!retryUnauthorizedOnce) {
+        throw this.unauthorizedException(reqId, path, result.status);
       }
 
-      if (data?.responseCode !== 0) {
-        if (opts?.tolerateError) return data;
-        this.logger.error(
-          `[QR][${reqId}] failed path=${path} responseCode=${data?.responseCode} msg="${data?.message ?? 'sin detalle'}"`,
-        );
-        throw new ServiceUnavailableException(
-          `Baneco ${path} fallo: ${data?.message ?? 'sin detalle'}`,
-        );
+      this.logger.warn(
+        `[QR][${reqId}] ${path === '/api/qrsimple/generateQR' ? 'generateQR' : path} 401, refreshing Baneco token and retrying once`,
+      );
+
+      this.invalidateToken(reqId, `unauthorized_status_${result.status}`);
+      token = await this.ensureToken(reqId);
+      result = await exec(token, 2);
+      this.logger.log(`[QR][${reqId}] retry result status=${result.status} path=${path}`);
+
+      if (result.kind === 'unauthorized') {
+        throw this.unauthorizedException(reqId, path, result.status);
       }
     }
 
     this.logger.log(`[QR][${reqId}] success path=${path}`);
-    return data;
+    return result.data;
   }
 
   async generateQR(params: GenerateQrParams): Promise<GenerateQrResponse & { responseCode: number }> {
+    const reqId = params.reqId ?? this.newReqId();
     const accountEnc = await this.encrypt(this.accountCredit);
+
+    this.logger.log(
+      `[QR][${reqId}] generateQR payload transactionId=${params.transactionId} amount=${Number(params.amount.toFixed(2))} currency=${params.currency ?? this.currency} accountCreditEncryptedLen=${accountEnc.length} dueDate=${params.dueDate} singleUse=${params.singleUse ?? true} modifyAmount=${params.modifyAmount ?? false}`,
+    );
+
     return this.authedCall<GenerateQrResponse & { responseCode: number }>(
       '/api/qrsimple/generateQR',
       'POST',
@@ -364,23 +534,25 @@ export class BanecoApiService {
         singleUse: params.singleUse ?? true,
         modifyAmount: params.modifyAmount ?? false,
       },
+      { reqId, retryUnauthorizedOnce: true },
     );
   }
 
-  async statusQR(qrId: string): Promise<StatusQrResponse & { responseCode: number }> {
+  async statusQR(qrId: string, reqId?: string): Promise<StatusQrResponse & { responseCode: number }> {
     return this.authedCall<StatusQrResponse & { responseCode: number }>(
       '/api/qrsimple/statusQR',
       'GET',
       { qrId },
+      { reqId },
     );
   }
 
-  async cancelQR(qrId: string): Promise<{ responseCode: number; message?: string }> {
+  async cancelQR(qrId: string, reqId?: string): Promise<{ responseCode: number; message?: string }> {
     return this.authedCall<{ responseCode: number; message?: string }>(
       '/api/qrsimple/cancelQR',
       'DELETE',
       { qrId },
-      { tolerateError: true },
+      { tolerateError: true, reqId },
     );
   }
 }

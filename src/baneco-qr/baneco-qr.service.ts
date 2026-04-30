@@ -55,13 +55,17 @@ export class BanecoQrService {
     return pm;
   }
 
-  async createQrForPackage(userId: string, packageId: string) {
-    const reqId = Math.random().toString(36).slice(2, 9);
-    this.logger.log(`[QR][${reqId}] start userId=${userId} packageId=${packageId}`);
+  private newReqId() {
+    return Math.random().toString(36).slice(2, 9);
+  }
+
+  async createQrForPackage(userId: string, packageId: string, reqId?: string) {
+    const traceId = reqId ?? this.newReqId();
+    this.logger.log(`[QR][${traceId}] start userId=${userId} packageId=${packageId}`);
 
     const paymentsEnabled = await this.systemConfigService.isPaymentsEnabled();
     if (!paymentsEnabled) {
-      this.logger.warn(`[QR][${reqId}] aborted reason=PAYMENTS_DISABLED`);
+      this.logger.warn(`[QR][${traceId}] aborted reason=PAYMENTS_DISABLED`);
       throw new BadRequestException('Las recargas estan temporalmente deshabilitadas.');
     }
 
@@ -69,7 +73,7 @@ export class BanecoQrService {
       where: { id: packageId, isActive: true },
     });
     if (!pkg) {
-      this.logger.warn(`[QR][${reqId}] aborted reason=PACKAGE_NOT_FOUND packageId=${packageId}`);
+      this.logger.warn(`[QR][${traceId}] aborted reason=PACKAGE_NOT_FOUND packageId=${packageId}`);
       throw new NotFoundException('Paquete no encontrado.');
     }
 
@@ -78,7 +82,7 @@ export class BanecoQrService {
       this.currency === 'BOB' ? Math.round(priceUsd * this.usdToBob * 100) / 100 : priceUsd;
 
     this.logger.log(
-      `[QR][${reqId}] package="${pkg.name}" priceUsd=${priceUsd} amount=${amount} currency=${this.currency} credits=${pkg.credits}`,
+      `[QR][${traceId}] package="${pkg.name}" priceUsd=${priceUsd} amount=${amount} currency=${this.currency} credits=${pkg.credits}`,
     );
 
     const pm = await this.getOrCreateQrPaymentMethod();
@@ -96,7 +100,7 @@ export class BanecoQrService {
     });
 
     try {
-      this.logger.log(`[QR][${reqId}] calling Baneco generateQR depositId=${deposit.id}`);
+      this.logger.log(`[QR][${traceId}] calling Baneco generateQR depositId=${deposit.id}`);
       const qr = await this.banecoApi.generateQR({
         transactionId: deposit.id,
         amount,
@@ -105,6 +109,7 @@ export class BanecoQrService {
         dueDate: this.buildDueDate(),
         singleUse: true,
         modifyAmount: false,
+        reqId: traceId,
       });
 
       await this.prisma.depositRequest.update({
@@ -112,7 +117,7 @@ export class BanecoQrService {
         data: { bancoQrId: qr.qrId },
       });
 
-      this.logger.log(`[QR][${reqId}] success depositId=${deposit.id} qrId=${qr.qrId}`);
+      this.logger.log(`[QR][${traceId}] success depositId=${deposit.id} qrId=${qr.qrId}`);
       return {
         depositId: deposit.id,
         qrId: qr.qrId,
@@ -125,7 +130,7 @@ export class BanecoQrService {
       };
     } catch (err: any) {
       this.logger.error(
-        `[QR][${reqId}] failed depositId=${deposit.id} reason=${err?.response?.code ?? err?.message ?? 'unknown'}`,
+        `[QR][${traceId}] failed depositId=${deposit.id} reason=${err?.response?.code ?? err?.message ?? 'unknown'}`,
       );
       await this.prisma.depositRequest.update({
         where: { id: deposit.id },
@@ -135,7 +140,8 @@ export class BanecoQrService {
     }
   }
 
-  async getStatus(userId: string, qrId: string) {
+  async getStatus(userId: string, qrId: string, reqId?: string) {
+    const traceId = reqId ?? this.newReqId();
     const deposit = await this.prisma.depositRequest.findUnique({
       where: { bancoQrId: qrId },
     });
@@ -150,7 +156,7 @@ export class BanecoQrService {
       return { status: 'CANCELED' as const, depositId: deposit.id };
     }
 
-    const remote = await this.banecoApi.statusQR(qrId);
+    const remote = await this.banecoApi.statusQR(qrId, traceId);
 
     const paymentObj =
       remote.payment && !Array.isArray(remote.payment) ? remote.payment : null;
@@ -170,7 +176,8 @@ export class BanecoQrService {
     return { status: 'PENDING' as const, depositId: deposit.id };
   }
 
-  async cancel(userId: string, qrId: string) {
+  async cancel(userId: string, qrId: string, reqId?: string) {
+    const traceId = reqId ?? this.newReqId();
     const deposit = await this.prisma.depositRequest.findUnique({
       where: { bancoQrId: qrId },
     });
@@ -181,7 +188,7 @@ export class BanecoQrService {
       return { ok: true, alreadyResolved: true };
     }
 
-    const res = await this.banecoApi.cancelQR(qrId);
+    const res = await this.banecoApi.cancelQR(qrId, traceId);
 
     // Caso especial: el banco rechaza la cancelacion porque el QR ya fue pagado.
     // Lo tratamos como pago confirmado y acreditamos el wallet.
@@ -246,7 +253,8 @@ export class BanecoQrService {
     ]);
   }
 
-  async reconcile(userId: string, qrId: string) {
+  async reconcile(userId: string, qrId: string, reqId?: string) {
+    const traceId = reqId ?? this.newReqId();
     const deposit = await this.prisma.depositRequest.findUnique({
       where: { bancoQrId: qrId },
     });
@@ -258,7 +266,7 @@ export class BanecoQrService {
     }
 
     // Intentamos cancelar: si el banco responde "ya pagado" -> confirmamos el pago.
-    const res = await this.banecoApi.cancelQR(qrId);
+    const res = await this.banecoApi.cancelQR(qrId, traceId);
     if (res.responseCode !== 0 && /pagado/i.test(res.message ?? '')) {
       await this.applyPaymentByQrId(qrId, null);
       return { ok: true, paid: true };

@@ -25,26 +25,33 @@ export class BanecoQrController {
 
   constructor(private readonly service: BanecoQrService) {}
 
+  private newReqId() {
+    return Math.random().toString(36).slice(2, 9);
+  }
+
   @Post('create')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Generar QR de Banco Economico para un paquete' })
   create(@CurrentUser() user: JwtUser, @Body() dto: CreateBanecoQrDto) {
-    this.logger.log(`[QR] create request arrived userId=${user.userId} packageId=${dto.packageId}`);
-    return this.service.createQrForPackage(user.userId, dto.packageId);
+    const reqId = this.newReqId();
+    this.logger.log(`[QR][${reqId}] create request arrived userId=${user.userId} packageId=${dto.packageId}`);
+    return this.service.createQrForPackage(user.userId, dto.packageId, reqId);
   }
 
   @Get('status/:qrId')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Consultar estado del QR' })
   status(@CurrentUser() user: JwtUser, @Param('qrId') qrId: string) {
-    return this.service.getStatus(user.userId, qrId);
+    const reqId = this.newReqId();
+    return this.service.getStatus(user.userId, qrId, reqId);
   }
 
   @Delete('cancel/:qrId')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Anular un QR pendiente' })
   cancel(@CurrentUser() user: JwtUser, @Param('qrId') qrId: string) {
-    return this.service.cancel(user.userId, qrId);
+    const reqId = this.newReqId();
+    return this.service.cancel(user.userId, qrId, reqId);
   }
 
   @Post('reconcile/:qrId')
@@ -53,7 +60,8 @@ export class BanecoQrController {
     summary: 'Reconciliar un QR: si el banco confirma que ya esta pagado, acredita los creditos',
   })
   reconcile(@CurrentUser() user: JwtUser, @Param('qrId') qrId: string) {
-    return this.service.reconcile(user.userId, qrId);
+    const reqId = this.newReqId();
+    return this.service.reconcile(user.userId, qrId, reqId);
   }
 
   // Webhook publico llamado por el banco al confirmar un pago.
