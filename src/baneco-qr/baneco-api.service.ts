@@ -4,9 +4,12 @@ import * as https from 'node:https';
 import * as http from 'node:http';
 import { URL } from 'node:url';
 
+const BANECO_TIMEOUT_MS = 12_000;
+
 interface RawResponse {
   status: number;
   body: string;
+  contentType: string;
 }
 
 function rawRequest(
@@ -35,11 +38,17 @@ function rawRequest(
       const chunks: Buffer[] = [];
       res.on('data', (c) => chunks.push(Buffer.from(c)));
       res.on('end', () => {
+        const rawCt = res.headers['content-type'] ?? '';
         resolve({
           status: res.statusCode ?? 0,
           body: Buffer.concat(chunks).toString('utf8'),
+          contentType: rawCt.split(';')[0].trim().toLowerCase(),
         });
       });
+    });
+
+    req.setTimeout(BANECO_TIMEOUT_MS, () => {
+      req.destroy(new Error(`Baneco timeout after ${BANECO_TIMEOUT_MS}ms`));
     });
 
     req.on('error', reject);
@@ -215,39 +224,111 @@ export class BanecoApiService {
 
     const url = `${this.base}${path}`;
     const sendBody = body ? JSON.stringify(body) : undefined;
+    const reqId = Math.random().toString(36).slice(2, 9);
 
-    this.logger.log(`[${path}] ${method} url=${url} body=${sendBody ?? '(none)'}`);
+    this.logger.log(`[QR][${reqId}] calling path=${path} method=${method}`);
 
     const exec = async () => {
-      const r = await rawRequest(
-        url,
-        method,
-        {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        sendBody,
+      const startMs = Date.now();
+      let r: RawResponse;
+      try {
+        r = await rawRequest(
+          url,
+          method,
+          {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          sendBody,
+        );
+      } catch (netErr: any) {
+        const durationMs = Date.now() - startMs;
+        this.logger.error(
+          `[QR][${reqId}] network/timeout error path=${path} durationMs=${durationMs} err=${netErr?.message ?? netErr}`,
+        );
+        throw new ServiceUnavailableException(
+          'No se pudo generar el QR en este momento. Intenta nuevamente en unos minutos.',
+        );
+      }
+
+      const durationMs = Date.now() - startMs;
+      const isJsonContent =
+        r.contentType === '' ||
+        r.contentType === 'application/json' ||
+        r.contentType.includes('application/json');
+
+      this.logger.log(
+        `[QR][${reqId}] Baneco response path=${path} status=${r.status} contentType=${r.contentType || '(none)'} durationMs=${durationMs}`,
       );
-      this.logger.log(`[${path}] status=${r.status} body=${r.body}`);
+
       let parsed: any;
       try {
         parsed = JSON.parse(r.body);
       } catch {
-        parsed = { responseCode: -1, message: 'respuesta no JSON', _raw: r.body };
+        const preview = r.body.slice(0, 500).replace(/[\r\n]+/g, ' ');
+        this.logger.error(
+          `[QR][${reqId}] Non-JSON response path=${path} status=${r.status} contentType=${r.contentType || '(none)'} preview="${preview}"`,
+        );
+        this.logger.error(`[QR][${reqId}] failed reason=NON_JSON_RESPONSE path=${path}`);
+
+        // Si tolerateError está activo (ej: cancelQR) devolvemos placeholder sin lanzar
+        if (opts?.tolerateError) {
+          return {
+            res: r,
+            data: { responseCode: -1, message: 'NON_JSON_RESPONSE' } as any,
+          };
+        }
+
+        const providerLabel =
+          r.status === 401 || r.status === 403
+            ? 'credenciales/permisos'
+            : r.status >= 500
+              ? 'proveedor caido'
+              : r.status === 0
+                ? 'timeout'
+                : `status=${r.status}`;
+
+        this.logger.error(
+          `[QR][${reqId}] failed providerLabel=${providerLabel} path=${path}`,
+        );
+
+        throw new ServiceUnavailableException({
+          message:
+            'No se pudo generar el QR en este momento. Intenta nuevamente en unos minutos.',
+          code: 'QR_PROVIDER_NON_JSON_RESPONSE',
+          providerStatus: r.status,
+          providerLabel,
+        });
       }
+
+      // Truncar log para no registrar base64 completo (qrImage puede ser enorme)
+      const bodyPreview = JSON.stringify(parsed).slice(0, 300);
+      this.logger.log(
+        `[QR][${reqId}] parsed path=${path} responseCode=${parsed?.responseCode} bodyPreview=${bodyPreview}`,
+      );
+
+      // Advertir si status HTTP no-OK aunque haya JSON
+      if (!isJsonContent && r.status >= 400) {
+        const preview = r.body.slice(0, 200).replace(/[\r\n]+/g, ' ');
+        this.logger.warn(
+          `[QR][${reqId}] non-json content-type with status=${r.status} preview="${preview}"`,
+        );
+      }
+
       return { res: r, data: parsed as T & { responseCode?: number; message?: string } };
     };
 
     let { data } = await exec();
 
     if (data?.responseCode !== 0) {
-      // Solo reintentar con login fresco si parece error de auth (401/403 con mensaje de token)
       const looksLikeAuth =
         data?.responseCode === 401 ||
         /token|autentic|no valid/i.test(String(data?.message ?? ''));
 
       if (looksLikeAuth) {
-        this.logger.warn(`[${path}] responseCode=${data?.responseCode}, renovando token y reintentando`);
+        this.logger.warn(
+          `[QR][${reqId}] responseCode=${data?.responseCode} msg="${data?.message}", renovando token y reintentando`,
+        );
         token = await this.login();
         const retry = await exec();
         data = retry.data;
@@ -255,12 +336,16 @@ export class BanecoApiService {
 
       if (data?.responseCode !== 0) {
         if (opts?.tolerateError) return data;
+        this.logger.error(
+          `[QR][${reqId}] failed path=${path} responseCode=${data?.responseCode} msg="${data?.message ?? 'sin detalle'}"`,
+        );
         throw new ServiceUnavailableException(
           `Baneco ${path} fallo: ${data?.message ?? 'sin detalle'}`,
         );
       }
     }
 
+    this.logger.log(`[QR][${reqId}] success path=${path}`);
     return data;
   }
 

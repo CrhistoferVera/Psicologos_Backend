@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
   Param,
   Post,
   UseGuards,
@@ -20,12 +21,15 @@ interface JwtUser {
 @ApiTags('Baneco QR')
 @Controller('baneco-qr')
 export class BanecoQrController {
+  private readonly logger = new Logger(BanecoQrController.name);
+
   constructor(private readonly service: BanecoQrService) {}
 
   @Post('create')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Generar QR de Banco Economico para un paquete' })
   create(@CurrentUser() user: JwtUser, @Body() dto: CreateBanecoQrDto) {
+    this.logger.log(`[QR] create request arrived userId=${user.userId} packageId=${dto.packageId}`);
     return this.service.createQrForPackage(user.userId, dto.packageId);
   }
 

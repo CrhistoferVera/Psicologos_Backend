@@ -1,7 +1,7 @@
 import { Controller, Get, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { UpdateProfessionalDto, EditProfessionalDto } from './dto/update-professional.dto';
-import { UpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
+import { AdminUpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -90,7 +90,7 @@ export class AdminProfessionalsController {
 
   @Patch(':id/profile')
   @ApiOperation({ summary: 'Editar datos de perfil de un profesional' })
-  updateProfile(@Param('id') id: string, @Body() dto: UpdateProfessionalProfileDto) {
+  updateProfile(@Param('id') id: string, @Body() dto: AdminUpdateProfessionalProfileDto) {
     return this.professionalsService.updateProfile(id, dto);
   }
 }

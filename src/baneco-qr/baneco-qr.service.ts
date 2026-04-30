@@ -56,19 +56,30 @@ export class BanecoQrService {
   }
 
   async createQrForPackage(userId: string, packageId: string) {
+    const reqId = Math.random().toString(36).slice(2, 9);
+    this.logger.log(`[QR][${reqId}] start userId=${userId} packageId=${packageId}`);
+
     const paymentsEnabled = await this.systemConfigService.isPaymentsEnabled();
     if (!paymentsEnabled) {
+      this.logger.warn(`[QR][${reqId}] aborted reason=PAYMENTS_DISABLED`);
       throw new BadRequestException('Las recargas estan temporalmente deshabilitadas.');
     }
 
     const pkg = await this.prisma.package.findFirst({
       where: { id: packageId, isActive: true },
     });
-    if (!pkg) throw new NotFoundException('Paquete no encontrado.');
+    if (!pkg) {
+      this.logger.warn(`[QR][${reqId}] aborted reason=PACKAGE_NOT_FOUND packageId=${packageId}`);
+      throw new NotFoundException('Paquete no encontrado.');
+    }
 
     const priceUsd = Number(pkg.price);
     const amount =
       this.currency === 'BOB' ? Math.round(priceUsd * this.usdToBob * 100) / 100 : priceUsd;
+
+    this.logger.log(
+      `[QR][${reqId}] package="${pkg.name}" priceUsd=${priceUsd} amount=${amount} currency=${this.currency} credits=${pkg.credits}`,
+    );
 
     const pm = await this.getOrCreateQrPaymentMethod();
 
@@ -85,6 +96,7 @@ export class BanecoQrService {
     });
 
     try {
+      this.logger.log(`[QR][${reqId}] calling Baneco generateQR depositId=${deposit.id}`);
       const qr = await this.banecoApi.generateQR({
         transactionId: deposit.id,
         amount,
@@ -100,6 +112,7 @@ export class BanecoQrService {
         data: { bancoQrId: qr.qrId },
       });
 
+      this.logger.log(`[QR][${reqId}] success depositId=${deposit.id} qrId=${qr.qrId}`);
       return {
         depositId: deposit.id,
         qrId: qr.qrId,
@@ -110,7 +123,10 @@ export class BanecoQrService {
         packageName: pkg.name,
         dueDate: this.buildDueDate(),
       };
-    } catch (err) {
+    } catch (err: any) {
+      this.logger.error(
+        `[QR][${reqId}] failed depositId=${deposit.id} reason=${err?.response?.code ?? err?.message ?? 'unknown'}`,
+      );
       await this.prisma.depositRequest.update({
         where: { id: deposit.id },
         data: { status: DepositStatus.REJECTED, rejectionReason: 'Fallo al generar QR' },

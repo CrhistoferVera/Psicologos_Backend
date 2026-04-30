@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import { Prisma, WithdrawalStatus, ProfessionalReviewStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { UpdateProfessionalDto, EditProfessionalDto } from './dto/update-professional.dto';
-import { UpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
+import { AdminUpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
 import { PROFESSIONAL_ROLES } from '../../common/professional-role';
 
 @Injectable()
@@ -57,7 +57,7 @@ export class AdminProfessionalsService {
     return this.findOne(id);
   }
 
-  async updateProfile(id: string, dto: UpdateProfessionalProfileDto) {
+  async updateProfile(id: string, dto: AdminUpdateProfessionalProfileDto) {
     const user = await this.prisma.user.findFirst({
       where: { id, role: { in: PROFESSIONAL_ROLES } },
     });
