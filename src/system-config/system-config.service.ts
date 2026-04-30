@@ -114,6 +114,9 @@ export class SystemConfigService {
 
   async getPublicConfig() {
     const config = await this.getRuntimeConfig();
+    const bobToUsdRate = Number(process.env.BOB_TO_USD_RATE ?? '7');
+    const stripeBonusPercentage = Number(process.env.STRIPE_BONUS_PERCENTAGE ?? '0.35');
+
     return {
       creditValueBs: config.creditValueBs,
       creditToSolesRate: config.creditToSolesRate,
@@ -124,6 +127,8 @@ export class SystemConfigService {
       referralPercentage: config.referralPercentage,
       referralRewardCredits: config.referralRewardCredits,
       referralMinDepositAmount: config.referralMinDepositAmount,
+      bobToUsdRate,
+      stripeBonusPercentage,
     };
   }
 
