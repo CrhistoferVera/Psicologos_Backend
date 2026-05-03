@@ -9,6 +9,12 @@ datasource db {
 model User {
   id                          String                    @id @default(uuid())
   phoneNumber                 String                    @unique
+  phoneDialCode               String?
+  phoneNationalNumber         String?
+  phoneCountryIso             String?
+  phoneCountryName            String?
+  billingRegion               String?
+  preferredCurrency           String?
   email                       String?                   @unique
   referralCode                String?                   @unique
   password                    String?
@@ -38,6 +44,8 @@ model User {
   referralsSent               Referral[]                @relation("ReferralReferrer")
   referralAsReferred          Referral?                 @relation("ReferralReferred")
 
+  @@index([billingRegion])
+  @@index([phoneCountryIso])
   @@map("users")
 }
 

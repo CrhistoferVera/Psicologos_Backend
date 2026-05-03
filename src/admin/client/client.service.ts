@@ -2,6 +2,7 @@ import { Injectable, ConflictException, NotFoundException } from '@nestjs/common
 import { PrismaService } from '../../../prisma/prisma.service';
 import { UpdateClientStatusDto } from './dto/update-client-status.dto';
 import { UserRole, Prisma } from "@prisma/client";
+import { BILLING_REGION_BOLIVIA, BILLING_REGION_INTERNATIONAL } from '../../common/phone-metadata.util';
 
 
 @Injectable()
@@ -49,10 +50,14 @@ export class ClientService {
     }
 
     // LISTAR CLIENTES + BUSQUEDA
-    async findAll(search?: string, cursor?: string, limit: number = 10) {
+    async findAll(search?: string, cursor?: string, limit: number = 10, billingRegion?: string) {
+        const normalizedRegion = (billingRegion ?? '').trim().toUpperCase();
+        const hasValidBillingRegion =
+            normalizedRegion === BILLING_REGION_BOLIVIA || normalizedRegion === BILLING_REGION_INTERNATIONAL;
 
         const whereCondition: Prisma.UserWhereInput = {
             role: UserRole.USER,
+            ...(hasValidBillingRegion ? { billingRegion: normalizedRegion } : {}),
             ...(search && {
                 OR: [
                     { firstName: { contains: search, mode: 'insensitive' } },

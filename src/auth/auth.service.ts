@@ -16,6 +16,8 @@ import { UsersService } from '../users/users.service';
 import { UserEntity } from '../users/entities/user.entity';
 import { CompleteRegistrationDto } from './dto/complete-registration.dto';
 import { CompleteProfessionalRegistrationDto } from './dto/complete-professional-registration.dto';
+import { SendOtpDto } from './dto/send-otp.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -25,6 +27,7 @@ import { PROFESSIONAL_ROLE } from '../common/professional-role';
 import { ReferralsService } from '../referrals/referrals.service';
 import { createUniqueReferralCode } from '../referrals/utils/referral-code.util';
 import { FaceMatchService } from '../kyc/face-match.service';
+import { normalizePhoneRegistrationInput } from '../common/phone-metadata.util';
 
 type GoogleTokenInfo = {
   iss?: string;
@@ -42,6 +45,17 @@ type GoogleVerifiedTokenInfo = GoogleTokenInfo & {
   sub: string;
 };
 
+type PhoneVerifiedTokenPayload = {
+  sub: string;
+  type: 'phone_verified';
+  phoneDialCode: string;
+  phoneNationalNumber: string;
+  phoneCountryIso: string;
+  phoneCountryName: string;
+  billingRegion: string;
+  preferredCurrency: string;
+};
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -56,7 +70,17 @@ export class AuthService {
     private readonly faceMatch: FaceMatchService,
   ) {}
 
-  async sendOtp(phoneNumber: string) {
+  async sendOtp(dto: SendOtpDto) {
+    const normalized = normalizePhoneRegistrationInput({
+      phoneDialCode: dto.phoneDialCode,
+      phoneNationalNumber: dto.phoneNationalNumber,
+      phoneCountryIso: dto.phoneCountryIso,
+      phoneCountryName: dto.phoneCountryName,
+    });
+    const phoneNumber = normalized.phoneNumber;
+    if (dto.phoneNumber && dto.phoneNumber.trim() !== phoneNumber) {
+      throw new BadRequestException('El numero de telefono no coincide con el pais seleccionado');
+    }
     const code = randomInt(0, 1000000).toString().padStart(6, '0');
     await this.cacheManager.set(`otp_${phoneNumber}`, code, 300000);
 
@@ -68,10 +92,20 @@ export class AuthService {
     return { message: 'Codigo OTP enviado por WhatsApp. Expira en 5 minutos.' };
   }
 
-  async verifyOtp(phoneNumber: string, code: string) {
+  async verifyOtp(dto: VerifyOtpDto) {
+    const normalized = normalizePhoneRegistrationInput({
+      phoneDialCode: dto.phoneDialCode,
+      phoneNationalNumber: dto.phoneNationalNumber,
+      phoneCountryIso: dto.phoneCountryIso,
+      phoneCountryName: dto.phoneCountryName,
+    });
+    const phoneNumber = normalized.phoneNumber;
+    if (dto.phoneNumber && dto.phoneNumber.trim() !== phoneNumber) {
+      throw new BadRequestException('El numero de telefono no coincide con el pais seleccionado');
+    }
     const cached = await this.cacheManager.get<string>(`otp_${phoneNumber}`);
 
-    if (!cached || cached !== code) {
+    if (!cached || cached !== dto.code) {
       throw new BadRequestException('Codigo OTP invalido o expirado');
     }
 
@@ -85,7 +119,16 @@ export class AuthService {
     }
 
     const tempToken = this.jwtService.sign(
-      { sub: phoneNumber, type: 'phone_verified' },
+      {
+        sub: phoneNumber,
+        type: 'phone_verified',
+        phoneDialCode: normalized.phoneDialCode,
+        phoneNationalNumber: normalized.phoneNationalNumber,
+        phoneCountryIso: normalized.phoneCountryIso,
+        phoneCountryName: normalized.phoneCountryName,
+        billingRegion: normalized.billingRegion,
+        preferredCurrency: normalized.preferredCurrency,
+      } as PhoneVerifiedTokenPayload,
       { expiresIn: '10m' },
     );
 
@@ -93,16 +136,7 @@ export class AuthService {
   }
 
   async completeRegistration(dto: CompleteRegistrationDto) {
-    let payload: { sub: string; type: string };
-    try {
-      payload = this.jwtService.verify(dto.tempToken);
-    } catch {
-      throw new BadRequestException('Token invalido o expirado');
-    }
-
-    if (payload.type !== 'phone_verified') {
-      throw new BadRequestException('Token invalido');
-    }
+    const payload = this.verifyPhoneToken(dto.tempToken);
 
     if (dto.password !== dto.confirmPassword) {
       throw new BadRequestException('Las contrasenas no coinciden');
@@ -123,6 +157,12 @@ export class AuthService {
 
     const newUser = await this.usersService.create({
       phoneNumber: payload.sub,
+      phoneDialCode: payload.phoneDialCode,
+      phoneNationalNumber: payload.phoneNationalNumber,
+      phoneCountryIso: payload.phoneCountryIso,
+      phoneCountryName: payload.phoneCountryName,
+      billingRegion: payload.billingRegion,
+      preferredCurrency: payload.preferredCurrency,
       email,
       firstName: dto.firstName,
       lastName: dto.lastName,
@@ -148,16 +188,7 @@ export class AuthService {
       tituloProfesional?: Express.Multer.File;
     },
   ) {
-    let payload: { sub: string; type: string };
-    try {
-      payload = this.jwtService.verify(dto.tempToken);
-    } catch {
-      throw new BadRequestException('Token invalido o expirado');
-    }
-
-    if (payload.type !== 'phone_verified') {
-      throw new BadRequestException('Token invalido');
-    }
+    const payload = this.verifyPhoneToken(dto.tempToken);
 
     if (dto.password !== dto.confirmPassword) {
       throw new BadRequestException('Las contrasenas no coinciden');
@@ -243,6 +274,12 @@ export class AuthService {
         data: {
           id: uid,
           phoneNumber: payload.sub,
+          phoneDialCode: payload.phoneDialCode,
+          phoneNationalNumber: payload.phoneNationalNumber,
+          phoneCountryIso: payload.phoneCountryIso,
+          phoneCountryName: payload.phoneCountryName,
+          billingRegion: payload.billingRegion,
+          preferredCurrency: payload.preferredCurrency,
           email: email ?? null,
           firstName: dto.firstName,
           lastName: dto.lastName,
@@ -427,6 +464,40 @@ export class AuthService {
     return {
       access_token: this.jwtService.sign(payload),
       user: new UserEntity(user),
+    };
+  }
+
+  private verifyPhoneToken(token: string): PhoneVerifiedTokenPayload {
+    let payload: PhoneVerifiedTokenPayload;
+    try {
+      payload = this.jwtService.verify(token);
+    } catch {
+      throw new BadRequestException('Token invalido o expirado');
+    }
+
+    if (payload.type !== 'phone_verified' || !payload.sub) {
+      throw new BadRequestException('Token invalido');
+    }
+
+    const normalized = normalizePhoneRegistrationInput({
+      phoneDialCode: payload.phoneDialCode,
+      phoneNationalNumber: payload.phoneNationalNumber,
+      phoneCountryIso: payload.phoneCountryIso,
+      phoneCountryName: payload.phoneCountryName,
+    });
+
+    if (normalized.phoneNumber !== payload.sub) {
+      throw new BadRequestException('Token invalido');
+    }
+
+    return {
+      ...payload,
+      phoneDialCode: normalized.phoneDialCode,
+      phoneNationalNumber: normalized.phoneNationalNumber,
+      phoneCountryIso: normalized.phoneCountryIso,
+      phoneCountryName: normalized.phoneCountryName,
+      billingRegion: normalized.billingRegion,
+      preferredCurrency: normalized.preferredCurrency,
     };
   }
 

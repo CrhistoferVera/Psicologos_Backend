@@ -19,12 +19,14 @@ export class ClientController {
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'cursor', required: false, description: 'ID del ultimo registro recibido' })
   @ApiQuery({ name: 'limit', required: false, example: 10 })
+  @ApiQuery({ name: 'billingRegion', required: false, enum: ['BOLIVIA', 'INTERNATIONAL'] })
   findAll(
     @Query('search') search?: string,
     @Query('cursor') cursor?: string,
     @Query('limit') limit: number = 10,
+    @Query('billingRegion') billingRegion?: string,
   ) {
-    return this.clientService.findAll(search, cursor, Number(limit));
+    return this.clientService.findAll(search, cursor, Number(limit), billingRegion);
   }
 
   @Get(':id')

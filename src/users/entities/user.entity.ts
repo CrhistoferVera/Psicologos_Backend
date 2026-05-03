@@ -4,6 +4,12 @@ import { Exclude } from 'class-transformer';
 export class UserEntity implements User {
   id: string;
   phoneNumber: string;
+  phoneDialCode: string | null;
+  phoneNationalNumber: string | null;
+  phoneCountryIso: string | null;
+  phoneCountryName: string | null;
+  billingRegion: string | null;
+  preferredCurrency: string | null;
   email: string | null;
   referralCode: string | null;
   firstName: string | null;

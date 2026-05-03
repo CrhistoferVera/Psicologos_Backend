@@ -4,6 +4,30 @@ export class CreateUserDto {
   @IsString()
   phoneNumber: string;
 
+  @IsOptional()
+  @IsString()
+  phoneDialCode?: string;
+
+  @IsOptional()
+  @IsString()
+  phoneNationalNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  phoneCountryIso?: string;
+
+  @IsOptional()
+  @IsString()
+  phoneCountryName?: string;
+
+  @IsOptional()
+  @IsString()
+  billingRegion?: string;
+
+  @IsOptional()
+  @IsString()
+  preferredCurrency?: string;
+
   @IsEmail()
   @IsOptional()
   email?: string;

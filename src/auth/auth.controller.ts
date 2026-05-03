@@ -27,13 +27,13 @@ export class AuthController {
 
   @Post('send-otp')
   async sendOtp(@Body() dto: SendOtpDto) {
-    return this.authService.sendOtp(dto.phoneNumber);
+    return this.authService.sendOtp(dto);
   }
 
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
   async verifyOtp(@Body() dto: VerifyOtpDto) {
-    return this.authService.verifyOtp(dto.phoneNumber, dto.code);
+    return this.authService.verifyOtp(dto);
   }
 
   @Post('complete-registration')

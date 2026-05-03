@@ -1,8 +1,21 @@
-import { IsString } from 'class-validator';
+import { IsOptional, IsString } from 'class-validator';
 
 export class VerifyOtpDto {
   @IsString()
-  phoneNumber: string;
+  phoneDialCode: string;
+
+  @IsString()
+  phoneNationalNumber: string;
+
+  @IsString()
+  phoneCountryIso: string;
+
+  @IsString()
+  phoneCountryName: string;
+
+  @IsOptional()
+  @IsString()
+  phoneNumber?: string;
 
   @IsString()
   code: string;
