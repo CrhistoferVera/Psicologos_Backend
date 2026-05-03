@@ -2,6 +2,10 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
 import { DepositStatus, PaymentType } from '@prisma/client';
+import {
+  BILLING_REGION_INTERNATIONAL,
+  CURRENCY_USD,
+} from '../common/phone-metadata.util';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const Stripe = require('stripe');
 
@@ -15,6 +19,21 @@ export class StripeService {
     private readonly prisma: PrismaService,
   ) {
     this.stripe = new Stripe(this.config.get<string>('STRIPE_SECRET_KEY')!);
+  }
+
+  private canUseStripe(user: {
+    billingRegion: string | null;
+    preferredCurrency: string | null;
+    phoneCountryIso: string | null;
+  }) {
+    const billingRegion = (user.billingRegion ?? '').trim().toUpperCase();
+    const preferredCurrency = (user.preferredCurrency ?? '').trim().toUpperCase();
+    const phoneCountryIso = (user.phoneCountryIso ?? '').trim().toUpperCase();
+    return (
+      billingRegion === BILLING_REGION_INTERNATIONAL ||
+      preferredCurrency === CURRENCY_USD ||
+      (phoneCountryIso.length > 0 && phoneCountryIso !== 'BO')
+    );
   }
 
   // Crea o reutiliza el customer de Stripe para el usuario.
@@ -53,6 +72,15 @@ export class StripeService {
 
   // Crea el PaymentIntent y el DepositRequest en PENDING
   async createPaymentIntent(userId: string, packageId: string, saveCard = false) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { billingRegion: true, preferredCurrency: true, phoneCountryIso: true },
+    });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    if (!this.canUseStripe(user)) {
+      throw new BadRequestException('Stripe no esta disponible para tu region.');
+    }
+
     const pkg = await this.prisma.package.findUnique({ where: { id: packageId } });
     if (!pkg || !pkg.isActive) throw new NotFoundException('Paquete no encontrado');
 

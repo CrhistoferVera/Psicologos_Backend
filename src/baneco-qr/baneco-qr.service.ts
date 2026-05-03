@@ -9,6 +9,7 @@ import { DepositStatus, PaymentType } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { BanecoApiService, PaymentQR } from './baneco-api.service';
+import { BILLING_REGION_BOLIVIA, CURRENCY_BOB } from '../common/phone-metadata.util';
 
 @Injectable()
 export class BanecoQrService {
@@ -59,9 +60,36 @@ export class BanecoQrService {
     return Math.random().toString(36).slice(2, 9);
   }
 
+  private canUseBaneco(user: {
+    billingRegion: string | null;
+    preferredCurrency: string | null;
+    phoneCountryIso: string | null;
+  }) {
+    const billingRegion = (user.billingRegion ?? '').trim().toUpperCase();
+    const preferredCurrency = (user.preferredCurrency ?? '').trim().toUpperCase();
+    const phoneCountryIso = (user.phoneCountryIso ?? '').trim().toUpperCase();
+    return (
+      billingRegion === BILLING_REGION_BOLIVIA ||
+      preferredCurrency === CURRENCY_BOB ||
+      phoneCountryIso === 'BO'
+    );
+  }
+
   async createQrForPackage(userId: string, packageId: string, reqId?: string) {
     const traceId = reqId ?? this.newReqId();
     this.logger.log(`[QR][${traceId}] start userId=${userId} packageId=${packageId}`);
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { billingRegion: true, preferredCurrency: true, phoneCountryIso: true },
+    });
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado.');
+    }
+    if (!this.canUseBaneco(user)) {
+      this.logger.warn(`[QR][${traceId}] aborted reason=REGION_NOT_ALLOWED userId=${userId}`);
+      throw new BadRequestException('El metodo QR Baneco no esta disponible para tu region.');
+    }
 
     const paymentsEnabled = await this.systemConfigService.isPaymentsEnabled();
     if (!paymentsEnabled) {
