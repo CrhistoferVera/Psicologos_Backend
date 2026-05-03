@@ -2,16 +2,10 @@ import {
   BadRequestException,
   Injectable,
   Logger,
-  NotFoundException,
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { Prisma, ServiceType, TransactionType, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
-import { ServicePricesService } from '../service-prices/service-prices.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { allocateCreditDebit } from '../wallet/utils/credit-allocation.util';
-import { SystemConfigService } from '../system-config/system-config.service';
-import { ReferralsService } from '../referrals/referrals.service';
 
 @Injectable()
 export class MessagesService {
@@ -19,10 +13,7 @@ export class MessagesService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly servicePricesService: ServicePricesService,
     private readonly notificationsService: NotificationsService,
-    private readonly systemConfigService: SystemConfigService,
-    private readonly referralsService: ReferralsService,
   ) {}
 
   private ttlCutoff(): Date {
@@ -60,116 +51,6 @@ export class MessagesService {
       create: { user1Id, user2Id },
       update: {},
     });
-
-    const senderProfile = await this.prisma.professionalProfile.findUnique({
-      where: { userId: senderId },
-      select: { id: true },
-    });
-
-    if (!senderProfile) {
-      const sendPrice = await this.servicePricesService.getPriceForUser(
-        receiverId,
-        ServiceType.MESSAGE_SEND,
-      );
-
-      if (sendPrice && sendPrice.price > 0) {
-        const creditsRequired = sendPrice.price;
-
-        const clientWallet = await this.prisma.wallet.findUnique({ where: { userId: senderId } });
-        if (!clientWallet) throw new NotFoundException('Wallet del cliente no encontrada');
-        if (Number(clientWallet.balance) < creditsRequired) {
-          throw new BadRequestException('Creditos insuficientes para enviar el mensaje');
-        }
-
-        const professionalWallet = await this.prisma.wallet.findUnique({ where: { userId: receiverId } });
-        if (!professionalWallet) throw new NotFoundException('Wallet de profesional no encontrada');
-
-        const [client, runtimeConfig, adminWallet] = await Promise.all([
-          this.prisma.user.findUnique({
-            where: { id: senderId },
-            select: { firstName: true, lastName: true },
-          }),
-          this.systemConfigService.getRuntimeConfig(),
-          this.prisma.wallet.findFirst({
-            where: { user: { role: UserRole.ADMIN } },
-            select: { id: true, userId: true },
-          }),
-        ]);
-
-        const clientName = [client?.firstName, client?.lastName].filter(Boolean).join(' ') || 'Cliente';
-
-        const debit = allocateCreditDebit(
-          Number(clientWallet.balance),
-          Number(clientWallet.promotionalBalance),
-          creditsRequired,
-        );
-
-        const feePct = runtimeConfig.platformFeePercent / 100;
-        const distributableCredits = debit.realDebited;
-        const adminShare = Math.round(distributableCredits * feePct * 100) / 100;
-        const professionalShare = Math.round((distributableCredits - adminShare) * 100) / 100;
-
-        const clientWalletUpdate: Prisma.WalletUpdateInput = {
-          balance: { decrement: debit.totalDebited },
-        };
-        if (debit.promotionalDebited > 0) {
-          clientWalletUpdate.promotionalBalance = { decrement: debit.promotionalDebited };
-        }
-
-        await this.prisma.$transaction(async (tx) => {
-          await tx.wallet.update({ where: { userId: senderId }, data: clientWalletUpdate });
-          await tx.transaction.create({
-            data: {
-              walletId: clientWallet.id,
-              type: TransactionType.MESSAGE_SEND,
-              amount: debit.totalDebited,
-              promotionalAmount: debit.promotionalDebited,
-              realAmount: debit.realDebited,
-              isPromotional: debit.realDebited === 0,
-              description: 'Costo por enviar mensaje',
-            },
-          });
-
-          if (professionalShare > 0) {
-            await tx.wallet.update({
-              where: { userId: receiverId },
-              data: { balance: { increment: professionalShare } },
-            });
-            const earningTx = await tx.transaction.create({
-              data: {
-                walletId: professionalWallet.id,
-                type: TransactionType.EARNING,
-                amount: professionalShare,
-                promotionalAmount: 0,
-                realAmount: professionalShare,
-                isPromotional: false,
-                description: JSON.stringify({ service: 'Mensaje recibido', clientName }),
-              },
-            });
-            await this.referralsService.maybeRewardReferralOnProfessionalEarning(tx, {
-              professionalUserId: receiverId,
-              earningTransactionId: earningTx.id,
-              earningRealAmount: professionalShare,
-            });
-          }
-
-          if (adminWallet && adminShare > 0) {
-            await tx.wallet.update({ where: { id: adminWallet.id }, data: { balance: { increment: adminShare } } });
-            await tx.transaction.create({
-              data: {
-                walletId: adminWallet.id,
-                type: TransactionType.EARNING,
-                amount: adminShare,
-                promotionalAmount: 0,
-                realAmount: adminShare,
-                isPromotional: false,
-                description: JSON.stringify({ service: 'Comision mensaje', clientName }),
-              },
-            });
-          }
-        });
-      }
-    }
 
     const message = await this.prisma.message.create({
       data: {

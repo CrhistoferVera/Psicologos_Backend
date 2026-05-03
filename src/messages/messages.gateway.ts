@@ -7,7 +7,6 @@
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { MessagesService } from './messages.service';
-import { CallsService } from '../calls/calls.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma.service';
 
@@ -16,7 +15,6 @@ interface CallSession {
   professionalId: string;
   callType: 'CALL' | 'VIDEO_CALL';
   startedAt: number | null;
-  warningInterval?: NodeJS.Timeout;
 }
 
 @WebSocketGateway({
@@ -32,7 +30,6 @@ export class MessagesGateway {
 
   constructor(
     private readonly messagesService: MessagesService,
-    private readonly callsService: CallsService,
     private readonly notificationsService: NotificationsService,
     private readonly prisma: PrismaService,
   ) {}
@@ -121,25 +118,6 @@ export class MessagesGateway {
 
     this.server.to(`user_${data.callerId}`).emit('call_accepted', { callId: data.callId });
 
-    if (session) {
-      session.warningInterval = setInterval(async () => {
-        const caller = await this.prisma.user.findUnique({
-          where: { id: session.callerId },
-          select: { fcmToken: true, wallet: { select: { balance: true } } },
-        });
-
-        if (caller?.fcmToken && caller.wallet) {
-          const balance = Number(caller.wallet.balance);
-          this.notificationsService.sendPushNotification(
-            caller.fcmToken,
-            'Llamada en curso',
-            `Te quedan ${balance} creditos`,
-            { callId: data.callId, type: 'CALL_WARNING', balance },
-          );
-        }
-      }, 2 * 60 * 1000);
-    }
-
     const caller = await this.prisma.user.findUnique({
       where: { id: data.callerId },
       select: { fcmToken: true },
@@ -167,8 +145,6 @@ export class MessagesGateway {
     },
     @ConnectedSocket() _client: Socket,
   ) {
-    const session = this.callSessions.get(data.callId);
-    if (session?.warningInterval) clearInterval(session.warningInterval);
     this.callSessions.delete(data.callId);
     this.server.to(`user_${data.callerId}`).emit('call_rejected', { callId: data.callId });
 
@@ -195,8 +171,6 @@ export class MessagesGateway {
     const session = this.callSessions.get(data.callId);
     this.callSessions.delete(data.callId);
 
-    if (session?.warningInterval) clearInterval(session.warningInterval);
-
     if (session) {
       this.server.to(`user_${session.callerId}`).emit('call_ended', { callId: data.callId });
       this.server.to(`user_${session.professionalId}`).emit('call_ended', { callId: data.callId });
@@ -206,41 +180,27 @@ export class MessagesGateway {
 
     if (session?.startedAt) {
       const durationSeconds = Math.floor((Date.now() - session.startedAt) / 1000);
-      try {
-        const billing = await this.callsService.billCall(
-          session.callerId,
-          session.professionalId,
-          session.callType,
-          durationSeconds,
+      const [caller, professional] = await Promise.all([
+        this.prisma.user.findUnique({ where: { id: session.callerId }, select: { fcmToken: true } }),
+        this.prisma.user.findUnique({ where: { id: session.professionalId }, select: { fcmToken: true } }),
+      ]);
+
+      const minutes = Math.ceil(durationSeconds / 60);
+      if (caller?.fcmToken) {
+        this.notificationsService.sendPushNotification(
+          caller.fcmToken,
+          'Sesión finalizada',
+          `Duración: ${minutes} min`,
+          { callId: data.callId, type: 'CALL_ENDED', durationSeconds },
         );
-
-        const billingResult = { ...billing, durationSeconds };
-        this.server.to(`user_${session.callerId}`).emit('call_billed', billingResult);
-        this.server.to(`user_${session.professionalId}`).emit('call_billed', billingResult);
-
-        const [caller, professional] = await Promise.all([
-          this.prisma.user.findUnique({ where: { id: session.callerId }, select: { fcmToken: true } }),
-          this.prisma.user.findUnique({ where: { id: session.professionalId }, select: { fcmToken: true } }),
-        ]);
-
-        if (caller?.fcmToken) {
-          this.notificationsService.sendPushNotification(
-            caller.fcmToken,
-            'Llamada finalizada',
-            `Se cobraron ${billing.creditsCharged} creditos · ${billing.minutesBilled} min`,
-            { callId: data.callId, type: 'CALL_BILLED', ...billingResult },
-          );
-        }
-        if (professional?.fcmToken) {
-          this.notificationsService.sendPushNotification(
-            professional.fcmToken,
-            'Llamada finalizada',
-            `Ganaste ${billing.realCreditsCharged} creditos reales · ${billing.minutesBilled} min`,
-            { callId: data.callId, type: 'CALL_BILLED', ...billingResult },
-          );
-        }
-      } catch (err) {
-        console.error('[CallBilling] Error al facturar llamada:', err);
+      }
+      if (professional?.fcmToken) {
+        this.notificationsService.sendPushNotification(
+          professional.fcmToken,
+          'Sesión finalizada',
+          `Duración: ${minutes} min`,
+          { callId: data.callId, type: 'CALL_ENDED', durationSeconds },
+        );
       }
     }
   }
