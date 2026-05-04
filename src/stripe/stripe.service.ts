@@ -136,8 +136,51 @@ export class StripeService {
     }
   }
 
-  // Procesa el evento payment_intent.succeeded
   async handlePaymentSuccess(paymentIntentId: string) {
+    // Verificar si es pago de sesion
+    const sessionPayment = await this.prisma.sessionPayment.findUnique({
+      where: { stripePaymentIntentId: paymentIntentId },
+      include: { session: true },
+    });
+
+    if (sessionPayment) {
+      if (sessionPayment.status !== 'PENDING') return;
+      const professionalWallet = await this.prisma.wallet.findUnique({
+        where: { userId: sessionPayment.session.professionalUserId },
+      });
+      if (!professionalWallet) return;
+
+      await this.prisma.$transaction(async (tx) => {
+        await tx.sessionPayment.update({
+          where: { id: sessionPayment.id },
+          data: { status: 'APPROVED' },
+        });
+        await tx.wallet.update({
+          where: { id: professionalWallet.id },
+          data: { balanceUsd: { increment: sessionPayment.amountUsd } },
+        });
+        await tx.transaction.create({
+          data: {
+            walletId: professionalWallet.id,
+            type: 'EARNING',
+            amount: sessionPayment.amountUsd,
+            realAmount: sessionPayment.amountUsd,
+            isPromotional: false,
+            promotionalAmount: 0,
+            description: JSON.stringify({
+              event: 'SESSION_PAYMENT',
+              sessionId: sessionPayment.sessionId,
+              sessionTitle: sessionPayment.session.title,
+              clientUserId: sessionPayment.clientUserId,
+              currency: 'USD',
+            }),
+          },
+        });
+      });
+      return;
+    }
+
+    // Fallback: DepositRequest normal
     const deposit = await this.prisma.depositRequest.findUnique({
       where: { stripePaymentIntentId: paymentIntentId },
       include: { user: { include: { wallet: true } } },
@@ -148,7 +191,6 @@ export class StripeService {
     const wallet = deposit.user.wallet;
     if (!wallet) return;
 
-    // Bonus configurable desde .env para pagos con Stripe
     const bonusPercentage = Number(this.config.get<string>('STRIPE_BONUS_PERCENTAGE')) || 0.35;
     const bonusCredits = Math.round(deposit.creditsToDeliver * bonusPercentage);
     const totalCredits = deposit.creditsToDeliver + bonusCredits;
@@ -160,7 +202,7 @@ export class StripeService {
       }),
       this.prisma.wallet.update({
         where: { id: wallet.id },
-        data: { balance: { increment: totalCredits } },
+        data: { balanceUsd: { increment: totalCredits } },
       }),
       this.prisma.transaction.create({
         data: {
@@ -198,6 +240,54 @@ export class StripeService {
       { customer: customerId },
       { apiVersion: this.config.get<string>('STRIPE_API_VERSION') ?? '2024-06-20' },
     );
+  }
+
+  async createPaymentIntentForSession(clientUserId: string, session: { id: string; title: string; priceInBs: any; priceInUsd: any; professionalUserId: string }) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: clientUserId },
+      select: { billingRegion: true, preferredCurrency: true, phoneCountryIso: true },
+    });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    if (!this.canUseStripe(user)) {
+      throw new BadRequestException('Stripe no esta disponible para tu region.');
+    }
+
+    const amountUsd = Number(session.priceInUsd);
+    const amountBs = Number(session.priceInBs);
+    const customerId = await this.getOrCreateCustomer(clientUserId);
+
+    const paymentIntent = await this.stripe.paymentIntents.create({
+      amount: Math.round(amountUsd * 100),
+      currency: 'usd',
+      customer: customerId,
+      metadata: { clientUserId, sessionId: session.id, type: 'SESSION' },
+    });
+
+    // Crear o reutilizar SessionPayment
+    const existing = await this.prisma.sessionPayment.findUnique({
+      where: { sessionId_clientUserId: { sessionId: session.id, clientUserId } },
+    });
+
+    if (!existing) {
+      await this.prisma.sessionPayment.create({
+        data: {
+          sessionId: session.id,
+          clientUserId,
+          amountBs,
+          amountUsd,
+          currency: 'USD',
+          status: 'PENDING',
+          stripePaymentIntentId: paymentIntent.id,
+        },
+      });
+    } else {
+      await this.prisma.sessionPayment.update({
+        where: { id: existing.id },
+        data: { stripePaymentIntentId: paymentIntent.id },
+      });
+    }
+
+    return { clientSecret: paymentIntent.client_secret, customerId };
   }
 
   // Procesa el evento payment_intent.payment_failed

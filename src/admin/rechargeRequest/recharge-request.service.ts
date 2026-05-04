@@ -128,6 +128,7 @@ export class RechargeRequestService {
 
     const creditsToSum = depositRequest.creditsToDeliver || 0;
     const packageName = depositRequest.packageNameAtMoment || 'Paquete de Credito';
+    const isStripePayment = depositRequest.stripePaymentIntentId != null;
 
     try {
       const result = await this.prisma.$transaction(async (tx) => {
@@ -141,11 +142,9 @@ export class RechargeRequestService {
 
         const updatedWallet = await tx.wallet.update({
           where: { userId: depositRequest.userId },
-          data: {
-            balance: {
-              increment: new Prisma.Decimal(creditsToSum),
-            },
-          },
+          data: isStripePayment
+            ? { balanceUsd: { increment: new Prisma.Decimal(creditsToSum) } }
+            : { balance: { increment: new Prisma.Decimal(creditsToSum) } },
         });
 
         await tx.transaction.create({

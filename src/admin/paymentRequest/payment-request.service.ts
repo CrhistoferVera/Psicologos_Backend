@@ -48,6 +48,7 @@ export class PaymentRequestService {
 
     const credits = Number(withdrawalRequest.credits);
     const payoutAmountBs = Number(withdrawalRequest.soles);
+    const isUsd = (withdrawalRequest.currency ?? 'BOB') === 'USD';
 
     if (status === WithdrawalStatus.REJECTED) {
       if (!rejectionReason?.trim()) {
@@ -58,7 +59,9 @@ export class PaymentRequestService {
       const updated = await this.prisma.$transaction(async (tx) => {
         await tx.wallet.update({
           where: { id: withdrawalRequest.walletId },
-          data: { balance: { increment: credits } },
+          data: isUsd
+            ? { balanceUsd: { increment: credits } }
+            : { balance: { increment: credits } },
         });
 
         await tx.transaction.create({

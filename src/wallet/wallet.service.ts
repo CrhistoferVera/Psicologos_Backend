@@ -26,7 +26,7 @@ export class WalletService {
   async getMyEarnings(userId: string) {
     const wallet = await this.prisma.wallet.upsert({
       where: { userId },
-      create: { userId, balance: 0, promotionalBalance: 0 },
+      create: { userId, balance: 0, promotionalBalance: 0, balanceUsd: 0 },
       update: {},
     });
 
@@ -87,6 +87,7 @@ export class WalletService {
 
     return {
       balance: Number(wallet.balance),
+      balanceUsd: Number(wallet.balanceUsd ?? 0),
       promotionalBalance,
       realBalance,
       withdrawableBalance: realBalance,
@@ -123,6 +124,7 @@ export class WalletService {
       bankLogoUrl: a.bank.logo_url,
       accountNumber: a.accountNumber,
       accountHolderName: a.accountHolderName,
+      currency: a.currency ?? 'BOB',
     }));
   }
 
@@ -155,6 +157,7 @@ export class WalletService {
         professionalProfileId: profile.id,
         accountNumber: normalizedAccountNumber,
         accountHolderName: normalizedHolderName,
+        currency: dto.currency ?? 'BOB',
       },
       include: { bank: true },
     });
@@ -166,6 +169,7 @@ export class WalletService {
       bankLogoUrl: account.bank.logo_url,
       accountNumber: account.accountNumber,
       accountHolderName: account.accountHolderName,
+      currency: account.currency,
     };
   }
 
@@ -197,6 +201,10 @@ export class WalletService {
       throw new BadRequestException('El monto debe ser mayor a 0');
     }
 
+    if (!dto.bankAccountId || !/^\d+$/.test(dto.bankAccountId)) {
+      throw new BadRequestException('ID de cuenta bancaria invalido.');
+    }
+
     const withdrawalsEnabled = await this.systemConfigService.isWithdrawalsEnabled();
     if (!withdrawalsEnabled) {
       throw new BadRequestException('Los retiros se encuentran temporalmente deshabilitados.');
@@ -207,11 +215,14 @@ export class WalletService {
       throw new NotFoundException('Wallet no encontrada');
     }
 
-    const withdrawableBalance = this.computeWithdrawableBalance(
-      wallet.balance,
-      wallet.promotionalBalance ?? 0,
-    );
-    if (withdrawableBalance < dto.credits) {
+    const currency = dto.currency ?? 'BOB';
+    const isUsd = currency === 'USD';
+
+    const availableBalance = isUsd
+      ? Number(wallet.balanceUsd ?? 0)
+      : this.computeWithdrawableBalance(wallet.balance, wallet.promotionalBalance ?? 0);
+
+    if (availableBalance < dto.credits) {
       throw new BadRequestException('Saldo disponible para retiro insuficiente.');
     }
 
@@ -223,12 +234,15 @@ export class WalletService {
     }
 
     const creditValueBs = await this.systemConfigService.getCreditToSolesRate();
-    const amountBs = dto.credits * creditValueBs;
+    const payoutAmount = isUsd ? dto.credits : dto.credits * creditValueBs;
+    const payoutLabel = isUsd ? `$ ${payoutAmount.toFixed(2)} USD` : `Bs ${payoutAmount.toFixed(2)}`;
 
     const request = await this.prisma.$transaction(async (tx) => {
       await tx.wallet.update({
         where: { id: wallet.id },
-        data: { balance: { decrement: dto.credits } },
+        data: isUsd
+          ? { balanceUsd: { decrement: dto.credits } }
+          : { balance: { decrement: dto.credits } },
       });
 
       const createdRequest = await tx.withdrawalRequest.create({
@@ -236,7 +250,8 @@ export class WalletService {
           walletId: wallet.id,
           bankAccountId: BigInt(dto.bankAccountId),
           credits: dto.credits,
-          soles: amountBs,
+          soles: payoutAmount,
+          currency,
           status: 'PENDING',
         },
       });
@@ -253,7 +268,8 @@ export class WalletService {
             event: 'WITHDRAWAL_REQUEST_CREATED',
             withdrawalRequestId: createdRequest.id,
             credits: dto.credits,
-            payoutAmountBs: amountBs,
+            payoutAmount,
+            currency,
             bankAccountId: dto.bankAccountId,
           }),
         },
@@ -285,7 +301,7 @@ export class WalletService {
     this.notificationsService.sendMulticastNotification(
       adminTokens,
       'Nueva solicitud de retiro',
-      `${professionalName} solicito un retiro de ${dto.credits} creditos (Bs ${amountBs.toFixed(2)})`,
+      `${professionalName} solicito un retiro de ${dto.credits} creditos (${payoutLabel})`,
       { withdrawalRequestId: request.id, type: 'NEW_WITHDRAWAL_REQUEST' },
     );
 
@@ -294,6 +310,7 @@ export class WalletService {
       credits: Number(created!.credits),
       amountBs: Number(created!.soles),
       soles: Number(created!.soles),
+      currency: created!.currency,
       status: created!.status,
       notes: created!.notes,
       rejectionReason: created!.rejectionReason,
@@ -321,6 +338,7 @@ export class WalletService {
       credits: Number(r.credits),
       amountBs: Number(r.soles),
       soles: Number(r.soles),
+      currency: r.currency ?? 'BOB',
       status: r.status,
       notes: r.notes,
       rejectionReason: r.rejectionReason,

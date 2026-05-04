@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsIn, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class AddBankAccountDto {
   @ApiProperty({ example: 1, description: 'ID del banco seleccionado' })
@@ -18,4 +18,10 @@ export class AddBankAccountDto {
   @IsString()
   @MaxLength(100)
   accountHolderName?: string;
+
+  @ApiPropertyOptional({ example: 'BOB', description: 'Moneda de la cuenta: BOB o USD' })
+  @IsOptional()
+  @IsString()
+  @IsIn(['BOB', 'USD'])
+  currency?: 'BOB' | 'USD';
 }

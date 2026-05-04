@@ -26,6 +26,7 @@ import { ReferralsModule } from './referrals/referrals.module';
 import { FlowModule } from './flow/flow.module';
 import { StripeModule } from './stripe/stripe.module';
 import { BanecoQrModule } from './baneco-qr/baneco-qr.module';
+import { SessionsModule } from './sessions/sessions.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { BanecoQrModule } from './baneco-qr/baneco-qr.module';
     FlowModule,
     StripeModule,
     BanecoQrModule,
+    SessionsModule,
   ],
   controllers: [],
   providers: [],

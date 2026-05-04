@@ -43,6 +43,8 @@ model User {
   promotionalCreditsReceived  PromotionalCreditGrant[]  @relation("PromotionalCreditsReceivedBy")
   referralsSent               Referral[]                @relation("ReferralReferrer")
   referralAsReferred          Referral?                 @relation("ReferralReferred")
+  sessionsAsProfessional      Session[]                 @relation("ProfessionalSessions")
+  sessionPayments             SessionPayment[]          @relation("ClientSessionPayments")
 
   @@index([billingRegion])
   @@index([phoneCountryIso])
@@ -140,6 +142,7 @@ model Wallet {
   userId             String              @unique
   balance            Decimal             @default(0.00) @db.Decimal(10, 2)
   promotionalBalance Decimal             @default(0.00) @db.Decimal(10, 2)
+  balanceUsd         Decimal             @default(0.00) @db.Decimal(10, 2)
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 
@@ -265,6 +268,7 @@ model BankAccount {
   professionalProfileId String
   accountNumber       String              @db.VarChar(50)
   accountHolderName   String?             @db.VarChar(100)
+  currency            String              @default("BOB")
   createdAt           DateTime            @default(now())
   updatedAt           DateTime?           @updatedAt
 
@@ -284,6 +288,7 @@ model WithdrawalRequest {
   bankAccountId    BigInt
   credits          Decimal           @db.Decimal(10, 2)
   soles            Decimal           @db.Decimal(10, 2)
+  currency         String            @default("BOB")
   status           WithdrawalStatus  @default(PENDING)
   notes            String?
   rejectionReason  String?
@@ -402,6 +407,48 @@ model ReferralBonusTier {
   @@map("referral_bonus_tiers")
 }
 
+model Session {
+  id                 String          @id @default(uuid())
+  professionalUserId String
+  title              String          @db.VarChar(200)
+  durationMinutes    Int
+  priceInBs          Decimal         @db.Decimal(10, 2)
+  priceInUsd         Decimal         @db.Decimal(10, 2)
+  status             SessionStatus   @default(OPEN)
+  startedAt          DateTime?
+  endedAt            DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  professional       User            @relation("ProfessionalSessions", fields: [professionalUserId], references: [id], onDelete: Cascade)
+  payments           SessionPayment[]
+
+  @@index([professionalUserId])
+  @@index([status])
+  @@map("sessions")
+}
+
+model SessionPayment {
+  id                    String               @id @default(uuid())
+  sessionId             String
+  clientUserId          String
+  amountBs              Decimal              @db.Decimal(10, 2)
+  amountUsd             Decimal              @db.Decimal(10, 2)
+  currency              String
+  status                SessionPaymentStatus @default(PENDING)
+  bancoQrId             String?              @unique
+  stripePaymentIntentId String?              @unique
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  session               Session              @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  client                User                 @relation("ClientSessionPayments", fields: [clientUserId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, clientUserId])
+  @@index([clientUserId])
+  @@map("session_payments")
+}
+
 model SystemConfig {
   id                       String   @id @default("global")
   platformFeePercent       Decimal  @default(50.00) @db.Decimal(5, 2)
@@ -480,6 +527,19 @@ enum KycFaceMatchStatus {
   PASSED
   FAILED
   SKIPPED
+}
+
+enum SessionStatus {
+  OPEN
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum SessionPaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 

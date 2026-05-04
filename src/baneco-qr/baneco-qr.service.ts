@@ -306,6 +306,21 @@ export class BanecoQrService {
   }
 
   async applyPayment(payment: PaymentQR) {
+    // Primero intentar como SessionPayment
+    const sessionPayment = await this.prisma.sessionPayment.findUnique({
+      where: { bancoQrId: payment.qrId },
+      include: {
+        session: true,
+        client: { include: { wallet: true } },
+      },
+    });
+
+    if (sessionPayment) {
+      await this.applySessionPaymentByQrId(payment.qrId);
+      return;
+    }
+
+    // Fallback: DepositRequest normal
     const deposit = await this.prisma.depositRequest.findUnique({
       where: { bancoQrId: payment.qrId },
       include: { user: { include: { wallet: true } } },
@@ -342,5 +357,125 @@ export class BanecoQrService {
         },
       }),
     ]);
+  }
+
+  async createQrForSession(clientUserId: string, session: { id: string; title: string; priceInBs: any; priceInUsd: any; professionalUserId: string }) {
+    const traceId = this.newReqId();
+    this.logger.log(`[QR-SESSION][${traceId}] clientId=${clientUserId} sessionId=${session.id}`);
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: clientUserId },
+      select: { billingRegion: true, preferredCurrency: true, phoneCountryIso: true },
+    });
+    if (!user) throw new NotFoundException('Usuario no encontrado.');
+    if (!this.canUseBaneco(user)) {
+      throw new BadRequestException('El metodo QR Baneco no esta disponible para tu region.');
+    }
+
+    const amountBs = Number(session.priceInBs);
+    const amountUsd = Number(session.priceInUsd);
+
+    // Crear o reutilizar SessionPayment
+    let sessionPayment = await this.prisma.sessionPayment.findUnique({
+      where: { sessionId_clientUserId: { sessionId: session.id, clientUserId } },
+    });
+
+    if (!sessionPayment) {
+      sessionPayment = await this.prisma.sessionPayment.create({
+        data: {
+          sessionId: session.id,
+          clientUserId,
+          amountBs,
+          amountUsd,
+          currency: 'BOB',
+          status: 'PENDING',
+        },
+      });
+    } else if (sessionPayment.bancoQrId) {
+      // Ya tiene QR, devolver el existente
+      return {
+        paymentId: sessionPayment.id,
+        qrId: sessionPayment.bancoQrId,
+        qrImage: null,
+        amount: amountBs,
+        currency: 'BOB',
+        dueDate: this.buildDueDate(),
+      };
+    }
+
+    try {
+      const qr = await this.banecoApi.generateQR({
+        transactionId: sessionPayment.id,
+        amount: amountBs,
+        currency: 'BOB',
+        description: `SanaMente Sesion - ${session.title}`,
+        dueDate: this.buildDueDate(),
+        singleUse: true,
+        modifyAmount: false,
+        reqId: traceId,
+      });
+
+      await this.prisma.sessionPayment.update({
+        where: { id: sessionPayment.id },
+        data: { bancoQrId: qr.qrId },
+      });
+
+      this.logger.log(`[QR-SESSION][${traceId}] success paymentId=${sessionPayment.id} qrId=${qr.qrId}`);
+      return {
+        paymentId: sessionPayment.id,
+        qrId: qr.qrId,
+        qrImage: qr.qrImage,
+        amount: amountBs,
+        currency: 'BOB',
+        dueDate: this.buildDueDate(),
+      };
+    } catch (err: any) {
+      this.logger.error(`[QR-SESSION][${traceId}] failed reason=${err?.message ?? 'unknown'}`);
+      throw err;
+    }
+  }
+
+  async applySessionPaymentByQrId(qrId: string) {
+    const sessionPayment = await this.prisma.sessionPayment.findUnique({
+      where: { bancoQrId: qrId },
+      include: {
+        session: true,
+        client: { include: { wallet: true } },
+      },
+    });
+    if (!sessionPayment || sessionPayment.status !== 'PENDING') return;
+
+    const professionalWallet = await this.prisma.wallet.findUnique({
+      where: { userId: sessionPayment.session.professionalUserId },
+    });
+    if (!professionalWallet) return;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.sessionPayment.update({
+        where: { id: sessionPayment.id },
+        data: { status: 'APPROVED' },
+      });
+      await tx.wallet.update({
+        where: { id: professionalWallet.id },
+        data: { balance: { increment: sessionPayment.amountBs } },
+      });
+      await tx.transaction.create({
+        data: {
+          walletId: professionalWallet.id,
+          type: 'EARNING',
+          amount: sessionPayment.amountBs,
+          realAmount: sessionPayment.amountBs,
+          isPromotional: false,
+          promotionalAmount: 0,
+          description: JSON.stringify({
+            event: 'SESSION_PAYMENT',
+            sessionId: sessionPayment.sessionId,
+            sessionTitle: sessionPayment.session.title,
+            clientUserId: sessionPayment.clientUserId,
+            currency: 'BOB',
+          }),
+        },
+      });
+    });
   }
 }
