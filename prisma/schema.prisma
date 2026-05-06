@@ -453,6 +453,7 @@ model SystemConfig {
   id                       String   @id @default("global")
   platformFeePercent       Decimal  @default(50.00) @db.Decimal(5, 2)
   creditToSolesRate        Decimal  @default(1.00) @db.Decimal(10, 2)
+  usdExchangeRate          Decimal  @default(6.96) @db.Decimal(10, 4)
   minAppVersion            String   @default("1.0")
   referralPercentage       Decimal  @default(2.50) @db.Decimal(5, 2)
   referralRewardCredits    Decimal  @default(10.00) @db.Decimal(10, 2)

@@ -6,6 +6,7 @@ export type RuntimeSystemConfig = {
   platformFeePercent: number;
   creditValueBs: number;
   creditToSolesRate: number;
+  usdExchangeRate: number;
   minAppVersion: string;
   referralPercentage: number;
   referralRewardCredits: number;
@@ -25,6 +26,7 @@ export class SystemConfigService {
     return {
       platformFeePercent: Number(process.env.PLATFORM_FEE_PERCENT ?? '50'),
       creditValueBs,
+      usdExchangeRate: Number(process.env.BOB_TO_USD_RATE ?? '6.96'),
       minAppVersion: process.env.MIN_APP_VERSION ?? '1.0',
       referralPercentage: Number(process.env.REFERRAL_PERCENTAGE ?? '2.5'),
       referralRewardCredits: Number(process.env.REFERRAL_REWARD_CREDITS ?? '10'),
@@ -47,6 +49,7 @@ export class SystemConfigService {
           id: 'global',
           platformFeePercent: defaults.platformFeePercent,
           creditToSolesRate: defaults.creditValueBs,
+          usdExchangeRate: defaults.usdExchangeRate,
           minAppVersion: defaults.minAppVersion,
           referralRewardCredits: defaults.referralRewardCredits,
           referralMinDepositAmount: defaults.referralMinDepositAmount,
@@ -75,6 +78,7 @@ export class SystemConfigService {
       platformFeePercent: Number(config.platformFeePercent),
       creditValueBs,
       creditToSolesRate: creditValueBs,
+      usdExchangeRate: Number(config.usdExchangeRate ?? process.env.BOB_TO_USD_RATE ?? 6.96),
       minAppVersion: config.minAppVersion,
       referralPercentage: Number(config.referralPercentage),
       referralRewardCredits: Number(config.referralRewardCredits),
@@ -99,6 +103,7 @@ export class SystemConfigService {
       data: {
         ...(payload.platformFeePercent !== undefined ? { platformFeePercent: payload.platformFeePercent } : {}),
         ...(creditValueBs !== undefined ? { creditToSolesRate: creditValueBs } : {}),
+        ...(payload.usdExchangeRate !== undefined ? { usdExchangeRate: payload.usdExchangeRate } : {}),
         ...(payload.minAppVersion !== undefined ? { minAppVersion: payload.minAppVersion } : {}),
         ...(payload.referralPercentage !== undefined ? { referralPercentage: payload.referralPercentage } : {}),
         ...(payload.referralRewardCredits !== undefined ? { referralRewardCredits: payload.referralRewardCredits } : {}),
@@ -114,12 +119,12 @@ export class SystemConfigService {
 
   async getPublicConfig() {
     const config = await this.getRuntimeConfig();
-    const bobToUsdRate = Number(process.env.BOB_TO_USD_RATE ?? '7');
     const stripeBonusPercentage = Number(process.env.STRIPE_BONUS_PERCENTAGE ?? '0.35');
 
     return {
       creditValueBs: config.creditValueBs,
       creditToSolesRate: config.creditToSolesRate,
+      usdExchangeRate: config.usdExchangeRate,
       minVersion: config.minAppVersion,
       paymentsEnabled: config.paymentsEnabled,
       withdrawalsEnabled: config.withdrawalsEnabled,
@@ -127,7 +132,7 @@ export class SystemConfigService {
       referralPercentage: config.referralPercentage,
       referralRewardCredits: config.referralRewardCredits,
       referralMinDepositAmount: config.referralMinDepositAmount,
-      bobToUsdRate,
+      bobToUsdRate: config.usdExchangeRate,
       stripeBonusPercentage,
     };
   }

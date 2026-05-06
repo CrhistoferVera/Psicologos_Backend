@@ -21,6 +21,12 @@ export class UpdateSystemConfigDto {
   @Min(0)
   creditValueBs?: number;
 
+  @ApiPropertyOptional({ example: 6.96, description: 'Tipo de cambio USD → Bs para retiros en dólares.' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  usdExchangeRate?: number;
+
   @ApiPropertyOptional({ example: '1.0.0' })
   @IsOptional()
   @IsString()
