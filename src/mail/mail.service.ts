@@ -48,7 +48,7 @@ export class MailService {
         try {
             await this.mailerService.sendMail({
                 to: email,
-                subject: 'Recuperación de contraseña - Pachamama',
+                subject: 'Recuperacion de contrasena - SanaMente',
                 template: 'reset-password',
                 context: {
                     firstName,

@@ -19,6 +19,7 @@ import { PrismaService } from '../prisma.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { BanecoQrService } from '../baneco-qr/baneco-qr.service';
 import { StripeService } from '../stripe/stripe.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   BILLING_REGION_BOLIVIA,
   BILLING_REGION_INTERNATIONAL,
@@ -59,6 +60,7 @@ export class BookingsService {
     private readonly systemConfigService: SystemConfigService,
     private readonly banecoQrService: BanecoQrService,
     private readonly stripeService: StripeService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private newReqId() {
@@ -68,6 +70,11 @@ export class BookingsService {
   @Cron(CronExpression.EVERY_5_MINUTES)
   async expirePendingBookingsCron() {
     await this.expirePendingBookings();
+  }
+
+  @Cron(CronExpression.EVERY_MINUTE)
+  async sendBookingReminder15MinCron() {
+    await this.sendBookingReminder15Min();
   }
 
   async expirePendingBookings(tx?: PrismaTx): Promise<number> {
@@ -105,6 +112,123 @@ export class BookingsService {
   private toNumber(value: Prisma.Decimal | number | null | undefined): number | null {
     if (value === null || value === undefined) return null;
     return Number(value);
+  }
+
+  private fullName(user?: { firstName?: string | null; lastName?: string | null }, fallback = 'Usuario') {
+    const first = user?.firstName?.trim() ?? '';
+    const last = user?.lastName?.trim() ?? '';
+    const name = `${first} ${last}`.trim();
+    return name || fallback;
+  }
+
+  private formatBookingDateTime(date: Date, timezone: string) {
+    const tz = timezone || DEFAULT_BOOKING_TIMEZONE;
+    return new Intl.DateTimeFormat('es-BO', {
+      timeZone: tz,
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date);
+  }
+
+  async sendBookingReminder15Min() {
+    const now = new Date();
+    const from = new Date(now.getTime() + 14 * 60 * 1000);
+    const to = new Date(now.getTime() + 16 * 60 * 1000);
+
+    const candidates = await this.prisma.booking.findMany({
+      where: {
+        status: BookingStatus.CONFIRMED,
+        paymentStatus: BookingPaymentStatus.PAID,
+        reminder15SentAt: null,
+        scheduledStartAt: {
+          gte: from,
+          lte: to,
+        },
+      },
+      select: {
+        id: true,
+        timezone: true,
+        scheduledStartAt: true,
+        client: {
+          select: {
+            firstName: true,
+            lastName: true,
+            fcmToken: true,
+          },
+        },
+        professional: {
+          select: {
+            firstName: true,
+            lastName: true,
+            fcmToken: true,
+          },
+        },
+      },
+    });
+
+    for (const booking of candidates) {
+      try {
+        const claim = await this.prisma.booking.updateMany({
+          where: {
+            id: booking.id,
+            reminder15SentAt: null,
+            status: BookingStatus.CONFIRMED,
+            paymentStatus: BookingPaymentStatus.PAID,
+          },
+          data: {
+            reminder15SentAt: new Date(),
+          },
+        });
+
+        if (claim.count === 0) continue;
+
+        const professionalName = this.fullName(booking.professional, 'psicologo');
+        const clientName = this.fullName(booking.client, 'cliente');
+        const startAtFormatted = this.formatBookingDateTime(booking.scheduledStartAt, booking.timezone);
+
+        if (booking.client?.fcmToken) {
+          await this.notificationsService.sendPushNotification(
+            booking.client.fcmToken,
+            'Recordatorio de sesion',
+            `Tienes una sesion con ${professionalName} en 15 minutos.`,
+            {
+              type: 'BOOKING_REMINDER_15',
+              bookingId: booking.id,
+              startsAt: booking.scheduledStartAt.toISOString(),
+            },
+          );
+        } else {
+          this.logger.warn(
+            `[BOOKING-REMINDER-15] bookingId=${booking.id} target=client reason=NO_FCM_TOKEN startsAt=${startAtFormatted}`,
+          );
+        }
+
+        if (booking.professional?.fcmToken) {
+          await this.notificationsService.sendPushNotification(
+            booking.professional.fcmToken,
+            'Recordatorio de sesion',
+            `Tienes una sesion con ${clientName} en 15 minutos.`,
+            {
+              type: 'BOOKING_REMINDER_15',
+              bookingId: booking.id,
+              startsAt: booking.scheduledStartAt.toISOString(),
+            },
+          );
+        } else {
+          this.logger.warn(
+            `[BOOKING-REMINDER-15] bookingId=${booking.id} target=professional reason=NO_FCM_TOKEN startsAt=${startAtFormatted}`,
+          );
+        }
+      } catch (error: any) {
+        this.logger.error(
+          `[BOOKING-REMINDER-15] bookingId=${booking.id} failed reason=${error?.message ?? 'unknown'}`,
+        );
+      }
+    }
   }
 
   private async getBobToUsdRate(): Promise<number> {
@@ -565,7 +689,10 @@ export class BookingsService {
 
   async listAvailabilityRules(professionalId: string) {
     const rules = await this.prisma.professionalAvailabilityRule.findMany({
-      where: { professionalId },
+      where: {
+        professionalId,
+        isActive: true,
+      },
       orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
     });
 

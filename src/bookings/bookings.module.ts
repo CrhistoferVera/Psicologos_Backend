@@ -3,11 +3,12 @@ import { PrismaModule } from '../prisma.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
 import { BanecoQrModule } from '../baneco-qr/baneco-qr.module';
 import { StripeModule } from '../stripe/stripe.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { BookingsController } from './bookings.controller';
 import { BookingsService } from './bookings.service';
 
 @Module({
-  imports: [PrismaModule, SystemConfigModule, BanecoQrModule, StripeModule],
+  imports: [PrismaModule, SystemConfigModule, BanecoQrModule, StripeModule, NotificationsModule],
   controllers: [BookingsController],
   providers: [BookingsService],
   exports: [BookingsService],

@@ -17,6 +17,7 @@ import { PrismaService } from '../prisma.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { BanecoApiService, PaymentQR } from './baneco-api.service';
 import { BILLING_REGION_BOLIVIA, CURRENCY_BOB } from '../common/phone-metadata.util';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class BanecoQrService {
@@ -27,6 +28,7 @@ export class BanecoQrService {
     private readonly config: ConfigService,
     private readonly systemConfigService: SystemConfigService,
     private readonly banecoApi: BanecoApiService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private get usdToBob(): number {
@@ -65,6 +67,25 @@ export class BanecoQrService {
 
   private newReqId() {
     return Math.random().toString(36).slice(2, 9);
+  }
+
+  private fullName(user?: { firstName?: string | null; lastName?: string | null }, fallback = 'Cliente') {
+    const first = user?.firstName?.trim() ?? '';
+    const last = user?.lastName?.trim() ?? '';
+    const value = `${first} ${last}`.trim();
+    return value || fallback;
+  }
+
+  private formatBookingDateTime(date: Date, timezone: string) {
+    return new Intl.DateTimeFormat('es-BO', {
+      timeZone: timezone || 'America/La_Paz',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date);
   }
 
   private sanitizeProviderPayload(input: Record<string, unknown>) {
@@ -381,7 +402,7 @@ export class BanecoQrService {
     if (!bookingPayment) return false;
     if (bookingPayment.status === BookingPaymentStatus.PAID) return true;
 
-    await this.prisma.$transaction(async (tx) => {
+    const confirmedBookingForNotification = await this.prisma.$transaction(async (tx) => {
       const fresh = await tx.booking.findUnique({
         where: { id: bookingPayment.bookingId },
         select: {
@@ -426,17 +447,17 @@ export class BanecoQrService {
             }) as Prisma.InputJsonValue,
           },
         });
-        return;
+        return null;
       }
 
       if (
         fresh.status === BookingStatus.CONFIRMED &&
         fresh.paymentStatus === BookingPaymentStatus.PAID
       ) {
-        return;
+        return null;
       }
 
-      if (fresh.status !== BookingStatus.PENDING_PAYMENT) return;
+      if (fresh.status !== BookingStatus.PENDING_PAYMENT) return null;
 
       await tx.bookingPayment.updateMany({
         where: {
@@ -454,7 +475,7 @@ export class BanecoQrService {
         },
       });
 
-      await tx.booking.updateMany({
+      const bookingUpdate = await tx.booking.updateMany({
         where: {
           id: fresh.id,
           status: BookingStatus.PENDING_PAYMENT,
@@ -463,9 +484,61 @@ export class BanecoQrService {
         data: {
           status: BookingStatus.CONFIRMED,
           paymentStatus: BookingPaymentStatus.PAID,
+          professionalPurchaseNotifiedAt: new Date(),
         },
       });
+
+      if (bookingUpdate.count > 0) {
+        return tx.booking.findUnique({
+          where: { id: fresh.id },
+          select: {
+            id: true,
+            timezone: true,
+            scheduledStartAt: true,
+            professional: {
+              select: {
+                fcmToken: true,
+              },
+            },
+            client: {
+              select: {
+                firstName: true,
+                lastName: true,
+              },
+            },
+            sessionOffering: {
+              select: {
+                title: true,
+              },
+            },
+          },
+        });
+      }
+      return null;
     });
+
+    if (confirmedBookingForNotification?.professional?.fcmToken) {
+      const clientName = this.fullName(confirmedBookingForNotification.client);
+      const scheduled = this.formatBookingDateTime(
+        confirmedBookingForNotification.scheduledStartAt,
+        confirmedBookingForNotification.timezone,
+      );
+
+      await this.notificationsService.sendPushNotification(
+        confirmedBookingForNotification.professional.fcmToken,
+        'Nueva sesion reservada',
+        `${clientName} reservo ${confirmedBookingForNotification.sessionOffering.title} para ${scheduled}.`,
+        {
+          type: 'BOOKING_PURCHASE_CONFIRMED',
+          bookingId: confirmedBookingForNotification.id,
+          startsAt: confirmedBookingForNotification.scheduledStartAt.toISOString(),
+        },
+      );
+    } else if (confirmedBookingForNotification) {
+      this.logger.warn(
+        `[QR-BOOKING] bookingId=${confirmedBookingForNotification.id} professional notification skipped: no FCM token`,
+      );
+    }
 
     return true;
   }

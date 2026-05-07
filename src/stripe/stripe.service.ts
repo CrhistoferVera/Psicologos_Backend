@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   BookingPaymentMethod,
   BookingPaymentStatus,
@@ -25,12 +26,32 @@ export class StripeService {
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
   ) {
     this.stripe = new Stripe(this.config.get<string>('STRIPE_SECRET_KEY')!);
   }
 
   private newReqId() {
     return Math.random().toString(36).slice(2, 9);
+  }
+
+  private fullName(user?: { firstName?: string | null; lastName?: string | null }, fallback = 'Cliente') {
+    const first = user?.firstName?.trim() ?? '';
+    const last = user?.lastName?.trim() ?? '';
+    const value = `${first} ${last}`.trim();
+    return value || fallback;
+  }
+
+  private formatBookingDateTime(date: Date, timezone: string) {
+    return new Intl.DateTimeFormat('es-BO', {
+      timeZone: timezone || 'America/La_Paz',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date);
   }
 
   private sanitizeProviderPayload(input: Record<string, unknown>) {
@@ -281,7 +302,7 @@ export class StripeService {
     if (!bookingPayment) return false;
     if (bookingPayment.status === BookingPaymentStatus.PAID) return true;
 
-    await this.prisma.$transaction(async (tx) => {
+    const confirmedBookingForNotification = await this.prisma.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
         where: { id: bookingPayment.bookingId },
         select: { id: true, status: true, paymentStatus: true, expiresAt: true },
@@ -319,17 +340,17 @@ export class StripeService {
             }) as Prisma.InputJsonValue,
           },
         });
-        return;
+        return null;
       }
 
       if (
         booking.status === BookingStatus.CONFIRMED &&
         booking.paymentStatus === BookingPaymentStatus.PAID
       ) {
-        return;
+        return null;
       }
 
-      if (booking.status !== BookingStatus.PENDING_PAYMENT) return;
+      if (booking.status !== BookingStatus.PENDING_PAYMENT) return null;
 
       await tx.bookingPayment.updateMany({
         where: {
@@ -346,7 +367,7 @@ export class StripeService {
         },
       });
 
-      await tx.booking.updateMany({
+      const bookingUpdate = await tx.booking.updateMany({
         where: {
           id: booking.id,
           status: BookingStatus.PENDING_PAYMENT,
@@ -355,9 +376,61 @@ export class StripeService {
         data: {
           status: BookingStatus.CONFIRMED,
           paymentStatus: BookingPaymentStatus.PAID,
+          professionalPurchaseNotifiedAt: new Date(),
         },
       });
+
+      if (bookingUpdate.count > 0) {
+        return tx.booking.findUnique({
+          where: { id: booking.id },
+          select: {
+            id: true,
+            timezone: true,
+            scheduledStartAt: true,
+            professional: {
+              select: {
+                fcmToken: true,
+              },
+            },
+            client: {
+              select: {
+                firstName: true,
+                lastName: true,
+              },
+            },
+            sessionOffering: {
+              select: {
+                title: true,
+              },
+            },
+          },
+        });
+      }
+      return null;
     });
+
+    if (confirmedBookingForNotification?.professional?.fcmToken) {
+      const clientName = this.fullName(confirmedBookingForNotification.client);
+      const scheduled = this.formatBookingDateTime(
+        confirmedBookingForNotification.scheduledStartAt,
+        confirmedBookingForNotification.timezone,
+      );
+
+      await this.notificationsService.sendPushNotification(
+        confirmedBookingForNotification.professional.fcmToken,
+        'Nueva sesion reservada',
+        `${clientName} reservo ${confirmedBookingForNotification.sessionOffering.title} para ${scheduled}.`,
+        {
+          type: 'BOOKING_PURCHASE_CONFIRMED',
+          bookingId: confirmedBookingForNotification.id,
+          startsAt: confirmedBookingForNotification.scheduledStartAt.toISOString(),
+        },
+      );
+    } else if (confirmedBookingForNotification) {
+      this.logger.warn(
+        `[STRIPE-BOOKING] bookingId=${confirmedBookingForNotification.id} professional notification skipped: no FCM token`,
+      );
+    }
 
     return true;
   }
