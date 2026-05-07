@@ -63,12 +63,14 @@ export class StripeController {
     switch (event.type) {
       case 'payment_intent.succeeded':
         await this.stripeService.handlePaymentSuccess(
-          (event.data.object as { id: string }).id,
+          (event.data.object as { id: string; metadata?: Record<string, string> }).id,
+          (event.data.object as { id: string; metadata?: Record<string, string> }).metadata,
         );
         break;
       case 'payment_intent.payment_failed':
         await this.stripeService.handlePaymentFailed(
-          (event.data.object as { id: string }).id,
+          (event.data.object as { id: string; metadata?: Record<string, string> }).id,
+          (event.data.object as { id: string; metadata?: Record<string, string> }).metadata,
         );
         break;
     }

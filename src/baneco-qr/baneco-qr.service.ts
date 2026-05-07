@@ -5,7 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DepositStatus, PaymentType } from '@prisma/client';
+import {
+  BookingPaymentMethod,
+  BookingPaymentStatus,
+  BookingStatus,
+  DepositStatus,
+  PaymentType,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { BanecoApiService, PaymentQR } from './baneco-api.service';
@@ -58,6 +65,10 @@ export class BanecoQrService {
 
   private newReqId() {
     return Math.random().toString(36).slice(2, 9);
+  }
+
+  private sanitizeProviderPayload(input: Record<string, unknown>) {
+    return input;
   }
 
   private canUseBaneco(user: {
@@ -305,7 +316,164 @@ export class BanecoQrService {
     return { ok: false, message: res.message };
   }
 
+  async createQrForBookingPayment(payload: {
+    bookingId: string;
+    bookingPaymentId: string;
+    amountBob: number;
+    currency: 'BOB';
+    bookingExpiresAt: Date | null;
+    requestId?: string;
+  }) {
+    const traceId = payload.requestId ?? this.newReqId();
+    this.logger.log(
+      `[QR-BOOKING][${traceId}] start bookingId=${payload.bookingId} bookingPaymentId=${payload.bookingPaymentId} amount=${payload.amountBob} currency=${payload.currency}`,
+    );
+
+    const qr = await this.banecoApi.generateQR({
+      transactionId: payload.bookingPaymentId,
+      amount: payload.amountBob,
+      currency: payload.currency,
+      description: `SanaMente Booking ${payload.bookingId.slice(0, 8)}`,
+      dueDate: this.buildDueDate(),
+      singleUse: true,
+      modifyAmount: false,
+      reqId: traceId,
+    });
+
+    await this.prisma.bookingPayment.update({
+      where: { id: payload.bookingPaymentId },
+      data: {
+        providerReference: qr.qrId,
+        providerPayload: this.sanitizeProviderPayload({
+          provider: 'BANECO_QR',
+          qrId: qr.qrId,
+          responseCode: qr.responseCode,
+          dueDate: this.buildDueDate(),
+        }) as Prisma.InputJsonValue,
+      },
+    });
+
+    this.logger.log(
+      `[QR-BOOKING][${traceId}] success bookingId=${payload.bookingId} bookingPaymentId=${payload.bookingPaymentId} qrId=${qr.qrId}`,
+    );
+
+    return {
+      bookingId: payload.bookingId,
+      paymentMethod: 'BANECO_QR' as const,
+      currency: payload.currency,
+      amount: payload.amountBob,
+      qrImage: qr.qrImage,
+      providerReference: qr.qrId,
+      expiresAt: payload.bookingExpiresAt,
+    };
+  }
+
+  async applyBookingPaymentByQrId(qrId: string, payment: PaymentQR | null) {
+    const bookingPayment = await this.prisma.bookingPayment.findFirst({
+      where: {
+        method: BookingPaymentMethod.BANECO_QR,
+        providerReference: qrId,
+      },
+      include: { booking: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!bookingPayment) return false;
+    if (bookingPayment.status === BookingPaymentStatus.PAID) return true;
+
+    await this.prisma.$transaction(async (tx) => {
+      const fresh = await tx.booking.findUnique({
+        where: { id: bookingPayment.bookingId },
+        select: {
+          id: true,
+          status: true,
+          paymentStatus: true,
+          expiresAt: true,
+        },
+      });
+
+      if (!fresh) return;
+
+      const now = new Date();
+      const isExpired =
+        fresh.status === BookingStatus.EXPIRED ||
+        (fresh.expiresAt ? fresh.expiresAt <= now : false);
+
+      if (isExpired) {
+        await tx.booking.updateMany({
+          where: {
+            id: fresh.id,
+            status: BookingStatus.PENDING_PAYMENT,
+          },
+          data: {
+            status: BookingStatus.EXPIRED,
+            paymentStatus: BookingPaymentStatus.EXPIRED,
+          },
+        });
+
+        await tx.bookingPayment.updateMany({
+          where: {
+            id: bookingPayment.id,
+            status: BookingPaymentStatus.PENDING,
+          },
+          data: {
+            status: BookingPaymentStatus.EXPIRED,
+            providerPayload: this.sanitizeProviderPayload({
+              provider: 'BANECO_QR',
+              qrId,
+              latePaymentIgnored: true,
+              bankTransactionId: payment?.transactionId ?? null,
+            }) as Prisma.InputJsonValue,
+          },
+        });
+        return;
+      }
+
+      if (
+        fresh.status === BookingStatus.CONFIRMED &&
+        fresh.paymentStatus === BookingPaymentStatus.PAID
+      ) {
+        return;
+      }
+
+      if (fresh.status !== BookingStatus.PENDING_PAYMENT) return;
+
+      await tx.bookingPayment.updateMany({
+        where: {
+          id: bookingPayment.id,
+          status: BookingPaymentStatus.PENDING,
+        },
+        data: {
+          status: BookingPaymentStatus.PAID,
+          providerPayload: this.sanitizeProviderPayload({
+            provider: 'BANECO_QR',
+            qrId,
+            paidAt: new Date().toISOString(),
+            bankTransactionId: payment?.transactionId ?? null,
+          }) as Prisma.InputJsonValue,
+        },
+      });
+
+      await tx.booking.updateMany({
+        where: {
+          id: fresh.id,
+          status: BookingStatus.PENDING_PAYMENT,
+          paymentStatus: BookingPaymentStatus.PENDING,
+        },
+        data: {
+          status: BookingStatus.CONFIRMED,
+          paymentStatus: BookingPaymentStatus.PAID,
+        },
+      });
+    });
+
+    return true;
+  }
+
   async applyPayment(payment: PaymentQR) {
+    const appliedToBooking = await this.applyBookingPaymentByQrId(payment.qrId, payment);
+    if (appliedToBooking) return;
+
     // Primero intentar como SessionPayment
     const sessionPayment = await this.prisma.sessionPayment.findUnique({
       where: { bancoQrId: payment.qrId },
