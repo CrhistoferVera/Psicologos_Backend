@@ -35,40 +35,34 @@ export class WalletService {
     const startOfWeek = new Date(startOfToday);
     startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
 
-    const [todayResult, weekResult, transactions, withdrawalsEnabled] = await Promise.all([
-      this.prisma.transaction.aggregate({
-        where: {
-          walletId: wallet.id,
-          type: 'EARNING',
-          isPromotional: false,
-          createdAt: { gte: startOfToday },
-        },
-        _sum: { amount: true },
+    const [transactions, weekTransactions, withdrawalsEnabled] = await Promise.all([
+      this.prisma.transaction.findMany({
+        where: { walletId: wallet.id, type: 'EARNING', isPromotional: false },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
       }),
-      this.prisma.transaction.aggregate({
+      this.prisma.transaction.findMany({
         where: {
           walletId: wallet.id,
           type: 'EARNING',
           isPromotional: false,
           createdAt: { gte: startOfWeek },
         },
-        _sum: { amount: true },
-      }),
-      this.prisma.transaction.findMany({
-        where: { walletId: wallet.id, type: 'EARNING', isPromotional: false },
         orderBy: { createdAt: 'desc' },
-        take: 50,
       }),
       this.systemConfigService.isWithdrawalsEnabled(),
     ]);
 
-    const parsedTransactions = transactions.map((tx) => {
+    const parseTransaction = (tx: (typeof transactions)[number]) => {
       let service = 'Transaccion';
       let clientName = '';
+      let currency: 'BOB' | 'USD' = 'BOB';
       try {
         const meta = JSON.parse(tx.description ?? '{}');
         service = meta.service ?? service;
         clientName = meta.clientName ?? '';
+        const maybeCurrency = String(meta.currency ?? '').toUpperCase();
+        if (maybeCurrency === 'USD') currency = 'USD';
       } catch {
         service = tx.description ?? 'Transaccion';
       }
@@ -78,9 +72,26 @@ export class WalletService {
         service,
         clientName,
         amount: Number(tx.amount),
+        currency,
         createdAt: tx.createdAt,
       };
-    });
+    };
+
+    const parsedTransactions = transactions.map(parseTransaction);
+    const parsedWeekTransactions = weekTransactions.map(parseTransaction);
+
+    const todayBob = parsedWeekTransactions
+      .filter((tx) => tx.currency === 'BOB' && tx.createdAt >= startOfToday)
+      .reduce((sum, tx) => sum + tx.amount, 0);
+    const todayUsd = parsedWeekTransactions
+      .filter((tx) => tx.currency === 'USD' && tx.createdAt >= startOfToday)
+      .reduce((sum, tx) => sum + tx.amount, 0);
+    const weekBob = parsedWeekTransactions
+      .filter((tx) => tx.currency === 'BOB')
+      .reduce((sum, tx) => sum + tx.amount, 0);
+    const weekUsd = parsedWeekTransactions
+      .filter((tx) => tx.currency === 'USD')
+      .reduce((sum, tx) => sum + tx.amount, 0);
 
     const promotionalBalance = Number(wallet.promotionalBalance ?? 0);
     const realBalance = this.computeWithdrawableBalance(wallet.balance, wallet.promotionalBalance ?? 0);
@@ -92,8 +103,10 @@ export class WalletService {
       realBalance,
       withdrawableBalance: realBalance,
       withdrawalsEnabled,
-      today: Number(todayResult._sum.amount ?? 0),
-      thisWeek: Number(weekResult._sum.amount ?? 0),
+      today: todayBob,
+      todayUsd,
+      thisWeek: weekBob,
+      thisWeekUsd: weekUsd,
       total: Number(wallet.balance),
       transactions: parsedTransactions,
     };

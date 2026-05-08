@@ -14,6 +14,7 @@ import {
   BILLING_REGION_INTERNATIONAL,
   CURRENCY_USD,
 } from '../common/phone-metadata.util';
+import { BookingEarningsService } from '../booking-earnings/booking-earnings.service';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const Stripe = require('stripe');
 
@@ -27,6 +28,7 @@ export class StripeService {
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly bookingEarningsService: BookingEarningsService,
   ) {
     this.stripe = new Stripe(this.config.get<string>('STRIPE_SECRET_KEY')!);
   }
@@ -300,7 +302,15 @@ export class StripeService {
     });
 
     if (!bookingPayment) return false;
-    if (bookingPayment.status === BookingPaymentStatus.PAID) return true;
+
+    if (bookingPayment.status === BookingPaymentStatus.PAID) {
+      await this.bookingEarningsService.creditProfessionalEarningForBooking({
+        bookingId: bookingPayment.bookingId,
+        bookingPaymentId: bookingPayment.id,
+        source: 'STRIPE_WEBHOOK',
+      });
+      return true;
+    }
 
     const confirmedBookingForNotification = await this.prisma.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
@@ -431,6 +441,12 @@ export class StripeService {
         `[STRIPE-BOOKING] bookingId=${confirmedBookingForNotification.id} professional notification skipped: no FCM token`,
       );
     }
+
+    await this.bookingEarningsService.creditProfessionalEarningForBooking({
+      bookingId: bookingPayment.bookingId,
+      bookingPaymentId: bookingPayment.id,
+      source: 'STRIPE_WEBHOOK',
+    });
 
     return true;
   }

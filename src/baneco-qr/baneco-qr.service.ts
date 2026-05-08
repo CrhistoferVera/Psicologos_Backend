@@ -18,6 +18,7 @@ import { SystemConfigService } from '../system-config/system-config.service';
 import { BanecoApiService, PaymentQR } from './baneco-api.service';
 import { BILLING_REGION_BOLIVIA, CURRENCY_BOB } from '../common/phone-metadata.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { BookingEarningsService } from '../booking-earnings/booking-earnings.service';
 
 @Injectable()
 export class BanecoQrService {
@@ -29,6 +30,7 @@ export class BanecoQrService {
     private readonly systemConfigService: SystemConfigService,
     private readonly banecoApi: BanecoApiService,
     private readonly notificationsService: NotificationsService,
+    private readonly bookingEarningsService: BookingEarningsService,
   ) {}
 
   private get usdToBob(): number {
@@ -400,7 +402,14 @@ export class BanecoQrService {
     });
 
     if (!bookingPayment) return false;
-    if (bookingPayment.status === BookingPaymentStatus.PAID) return true;
+    if (bookingPayment.status === BookingPaymentStatus.PAID) {
+      await this.bookingEarningsService.creditProfessionalEarningForBooking({
+        bookingId: bookingPayment.bookingId,
+        bookingPaymentId: bookingPayment.id,
+        source: 'BANECO_QR_NOTIFY',
+      });
+      return true;
+    }
 
     const confirmedBookingForNotification = await this.prisma.$transaction(async (tx) => {
       const fresh = await tx.booking.findUnique({
@@ -539,6 +548,12 @@ export class BanecoQrService {
         `[QR-BOOKING] bookingId=${confirmedBookingForNotification.id} professional notification skipped: no FCM token`,
       );
     }
+
+    await this.bookingEarningsService.creditProfessionalEarningForBooking({
+      bookingId: bookingPayment.bookingId,
+      bookingPaymentId: bookingPayment.id,
+      source: 'BANECO_QR_NOTIFY',
+    });
 
     return true;
   }
