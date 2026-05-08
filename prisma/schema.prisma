@@ -45,6 +45,11 @@ model User {
   referralAsReferred          Referral?                 @relation("ReferralReferred")
   sessionsAsProfessional      Session[]                 @relation("ProfessionalSessions")
   sessionPayments             SessionPayment[]          @relation("ClientSessionPayments")
+  professionalSessionOfferings ProfessionalSessionOffering[] @relation("ProfessionalSessionOfferings")
+  professionalAvailabilityRules ProfessionalAvailabilityRule[] @relation("ProfessionalAvailabilityRules")
+  professionalAvailabilityExceptions ProfessionalAvailabilityException[] @relation("ProfessionalAvailabilityExceptions")
+  bookingsAsClient            Booking[]                 @relation("ClientBookings")
+  bookingsAsProfessional      Booking[]                 @relation("ProfessionalBookings")
 
   @@index([billingRegion])
   @@index([phoneCountryIso])
@@ -449,6 +454,115 @@ model SessionPayment {
   @@map("session_payments")
 }
 
+model ProfessionalSessionOffering {
+  id              String    @id @default(uuid())
+  professionalId  String
+  title           String
+  description     String?
+  durationMinutes Int
+  priceBob        Decimal   @db.Decimal(10, 2)
+  priceUsd        Decimal   @db.Decimal(10, 2)
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  professional    User      @relation("ProfessionalSessionOfferings", fields: [professionalId], references: [id], onDelete: Cascade)
+  bookings        Booking[]
+
+  @@index([professionalId])
+  @@index([isActive])
+  @@map("professional_session_offerings")
+}
+
+model ProfessionalAvailabilityRule {
+  id              String   @id @default(uuid())
+  professionalId  String
+  dayOfWeek       WeekDay
+  startTime       String
+  endTime         String
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  professional    User     @relation("ProfessionalAvailabilityRules", fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@index([professionalId])
+  @@index([professionalId, dayOfWeek, isActive])
+  @@map("professional_availability_rules")
+}
+
+model ProfessionalAvailabilityException {
+  id              String   @id @default(uuid())
+  professionalId  String
+  date            DateTime @db.Date
+  startTime       String?
+  endTime         String?
+  reason          String?
+  isFullDay       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  professional    User     @relation("ProfessionalAvailabilityExceptions", fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@index([professionalId])
+  @@index([professionalId, date])
+  @@map("professional_availability_exceptions")
+}
+
+model Booking {
+  id                String               @id @default(uuid())
+  clientId          String
+  professionalId    String
+  sessionOfferingId String
+  scheduledStartAt  DateTime
+  scheduledEndAt    DateTime
+  timezone          String               @default("America/La_Paz")
+  status            BookingStatus        @default(PENDING_PAYMENT)
+  priceBob          Decimal              @db.Decimal(10, 2)
+  priceUsd          Decimal              @db.Decimal(10, 2)
+  currency          String
+  paymentMethod     BookingPaymentMethod?
+  paymentStatus     BookingPaymentStatus @default(PENDING)
+  expiresAt         DateTime?
+  reminder15SentAt  DateTime?
+  professionalPurchaseNotifiedAt DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  client            User                 @relation("ClientBookings", fields: [clientId], references: [id], onDelete: Cascade)
+  professional      User                 @relation("ProfessionalBookings", fields: [professionalId], references: [id], onDelete: Cascade)
+  sessionOffering   ProfessionalSessionOffering @relation(fields: [sessionOfferingId], references: [id], onDelete: Restrict)
+  payments          BookingPayment[]
+
+  @@index([clientId])
+  @@index([professionalId])
+  @@index([sessionOfferingId])
+  @@index([scheduledStartAt])
+  @@index([status])
+  @@index([professionalId, scheduledStartAt, scheduledEndAt])
+  @@map("bookings")
+}
+
+model BookingPayment {
+  id                String               @id @default(uuid())
+  bookingId         String
+  method            BookingPaymentMethod
+  status            BookingPaymentStatus @default(PENDING)
+  amountBob         Decimal?             @db.Decimal(10, 2)
+  amountUsd         Decimal?             @db.Decimal(10, 2)
+  currency          String
+  providerReference String?
+  providerPayload   Json?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  booking           Booking              @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@index([status])
+  @@map("booking_payments")
+}
+
 model SystemConfig {
   id                       String   @id @default("global")
   platformFeePercent       Decimal  @default(50.00) @db.Decimal(5, 2)
@@ -541,6 +655,39 @@ enum SessionPaymentStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+enum BookingStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  CANCELLED_BY_CLIENT
+  CANCELLED_BY_PROFESSIONAL
+  COMPLETED
+  NO_SHOW
+  EXPIRED
+}
+
+enum BookingPaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  EXPIRED
+}
+
+enum BookingPaymentMethod {
+  BANECO_QR
+  STRIPE
+}
+
+enum WeekDay {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
 }
 
 
