@@ -525,6 +525,8 @@ model Booking {
   paymentStatus     BookingPaymentStatus @default(PENDING)
   expiresAt         DateTime?
   reminder15SentAt  DateTime?
+  reminder10BeforeStartSentAt DateTime?
+  reminder15BeforeEndSentAt DateTime?
   professionalPurchaseNotifiedAt DateTime?
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt

@@ -1,14 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RtcTokenBuilder, RtcRole } from 'agora-token';
+import { BookingsService } from '../bookings/bookings.service';
 
 @Injectable()
 export class CallsService {
   constructor(
     private readonly config: ConfigService,
+    private readonly bookingsService: BookingsService,
   ) {}
 
-  generateToken(channelName: string, uid: number): { token: string; appId: string } {
+  private buildAgoraToken(channelName: string, uid: number): { token: string; appId: string } {
     const appId = this.config.get<string>('AGORA_APP_ID')!;
     const appCertificate = this.config.get<string>('AGORA_APP_CERTIFICATE')!;
     const expirationSeconds = 3600;
@@ -24,6 +26,16 @@ export class CallsService {
     );
 
     return { token, appId };
+  }
+
+  async generateTokenForCall(
+    requesterUserId: string,
+    otherUserId: string,
+    channelName: string,
+    uid: number,
+  ): Promise<{ token: string; appId: string }> {
+    await this.bookingsService.assertActiveBookingAccess(requesterUserId, otherUserId, 'CALL');
+    return this.buildAgoraToken(channelName, uid);
   }
 
   billCall(

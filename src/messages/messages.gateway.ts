@@ -9,6 +9,7 @@ import { Server, Socket } from 'socket.io';
 import { MessagesService } from './messages.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma.service';
+import { BookingsService } from '../bookings/bookings.service';
 
 interface CallSession {
   callerId: string;
@@ -32,6 +33,7 @@ export class MessagesGateway {
     private readonly messagesService: MessagesService,
     private readonly notificationsService: NotificationsService,
     private readonly prisma: PrismaService,
+    private readonly bookingsService: BookingsService,
   ) {}
 
   @SubscribeMessage('register')
@@ -47,15 +49,21 @@ export class MessagesGateway {
     @MessageBody() data: { senderId: string; receiverId: string; text: string },
     @ConnectedSocket() client: Socket,
   ) {
-    const message = await this.messagesService.createMessage(
-      data.senderId,
-      data.receiverId,
-      data.text,
-      false,
-    );
+    try {
+      const message = await this.messagesService.createMessage(
+        data.senderId,
+        data.receiverId,
+        data.text,
+        false,
+      );
 
-    this.sendMessageToUser(data.receiverId, message);
-    client.emit('message_sent', message);
+      this.sendMessageToUser(data.receiverId, message);
+      client.emit('message_sent', message);
+    } catch (error: any) {
+      client.emit('message_error', {
+        message: error?.message ?? 'Solo puedes enviar mensajes durante una sesion activa.',
+      });
+    }
   }
 
   sendMessageToUser(userId: string, message: any) {
@@ -76,28 +84,36 @@ export class MessagesGateway {
     },
     @ConnectedSocket() client: Socket,
   ) {
-    this.callSessions.set(data.callId, {
-      callerId: data.callerId,
-      professionalId: data.receiverId,
-      callType: data.callType,
-      startedAt: null,
-    });
+    try {
+      await this.bookingsService.assertActiveBookingAccess(data.callerId, data.receiverId, 'CALL');
 
-    this.server.to(`user_${data.receiverId}`).emit('incoming_call', data);
-    client.emit('call_ringing', { callId: data.callId });
+      this.callSessions.set(data.callId, {
+        callerId: data.callerId,
+        professionalId: data.receiverId,
+        callType: data.callType,
+        startedAt: null,
+      });
 
-    const professional = await this.prisma.user.findUnique({
-      where: { id: data.receiverId },
-      select: { fcmToken: true },
-    });
-    if (professional?.fcmToken) {
-      const label = data.callType === 'VIDEO_CALL' ? 'Video llamada' : 'Llamada de voz';
-      this.notificationsService.sendPushNotification(
-        professional.fcmToken,
-        `📞 ${label} entrante`,
-        `${data.callerName} te esta llamando`,
-        { callId: data.callId, callerId: data.callerId, type: 'INCOMING_CALL' },
-      );
+      this.server.to(`user_${data.receiverId}`).emit('incoming_call', data);
+      client.emit('call_ringing', { callId: data.callId });
+
+      const professional = await this.prisma.user.findUnique({
+        where: { id: data.receiverId },
+        select: { fcmToken: true },
+      });
+      if (professional?.fcmToken) {
+        const label = data.callType === 'VIDEO_CALL' ? 'Video llamada' : 'Llamada de voz';
+        this.notificationsService.sendPushNotification(
+          professional.fcmToken,
+          `📞 ${label} entrante`,
+          `${data.callerName} te esta llamando`,
+          { callId: data.callId, callerId: data.callerId, type: 'INCOMING_CALL' },
+        );
+      }
+    } catch (error: any) {
+      client.emit('call_error', {
+        message: error?.message ?? 'Solo puedes iniciar llamadas durante una sesion activa.',
+      });
     }
   }
 
@@ -114,7 +130,24 @@ export class MessagesGateway {
     @ConnectedSocket() _client: Socket,
   ) {
     const session = this.callSessions.get(data.callId);
-    if (session) session.startedAt = Date.now();
+    if (!session) return;
+
+    try {
+      await this.bookingsService.assertActiveBookingAccess(session.callerId, session.professionalId, 'CALL');
+    } catch (error: any) {
+      this.callSessions.delete(data.callId);
+      this.server.to(`user_${session.callerId}`).emit('call_error', {
+        callId: data.callId,
+        message: error?.message ?? 'Solo puedes iniciar llamadas durante una sesion activa.',
+      });
+      this.server.to(`user_${session.professionalId}`).emit('call_error', {
+        callId: data.callId,
+        message: error?.message ?? 'Solo puedes iniciar llamadas durante una sesion activa.',
+      });
+      return;
+    }
+
+    session.startedAt = Date.now();
 
     this.server.to(`user_${data.callerId}`).emit('call_accepted', { callId: data.callId });
 
@@ -189,7 +222,7 @@ export class MessagesGateway {
       if (caller?.fcmToken) {
         this.notificationsService.sendPushNotification(
           caller.fcmToken,
-          'Sesión finalizada',
+          'Llamada finalizada',
           `Duración: ${minutes} min`,
           { callId: data.callId, type: 'CALL_ENDED', durationSeconds },
         );
@@ -197,7 +230,7 @@ export class MessagesGateway {
       if (professional?.fcmToken) {
         this.notificationsService.sendPushNotification(
           professional.fcmToken,
-          'Sesión finalizada',
+          'Llamada finalizada',
           `Duración: ${minutes} min`,
           { callId: data.callId, type: 'CALL_ENDED', durationSeconds },
         );

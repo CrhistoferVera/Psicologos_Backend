@@ -51,6 +51,21 @@ import {
 
 type PrismaTx = PrismaService | Prisma.TransactionClient;
 
+export type CommunicationAccessReason =
+  | 'NO_CONFIRMED_BOOKING'
+  | 'SESSION_NOT_STARTED'
+  | 'SESSION_ENDED'
+  | 'PAYMENT_PENDING'
+  | 'UNKNOWN';
+
+export type CommunicationAccessResult = {
+  allowed: boolean;
+  bookingId: string | null;
+  reason: CommunicationAccessReason | null;
+  sessionStartsAt: Date | null;
+  sessionEndsAt: Date | null;
+};
+
 @Injectable()
 export class BookingsService {
   private readonly logger = new Logger(BookingsService.name);
@@ -67,14 +82,297 @@ export class BookingsService {
     return Math.random().toString(36).slice(2, 9);
   }
 
+  private isProfessionalRole(role: UserRole) {
+    return PROFESSIONAL_ROLES.includes(role);
+  }
+
+  private resolveCommunicationPair(
+    currentUser: { id: string; role: UserRole },
+    otherUser: { id: string; role: UserRole },
+  ) {
+    const currentIsProfessional = this.isProfessionalRole(currentUser.role);
+    const otherIsProfessional = this.isProfessionalRole(otherUser.role);
+
+    if (currentUser.role === UserRole.USER && otherIsProfessional) {
+      return {
+        clientId: currentUser.id,
+        professionalId: otherUser.id,
+      };
+    }
+
+    if (currentIsProfessional && otherUser.role === UserRole.USER) {
+      return {
+        clientId: otherUser.id,
+        professionalId: currentUser.id,
+      };
+    }
+
+    return null;
+  }
+
+  private getCommunicationDeniedMessage(
+    reason: CommunicationAccessReason | null,
+    mode: 'MESSAGE' | 'CALL',
+  ) {
+    const actionLabel = mode === 'CALL' ? 'iniciar llamadas' : 'enviar mensajes';
+
+    if (reason === 'PAYMENT_PENDING') {
+      return `Solo puedes ${actionLabel} cuando la reserva este pagada y activa.`;
+    }
+
+    if (reason === 'SESSION_NOT_STARTED') {
+      return `Solo puedes ${actionLabel} durante una sesion activa.`;
+    }
+
+    if (reason === 'SESSION_ENDED') {
+      return `Solo puedes ${actionLabel} durante una sesion activa.`;
+    }
+
+    if (reason === 'NO_CONFIRMED_BOOKING') {
+      return `Solo puedes ${actionLabel} durante una sesion activa.`;
+    }
+
+    return `Solo puedes ${actionLabel} durante una sesion activa.`;
+  }
+
+  private mapAccessResultForResponse(result: CommunicationAccessResult) {
+    const reasonMessageMap: Record<CommunicationAccessReason, string> = {
+      NO_CONFIRMED_BOOKING: 'Reserva una sesion para habilitar mensajes y llamadas.',
+      SESSION_NOT_STARTED: 'Tu sesion aun no ha iniciado.',
+      SESSION_ENDED: 'Tu sesion ya finalizo.',
+      PAYMENT_PENDING: 'La reserva existe, pero el pago aun no esta confirmado.',
+      UNKNOWN: 'No se pudo validar el acceso de comunicacion.',
+    };
+
+    return {
+      allowed: result.allowed,
+      bookingId: result.bookingId,
+      sessionStartsAt: result.sessionStartsAt ? result.sessionStartsAt.toISOString() : null,
+      sessionEndsAt: result.sessionEndsAt ? result.sessionEndsAt.toISOString() : null,
+      reason: result.reason,
+      message: result.reason ? reasonMessageMap[result.reason] : null,
+    };
+  }
+
+  async hasActiveBookingAccess(currentUserId: string, otherUserId: string): Promise<CommunicationAccessResult> {
+    if (!currentUserId || !otherUserId) {
+      return {
+        allowed: false,
+        bookingId: null,
+        reason: 'UNKNOWN',
+        sessionStartsAt: null,
+        sessionEndsAt: null,
+      };
+    }
+
+    const [currentUser, otherUser] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: currentUserId },
+        select: { id: true, role: true, isActive: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: otherUserId },
+        select: { id: true, role: true, isActive: true },
+      }),
+    ]);
+
+    if (!currentUser || !otherUser || !currentUser.isActive || !otherUser.isActive) {
+      return {
+        allowed: false,
+        bookingId: null,
+        reason: 'UNKNOWN',
+        sessionStartsAt: null,
+        sessionEndsAt: null,
+      };
+    }
+
+    const pair = this.resolveCommunicationPair(currentUser, otherUser);
+    if (!pair) {
+      return {
+        allowed: false,
+        bookingId: null,
+        reason: 'UNKNOWN',
+        sessionStartsAt: null,
+        sessionEndsAt: null,
+      };
+    }
+
+    const now = new Date();
+
+    const activePaidBooking = await this.prisma.booking.findFirst({
+      where: {
+        clientId: pair.clientId,
+        professionalId: pair.professionalId,
+        status: BookingStatus.CONFIRMED,
+        paymentStatus: BookingPaymentStatus.PAID,
+        scheduledStartAt: { lte: now },
+        scheduledEndAt: { gte: now },
+      },
+      orderBy: { scheduledStartAt: 'asc' },
+      select: {
+        id: true,
+        scheduledStartAt: true,
+        scheduledEndAt: true,
+      },
+    });
+
+    if (activePaidBooking) {
+      return {
+        allowed: true,
+        bookingId: activePaidBooking.id,
+        reason: null,
+        sessionStartsAt: activePaidBooking.scheduledStartAt,
+        sessionEndsAt: activePaidBooking.scheduledEndAt,
+      };
+    }
+
+    const activeButUnpaidBooking = await this.prisma.booking.findFirst({
+      where: {
+        clientId: pair.clientId,
+        professionalId: pair.professionalId,
+        scheduledStartAt: { lte: now },
+        scheduledEndAt: { gte: now },
+        OR: [
+          {
+            status: BookingStatus.CONFIRMED,
+            paymentStatus: { not: BookingPaymentStatus.PAID },
+          },
+          {
+            status: BookingStatus.PENDING_PAYMENT,
+          },
+        ],
+      },
+      orderBy: { scheduledStartAt: 'asc' },
+      select: {
+        id: true,
+        scheduledStartAt: true,
+        scheduledEndAt: true,
+      },
+    });
+
+    if (activeButUnpaidBooking) {
+      return {
+        allowed: false,
+        bookingId: activeButUnpaidBooking.id,
+        reason: 'PAYMENT_PENDING',
+        sessionStartsAt: activeButUnpaidBooking.scheduledStartAt,
+        sessionEndsAt: activeButUnpaidBooking.scheduledEndAt,
+      };
+    }
+
+    const nextConfirmedPaidBooking = await this.prisma.booking.findFirst({
+      where: {
+        clientId: pair.clientId,
+        professionalId: pair.professionalId,
+        status: BookingStatus.CONFIRMED,
+        paymentStatus: BookingPaymentStatus.PAID,
+        scheduledStartAt: { gt: now },
+      },
+      orderBy: { scheduledStartAt: 'asc' },
+      select: {
+        id: true,
+        scheduledStartAt: true,
+        scheduledEndAt: true,
+      },
+    });
+
+    if (nextConfirmedPaidBooking) {
+      return {
+        allowed: false,
+        bookingId: nextConfirmedPaidBooking.id,
+        reason: 'SESSION_NOT_STARTED',
+        sessionStartsAt: nextConfirmedPaidBooking.scheduledStartAt,
+        sessionEndsAt: nextConfirmedPaidBooking.scheduledEndAt,
+      };
+    }
+
+    const nextPendingPaymentBooking = await this.prisma.booking.findFirst({
+      where: {
+        clientId: pair.clientId,
+        professionalId: pair.professionalId,
+        status: BookingStatus.PENDING_PAYMENT,
+        paymentStatus: BookingPaymentStatus.PENDING,
+        scheduledStartAt: { gt: now },
+      },
+      orderBy: { scheduledStartAt: 'asc' },
+      select: {
+        id: true,
+        scheduledStartAt: true,
+        scheduledEndAt: true,
+      },
+    });
+
+    if (nextPendingPaymentBooking) {
+      return {
+        allowed: false,
+        bookingId: nextPendingPaymentBooking.id,
+        reason: 'PAYMENT_PENDING',
+        sessionStartsAt: nextPendingPaymentBooking.scheduledStartAt,
+        sessionEndsAt: nextPendingPaymentBooking.scheduledEndAt,
+      };
+    }
+
+    const lastConfirmedPaidBooking = await this.prisma.booking.findFirst({
+      where: {
+        clientId: pair.clientId,
+        professionalId: pair.professionalId,
+        status: BookingStatus.CONFIRMED,
+        paymentStatus: BookingPaymentStatus.PAID,
+        scheduledEndAt: { lt: now },
+      },
+      orderBy: { scheduledEndAt: 'desc' },
+      select: {
+        id: true,
+        scheduledStartAt: true,
+        scheduledEndAt: true,
+      },
+    });
+
+    if (lastConfirmedPaidBooking) {
+      return {
+        allowed: false,
+        bookingId: lastConfirmedPaidBooking.id,
+        reason: 'SESSION_ENDED',
+        sessionStartsAt: lastConfirmedPaidBooking.scheduledStartAt,
+        sessionEndsAt: lastConfirmedPaidBooking.scheduledEndAt,
+      };
+    }
+
+    return {
+      allowed: false,
+      bookingId: null,
+      reason: 'NO_CONFIRMED_BOOKING',
+      sessionStartsAt: null,
+      sessionEndsAt: null,
+    };
+  }
+
+  async assertActiveBookingAccess(
+    currentUserId: string,
+    otherUserId: string,
+    mode: 'MESSAGE' | 'CALL' = 'MESSAGE',
+  ) {
+    const result = await this.hasActiveBookingAccess(currentUserId, otherUserId);
+    if (!result.allowed) {
+      throw new ForbiddenException(this.getCommunicationDeniedMessage(result.reason, mode));
+    }
+    return result;
+  }
+
+  async getCommunicationAccess(currentUserId: string, otherUserId: string) {
+    const result = await this.hasActiveBookingAccess(currentUserId, otherUserId);
+    return this.mapAccessResultForResponse(result);
+  }
+
   @Cron(CronExpression.EVERY_5_MINUTES)
   async expirePendingBookingsCron() {
     await this.expirePendingBookings();
   }
 
   @Cron(CronExpression.EVERY_MINUTE)
-  async sendBookingReminder15MinCron() {
-    await this.sendBookingReminder15Min();
+  async sendBookingSessionRemindersCron() {
+    await this.sendBookingReminder10MinBeforeStart();
+    await this.sendBookingReminder15MinBeforeEnd();
   }
 
   async expirePendingBookings(tx?: PrismaTx): Promise<number> {
@@ -134,16 +432,16 @@ export class BookingsService {
     }).format(date);
   }
 
-  async sendBookingReminder15Min() {
+  async sendBookingReminder10MinBeforeStart() {
     const now = new Date();
-    const from = new Date(now.getTime() + 14 * 60 * 1000);
-    const to = new Date(now.getTime() + 16 * 60 * 1000);
+    const from = new Date(now.getTime() + 9 * 60 * 1000);
+    const to = new Date(now.getTime() + 11 * 60 * 1000);
 
     const candidates = await this.prisma.booking.findMany({
       where: {
         status: BookingStatus.CONFIRMED,
         paymentStatus: BookingPaymentStatus.PAID,
-        reminder15SentAt: null,
+        reminder10BeforeStartSentAt: null,
         scheduledStartAt: {
           gte: from,
           lte: to,
@@ -175,12 +473,12 @@ export class BookingsService {
         const claim = await this.prisma.booking.updateMany({
           where: {
             id: booking.id,
-            reminder15SentAt: null,
+            reminder10BeforeStartSentAt: null,
             status: BookingStatus.CONFIRMED,
             paymentStatus: BookingPaymentStatus.PAID,
           },
           data: {
-            reminder15SentAt: new Date(),
+            reminder10BeforeStartSentAt: new Date(),
           },
         });
 
@@ -193,39 +491,135 @@ export class BookingsService {
         if (booking.client?.fcmToken) {
           await this.notificationsService.sendPushNotification(
             booking.client.fcmToken,
-            'Recordatorio de sesion',
-            `Tienes una sesion con ${professionalName} en 15 minutos.`,
+            'Tu sesion empieza pronto',
+            `Tu sesion con ${professionalName} empieza en 10 minutos.`,
             {
-              type: 'BOOKING_REMINDER_15',
+              type: 'BOOKING_REMINDER_10_BEFORE_START',
               bookingId: booking.id,
               startsAt: booking.scheduledStartAt.toISOString(),
             },
           );
         } else {
           this.logger.warn(
-            `[BOOKING-REMINDER-15] bookingId=${booking.id} target=client reason=NO_FCM_TOKEN startsAt=${startAtFormatted}`,
+            `[BOOKING-REMINDER-10-START] bookingId=${booking.id} target=client reason=NO_FCM_TOKEN startsAt=${startAtFormatted}`,
           );
         }
 
         if (booking.professional?.fcmToken) {
           await this.notificationsService.sendPushNotification(
             booking.professional.fcmToken,
-            'Recordatorio de sesion',
-            `Tienes una sesion con ${clientName} en 15 minutos.`,
+            'Tu sesion empieza pronto',
+            `Tu sesion con ${clientName} empieza en 10 minutos.`,
             {
-              type: 'BOOKING_REMINDER_15',
+              type: 'BOOKING_REMINDER_10_BEFORE_START',
               bookingId: booking.id,
               startsAt: booking.scheduledStartAt.toISOString(),
             },
           );
         } else {
           this.logger.warn(
-            `[BOOKING-REMINDER-15] bookingId=${booking.id} target=professional reason=NO_FCM_TOKEN startsAt=${startAtFormatted}`,
+            `[BOOKING-REMINDER-10-START] bookingId=${booking.id} target=professional reason=NO_FCM_TOKEN startsAt=${startAtFormatted}`,
           );
         }
       } catch (error: any) {
         this.logger.error(
-          `[BOOKING-REMINDER-15] bookingId=${booking.id} failed reason=${error?.message ?? 'unknown'}`,
+          `[BOOKING-REMINDER-10-START] bookingId=${booking.id} failed reason=${error?.message ?? 'unknown'}`,
+        );
+      }
+    }
+  }
+
+  async sendBookingReminder15MinBeforeEnd() {
+    const now = new Date();
+    const from = new Date(now.getTime() + 14 * 60 * 1000);
+    const to = new Date(now.getTime() + 16 * 60 * 1000);
+
+    const candidates = await this.prisma.booking.findMany({
+      where: {
+        status: BookingStatus.CONFIRMED,
+        paymentStatus: BookingPaymentStatus.PAID,
+        reminder15BeforeEndSentAt: null,
+        scheduledEndAt: {
+          gte: from,
+          lte: to,
+        },
+      },
+      select: {
+        id: true,
+        timezone: true,
+        scheduledEndAt: true,
+        client: {
+          select: {
+            firstName: true,
+            lastName: true,
+            fcmToken: true,
+          },
+        },
+        professional: {
+          select: {
+            firstName: true,
+            lastName: true,
+            fcmToken: true,
+          },
+        },
+      },
+    });
+
+    for (const booking of candidates) {
+      try {
+        const claim = await this.prisma.booking.updateMany({
+          where: {
+            id: booking.id,
+            reminder15BeforeEndSentAt: null,
+            status: BookingStatus.CONFIRMED,
+            paymentStatus: BookingPaymentStatus.PAID,
+          },
+          data: {
+            reminder15BeforeEndSentAt: new Date(),
+          },
+        });
+
+        if (claim.count === 0) continue;
+
+        const clientName = this.fullName(booking.client, 'cliente');
+        const endAtFormatted = this.formatBookingDateTime(booking.scheduledEndAt, booking.timezone);
+
+        if (booking.client?.fcmToken) {
+          await this.notificationsService.sendPushNotification(
+            booking.client.fcmToken,
+            'Tu sesion esta por terminar',
+            'Tu sesion termina en 15 minutos.',
+            {
+              type: 'BOOKING_REMINDER_15_BEFORE_END',
+              bookingId: booking.id,
+              endsAt: booking.scheduledEndAt.toISOString(),
+            },
+          );
+        } else {
+          this.logger.warn(
+            `[BOOKING-REMINDER-15-END] bookingId=${booking.id} target=client reason=NO_FCM_TOKEN endsAt=${endAtFormatted}`,
+          );
+        }
+
+        if (booking.professional?.fcmToken) {
+          await this.notificationsService.sendPushNotification(
+            booking.professional.fcmToken,
+            'Tu sesion esta por terminar',
+            `Tu sesion con ${clientName} termina en 15 minutos.`,
+            {
+              type: 'BOOKING_REMINDER_15_BEFORE_END',
+              bookingId: booking.id,
+              endsAt: booking.scheduledEndAt.toISOString(),
+            },
+          );
+        } else {
+          this.logger.warn(
+            `[BOOKING-REMINDER-15-END] bookingId=${booking.id} target=professional reason=NO_FCM_TOKEN endsAt=${endAtFormatted}`,
+          );
+        }
+      } catch (error: any) {
+        this.logger.error(
+          `[BOOKING-REMINDER-15-END] bookingId=${booking.id} failed reason=${error?.message ?? 'unknown'}`,
         );
       }
     }

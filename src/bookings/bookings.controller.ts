@@ -205,4 +205,15 @@ export class BookingsController {
   getProfessionalBookings(@CurrentUser() user: JwtUser, @Query() query: BookingListQueryDto) {
     return this.bookingsService.getProfessionalBookings(user.userId, query);
   }
+
+  @Get('communication/access/:otherUserId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER, ...PROFESSIONAL_ROLES)
+  @ApiOperation({
+    summary:
+      'Consultar si la comunicacion (mensajes/llamadas) con otro usuario esta habilitada por reserva activa',
+  })
+  getCommunicationAccess(@CurrentUser() user: JwtUser, @Param('otherUserId') otherUserId: string) {
+    return this.bookingsService.getCommunicationAccess(user.userId, otherUserId);
+  }
 }

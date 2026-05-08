@@ -6,6 +6,7 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { BookingsService } from '../bookings/bookings.service';
 
 @Injectable()
 export class MessagesService {
@@ -14,6 +15,7 @@ export class MessagesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly bookingsService: BookingsService,
   ) {}
 
   private ttlCutoff(): Date {
@@ -43,6 +45,11 @@ export class MessagesService {
     if (!messageText) {
       throw new BadRequestException('El mensaje no puede estar vacio.');
     }
+    if (senderId === receiverId) {
+      throw new BadRequestException('No puedes enviarte mensajes a ti mismo.');
+    }
+
+    await this.bookingsService.assertActiveBookingAccess(senderId, receiverId, 'MESSAGE');
 
     const [user1Id, user2Id] = [senderId, receiverId].sort();
 
