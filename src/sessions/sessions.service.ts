@@ -27,14 +27,19 @@ export class SessionsService {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 7;
   }
 
+  private calcPriceInUsd(priceInBs: number): number {
+    return Math.round((priceInBs / this.bobToUsdRate) * 100) / 100;
+  }
+
   private formatSession(s: any) {
+    const priceInBs = Number(s.priceInBs);
     return {
       id: s.id,
       professionalUserId: s.professionalUserId,
       title: s.title,
       durationMinutes: s.durationMinutes,
-      priceInBs: Number(s.priceInBs),
-      priceInUsd: Number(s.priceInUsd),
+      priceInBs,
+      priceInUsd: this.calcPriceInUsd(priceInBs),
       status: s.status,
       startedAt: s.startedAt,
       endedAt: s.endedAt,
@@ -53,15 +58,13 @@ export class SessionsService {
   }
 
   async createSession(professionalUserId: string, dto: CreateSessionDto) {
-    const priceInUsd = Math.round((dto.priceInBs / this.bobToUsdRate) * 100) / 100;
-
     const session = await this.prisma.session.create({
       data: {
         professionalUserId,
         title: dto.title,
         durationMinutes: dto.durationMinutes,
         priceInBs: new Prisma.Decimal(dto.priceInBs),
-        priceInUsd: new Prisma.Decimal(priceInUsd),
+        priceInUsd: new Prisma.Decimal(this.calcPriceInUsd(dto.priceInBs)),
         status: 'OPEN',
       },
       include: {
@@ -92,9 +95,7 @@ export class SessionsService {
     if (dto.durationMinutes !== undefined) data.durationMinutes = dto.durationMinutes;
     if (dto.priceInBs !== undefined) {
       data.priceInBs = new Prisma.Decimal(dto.priceInBs);
-      data.priceInUsd = new Prisma.Decimal(
-        Math.round((dto.priceInBs / this.bobToUsdRate) * 100) / 100,
-      );
+      data.priceInUsd = new Prisma.Decimal(this.calcPriceInUsd(dto.priceInBs));
     }
 
     const updated = await this.prisma.session.update({
@@ -324,7 +325,7 @@ export class SessionsService {
       sessionStatus: p.session.status,
       durationMinutes: p.session.durationMinutes,
       priceInBs: Number(p.session.priceInBs),
-      priceInUsd: Number(p.session.priceInUsd),
+      priceInUsd: this.calcPriceInUsd(Number(p.session.priceInBs)),
       currency: p.currency,
       amountPaid: Number(p.currency === 'USD' ? p.amountUsd : p.amountBs),
       endedAt: p.session.endedAt,

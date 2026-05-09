@@ -16,6 +16,7 @@ import {
   WeekDay,
 } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
+import { ConfigService } from '@nestjs/config';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { BanecoQrService } from '../baneco-qr/baneco-qr.service';
 import { StripeService } from '../stripe/stripe.service';
@@ -72,6 +73,7 @@ export class BookingsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
     private readonly systemConfigService: SystemConfigService,
     private readonly banecoQrService: BanecoQrService,
     private readonly stripeService: StripeService,
@@ -625,15 +627,10 @@ export class BookingsService {
     }
   }
 
-  private async getBobToUsdRate(): Promise<number> {
-    const runtime = await this.systemConfigService.getRuntimeConfig();
-    const rate = Number(runtime.usdExchangeRate);
-
-    if (!Number.isFinite(rate) || rate <= 0) {
-      throw new BadRequestException('No se encontro una tasa BOB->USD valida.');
-    }
-
-    return rate;
+  private getBobToUsdRate(): number {
+    const raw = this.config.get<string>('BOB_TO_USD_RATE');
+    const rate = raw ? Number(raw) : NaN;
+    return Number.isFinite(rate) && rate > 0 ? rate : 7;
   }
 
   private formatOffering(offering: {
@@ -651,7 +648,7 @@ export class BookingsService {
     return {
       ...offering,
       priceBob: Number(offering.priceBob),
-      priceUsd: Number(offering.priceUsd),
+      priceUsd: Math.round((Number(offering.priceBob) / this.getBobToUsdRate()) * 100) / 100,
     };
   }
 
@@ -971,7 +968,7 @@ export class BookingsService {
       throw new BadRequestException('priceBob debe ser mayor que 0.');
     }
 
-    const rate = await this.getBobToUsdRate();
+    const rate = this.getBobToUsdRate();
     const priceUsd = Math.round((dto.priceBob / rate) * 100) / 100;
 
     const created = await this.prisma.professionalSessionOffering.create({
@@ -1018,7 +1015,7 @@ export class BookingsService {
 
     if (dto.priceBob !== undefined) {
       if (dto.priceBob <= 0) throw new BadRequestException('priceBob debe ser mayor que 0.');
-      const rate = await this.getBobToUsdRate();
+      const rate = this.getBobToUsdRate();
       const priceUsd = Math.round((dto.priceBob / rate) * 100) / 100;
       payload.priceBob = new Prisma.Decimal(dto.priceBob);
       payload.priceUsd = new Prisma.Decimal(priceUsd);
@@ -1077,7 +1074,7 @@ export class BookingsService {
     return rows.map((row) => ({
       ...row,
       priceBob: Number(row.priceBob),
-      priceUsd: Number(row.priceUsd),
+      priceUsd: Math.round((Number(row.priceBob) / this.getBobToUsdRate()) * 100) / 100,
     }));
   }
 
@@ -1390,7 +1387,7 @@ export class BookingsService {
             paymentMethod: region.paymentMethod,
             currency: region.currency,
             priceBob: sessionOffering.priceBob,
-            priceUsd: sessionOffering.priceUsd,
+            priceUsd: new Prisma.Decimal(Math.round((Number(sessionOffering.priceBob) / this.getBobToUsdRate()) * 100) / 100),
             expiresAt,
           },
         });
@@ -1401,7 +1398,7 @@ export class BookingsService {
             method: region.paymentMethod,
             status: BookingPaymentStatus.PENDING,
             amountBob: region.currency === CURRENCY_BOB ? sessionOffering.priceBob : null,
-            amountUsd: region.currency === CURRENCY_USD ? sessionOffering.priceUsd : null,
+            amountUsd: region.currency === CURRENCY_USD ? new Prisma.Decimal(Math.round((Number(sessionOffering.priceBob) / this.getBobToUsdRate()) * 100) / 100) : null,
             currency: region.currency,
           },
         });
@@ -1651,3 +1648,4 @@ export class BookingsService {
     }));
   }
 }
+
