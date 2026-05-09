@@ -3,14 +3,13 @@ import {
   ConflictException,
   Inject,
   Injectable,
-  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import * as bcrypt from 'bcrypt';
-import { randomInt, randomUUID } from 'crypto';
+import { createHash, randomInt, randomUUID, timingSafeEqual } from 'crypto';
 import { User } from '@prisma/client';
 import { UsersService } from '../users/users.service';
 import { UserEntity } from '../users/entities/user.entity';
@@ -58,6 +57,9 @@ type PhoneVerifiedTokenPayload = {
 
 @Injectable()
 export class AuthService {
+  private static readonly RESET_CODE_TTL_MS = 15 * 60 * 1000;
+  private static readonly RESET_MAX_ATTEMPTS = 5;
+
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
@@ -69,6 +71,34 @@ export class AuthService {
     private readonly referralsService: ReferralsService,
     private readonly faceMatch: FaceMatchService,
   ) {}
+
+  private normalizeEmail(value: string) {
+    return value.trim().toLowerCase();
+  }
+
+  private getResetAttemptsKey(email: string) {
+    return `reset_attempts_${email}`;
+  }
+
+  private resetGenericMessage() {
+    return {
+      message: 'Si el correo esta registrado, recibiras un codigo de recuperacion.',
+    };
+  }
+
+  private buildResetCodeHash(email: string, code: string) {
+    const secret = process.env.RESET_PASSWORD_CODE_SECRET ?? '';
+    return createHash('sha256')
+      .update(`${email}:${code}:${secret}`)
+      .digest('hex');
+  }
+
+  private safeStringEqual(a: string, b: string) {
+    const aBuf = Buffer.from(a);
+    const bBuf = Buffer.from(b);
+    if (aBuf.length !== bBuf.length) return false;
+    return timingSafeEqual(aBuf, bBuf);
+  }
 
   async sendOtp(dto: SendOtpDto) {
     const normalized = normalizePhoneRegistrationInput({
@@ -413,39 +443,94 @@ export class AuthService {
   }
 
   async forgotPassword(email: string) {
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = this.normalizeEmail(email);
     const user = await this.usersService.findOneByEmail(normalizedEmail);
 
     if (!user || !user.email) {
-      return { message: 'Si el correo esta registrado, recibiras un codigo.' };
+      return this.resetGenericMessage();
     }
 
     const code = randomInt(0, 1000000).toString().padStart(6, '0');
-    await this.cacheManager.set(`reset_${normalizedEmail}`, code, 900000);
+    const expiresAt = new Date(Date.now() + AuthService.RESET_CODE_TTL_MS);
+    const codeHash = this.buildResetCodeHash(normalizedEmail, code);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetPasswordToken: codeHash,
+        resetPasswordExpiry: expiresAt,
+      },
+    });
+
+    await this.cacheManager.del(this.getResetAttemptsKey(normalizedEmail));
 
     await this.mailService.sendPasswordResetEmail(
       user.email,
       user.firstName ?? 'Usuario',
       code,
+      15,
     );
 
-    return { message: 'Si el correo esta registrado, recibiras un codigo.' };
+    return this.resetGenericMessage();
   }
 
   async resetPassword(dto: ResetPasswordDto) {
-    const normalizedEmail = dto.email.trim().toLowerCase();
-    const cached = await this.cacheManager.get<string>(`reset_${normalizedEmail}`);
+    const normalizedEmail = this.normalizeEmail(dto.email);
+    const code = dto.code.trim();
 
-    if (!cached || cached !== dto.code) {
+    const user = await this.usersService.findOneByEmail(normalizedEmail);
+    if (
+      !user ||
+      !user.resetPasswordToken ||
+      !user.resetPasswordExpiry ||
+      user.resetPasswordExpiry.getTime() <= Date.now()
+    ) {
       throw new BadRequestException('Codigo invalido o expirado');
     }
 
-    const user = await this.usersService.findOneByEmail(normalizedEmail);
-    if (!user) throw new NotFoundException('Usuario no encontrado');
+    const attemptsKey = this.getResetAttemptsKey(normalizedEmail);
+    const existingAttempts = Number((await this.cacheManager.get<number>(attemptsKey)) ?? 0);
+    if (existingAttempts >= AuthService.RESET_MAX_ATTEMPTS) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          resetPasswordToken: null,
+          resetPasswordExpiry: null,
+        },
+      });
+      await this.cacheManager.del(attemptsKey);
+      throw new BadRequestException('Codigo invalido o expirado');
+    }
+
+    const incomingHash = this.buildResetCodeHash(normalizedEmail, code);
+    const isValidCode = this.safeStringEqual(incomingHash, user.resetPasswordToken);
+    if (!isValidCode) {
+      const nextAttempts = existingAttempts + 1;
+      const ttlMs = Math.max(user.resetPasswordExpiry.getTime() - Date.now(), 1000);
+      await this.cacheManager.set(attemptsKey, nextAttempts, ttlMs);
+      if (nextAttempts >= AuthService.RESET_MAX_ATTEMPTS) {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            resetPasswordToken: null,
+            resetPasswordExpiry: null,
+          },
+        });
+        await this.cacheManager.del(attemptsKey);
+      }
+      throw new BadRequestException('Codigo invalido o expirado');
+    }
 
     const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
-    await this.usersService.update(user.id, { password: hashedPassword });
-    await this.cacheManager.del(`reset_${normalizedEmail}`);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        resetPasswordToken: null,
+        resetPasswordExpiry: null,
+      },
+    });
+    await this.cacheManager.del(attemptsKey);
 
     return { message: 'Contrasena actualizada correctamente' };
   }

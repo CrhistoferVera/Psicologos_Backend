@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { MailerService } from '@nestjs-modules/mailer';
 
 @Injectable()
@@ -6,6 +6,13 @@ export class MailService {
     private readonly logger = new Logger(MailService.name);
 
     constructor(private readonly mailerService: MailerService) { }
+
+    private getErrorCode(error: unknown) {
+        if (typeof error === 'object' && error !== null && 'code' in error) {
+            return String((error as { code?: unknown }).code ?? 'UNKNOWN');
+        }
+        return 'UNKNOWN';
+    }
 
     //METODO PARA ENVIAR NOTIFICACION DE ESTADO DE DEPÓSITO
     async sendDepositStatusNotification(
@@ -39,12 +46,17 @@ export class MailService {
 
             this.logger.log(`📧 Email enviado a ${email} - Estado: ${status}`);
         } catch (error) {
-            this.logger.error(`Error enviando email a ${email}:`, error);
+            this.logger.error(`Error enviando email a ${email}. code=${this.getErrorCode(error)}`);
         }
     }
 
     //METODO PARA ENVIAR CODIGO DE RECUPERACION DE CONTRASEÑA
-    async sendPasswordResetEmail(email: string, firstName: string, code: string) {
+    async sendPasswordResetEmail(
+        email: string,
+        firstName: string,
+        code: string,
+        expiresInMinutes = 15,
+    ) {
         try {
             await this.mailerService.sendMail({
                 to: email,
@@ -53,12 +65,15 @@ export class MailService {
                 context: {
                     firstName,
                     code,
+                    expiresInMinutes,
                 },
             });
             this.logger.log(`📧 Email de recuperación enviado a ${email}`);
         } catch (error) {
-            this.logger.error(`Error enviando email de recuperación a ${email}:`, error);
-            throw error;
+            this.logger.error(`Error enviando email de recuperación a ${email}. code=${this.getErrorCode(error)}`);
+            throw new ServiceUnavailableException(
+                'No se pudo enviar el correo de recuperacion en este momento. Intenta nuevamente.',
+            );
         }
     }
 
@@ -96,7 +111,7 @@ export class MailService {
 
             this.logger.log(`📧 Email retiro enviado a ${email} - Estado: ${status}`);
         } catch (error) {
-            this.logger.error(`Error enviando email de retiro a ${email}:`, error);
+            this.logger.error(`Error enviando email de retiro a ${email}. code=${this.getErrorCode(error)}`);
         }
     }
 }
