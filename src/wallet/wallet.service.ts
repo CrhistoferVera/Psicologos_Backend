@@ -23,6 +23,19 @@ export class WalletService {
     return Math.max(total - promotional, 0);
   }
 
+  async getMyBalance(userId: string) {
+    const wallet = await this.prisma.wallet.upsert({
+      where: { userId },
+      create: { userId, balance: 0, promotionalBalance: 0, balanceUsd: 0 },
+      update: {},
+    });
+    return {
+      balance: Number(wallet.balance ?? 0),
+      balanceUsd: Number(wallet.balanceUsd ?? 0),
+      promotionalBalance: Number(wallet.promotionalBalance ?? 0),
+    };
+  }
+
   async getMyEarnings(userId: string) {
     const wallet = await this.prisma.wallet.upsert({
       where: { userId },

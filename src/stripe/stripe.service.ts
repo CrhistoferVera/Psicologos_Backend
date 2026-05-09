@@ -15,6 +15,7 @@ import {
   CURRENCY_USD,
 } from '../common/phone-metadata.util';
 import { BookingEarningsService } from '../booking-earnings/booking-earnings.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const Stripe = require('stripe');
 
@@ -29,6 +30,7 @@ export class StripeService {
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
     private readonly bookingEarningsService: BookingEarningsService,
+    private readonly systemConfigService: SystemConfigService,
   ) {
     this.stripe = new Stripe(this.config.get<string>('STRIPE_SECRET_KEY')!);
   }
@@ -125,14 +127,16 @@ export class StripeService {
 
     const customerId = await this.getOrCreateCustomer(userId);
 
-    // Convertir BOB a USD usando la tasa de cambio del .env
-    const bobToUsdRate = Number(this.config.get<string>('BOB_TO_USD_RATE')) || 7;
+    // Convertir BOB a USD usando la tasa de cambio del SystemConfig (variable global)
+    const { usdExchangeRate } = await this.systemConfigService.getRuntimeConfig();
+    const bobToUsdRate = usdExchangeRate > 0 ? usdExchangeRate : 7;
     const priceInUSD = Number(pkg.price) / bobToUsdRate;
 
     const paymentIntent = await this.stripe.paymentIntents.create({
       amount: Math.round(priceInUSD * 100),
       currency: 'usd',
       customer: customerId,
+      automatic_payment_methods: { enabled: true },
       ...(saveCard && { setup_future_usage: 'off_session' }),
       metadata: { userId, packageId },
     });
@@ -149,7 +153,7 @@ export class StripeService {
       });
     }
 
-    await this.prisma.depositRequest.create({
+    const depositRequest = await this.prisma.depositRequest.create({
       data: {
         userId,
         packageId,
@@ -162,7 +166,23 @@ export class StripeService {
       },
     });
 
-    return { clientSecret: paymentIntent.client_secret, customerId };
+    return { clientSecret: paymentIntent.client_secret, customerId, depositId: depositRequest.id };
+  }
+
+  async getDepositStatus(userId: string, depositId: string) {
+    const deposit = await this.prisma.depositRequest.findUnique({
+      where: { id: depositId },
+    });
+    if (!deposit || deposit.userId !== userId) {
+      throw new NotFoundException('Deposito no encontrado.');
+    }
+    if (deposit.status === DepositStatus.APPROVED) {
+      return { status: 'PAID' as const };
+    }
+    if (deposit.status === DepositStatus.REJECTED) {
+      return { status: 'CANCELED' as const };
+    }
+    return { status: 'PENDING' as const };
   }
 
   async createPaymentIntentForBooking(payload: {
@@ -230,6 +250,7 @@ export class StripeService {
       amount: Math.round(payload.amountUsd * 100),
       currency: 'usd',
       customer: customerId,
+      automatic_payment_methods: { enabled: true },
       metadata: {
         purpose: 'BOOKING',
         bookingId: payload.bookingId,
@@ -611,6 +632,7 @@ export class StripeService {
       amount: Math.round(amountUsd * 100),
       currency: 'usd',
       customer: customerId,
+      automatic_payment_methods: { enabled: true },
       metadata: { clientUserId, sessionId: session.id, type: 'SESSION' },
     });
 

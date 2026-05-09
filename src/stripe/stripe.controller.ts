@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  Param,
   Post,
   Req,
   UseGuards,
@@ -34,6 +35,26 @@ export class StripeController {
     @Body('saveCard') saveCard = false,
   ) {
     return this.stripeService.createPaymentIntent(user.userId, packageId, saveCard);
+  }
+
+  @Post('package/:packageId')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Crear PaymentIntent para comprar un paquete (por param)' })
+  createPaymentIntentByParam(
+    @CurrentUser() user: JwtUser,
+    @Param('packageId') packageId: string,
+  ) {
+    return this.stripeService.createPaymentIntent(user.userId, packageId, false);
+  }
+
+  @Get('deposit-status/:depositId')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Consultar estado de un DepositRequest por ID' })
+  async getDepositStatus(
+    @CurrentUser() user: JwtUser,
+    @Param('depositId') depositId: string,
+  ) {
+    return this.stripeService.getDepositStatus(user.userId, depositId);
   }
 
   @Get('payment-methods')

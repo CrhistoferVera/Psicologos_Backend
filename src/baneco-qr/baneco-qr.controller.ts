@@ -38,6 +38,15 @@ export class BanecoQrController {
     return this.service.createQrForPackage(user.userId, dto.packageId, reqId);
   }
 
+  @Post('package/:packageId')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Generar QR de Banco Economico para un paquete (por param)' })
+  createByParam(@CurrentUser() user: JwtUser, @Param('packageId') packageId: string) {
+    const reqId = this.newReqId();
+    this.logger.log(`[QR][${reqId}] create request arrived userId=${user.userId} packageId=${packageId}`);
+    return this.service.createQrForPackage(user.userId, packageId, reqId);
+  }
+
   @Get('status/:qrId')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Consultar estado del QR' })

@@ -23,6 +23,11 @@ interface JwtUser {
 export class WalletController {
   constructor(private readonly walletService: WalletService) {}
 
+  @Get('me/balance')
+  getMyBalance(@CurrentUser() user: JwtUser) {
+    return this.walletService.getMyBalance(user.userId);
+  }
+
   @Get('me/earnings')
   getMyEarnings(@CurrentUser() user: JwtUser) {
     return this.walletService.getMyEarnings(user.userId);

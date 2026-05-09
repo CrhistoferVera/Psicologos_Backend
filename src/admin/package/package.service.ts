@@ -1,12 +1,15 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
 import { CreatePackageDto } from './dto/create-package.dto';
-import { EditPackageDto } from './dto/edit-package.dto'; // Importa tu DTO de edición
-
+import { EditPackageDto } from './dto/edit-package.dto';
 
 @Injectable()
 export class PackageService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private systemConfig: SystemConfigService,
+    ) {}
 
     // CREAR UN PAQUETE UNICO
     async create(createPackageDto: CreatePackageDto) {
@@ -24,23 +27,39 @@ export class PackageService {
     }
     //
 
-    // BUSCAR UN PAQUETE ESPESIFICO POR SU ID
     async findOne(id: string) {
-        const pkg = await this.prisma.package.findUnique({
-            where: { id }, // Aquí usamos el ID como criterio único
-        });
+        const [pkg, config] = await Promise.all([
+            this.prisma.package.findUnique({ where: { id } }),
+            this.systemConfig.getRuntimeConfig(),
+        ]);
 
         if (!pkg) {
             throw new NotFoundException(`No se encontró el paquete con ID: ${id}`);
         }
-        return pkg;
+
+        const usdRate = config.usdExchangeRate > 0 ? config.usdExchangeRate : 7;
+
+        return {
+            ...pkg,
+            price: Number(pkg.price),
+            priceUsd: Math.round((Number(pkg.price) / usdRate) * 100) / 100,
+        };
     }
 
     //
     async findAll() {
-        return this.prisma.package.findMany({
-            where: { isActive: true }, // Opcional: solo traer los activos para el panel
-        });
+        const [packages, config] = await Promise.all([
+            this.prisma.package.findMany({ where: { isActive: true } }),
+            this.systemConfig.getRuntimeConfig(),
+        ]);
+
+        const usdRate = config.usdExchangeRate > 0 ? config.usdExchangeRate : 7;
+
+        return packages.map((pkg) => ({
+            ...pkg,
+            price: Number(pkg.price),
+            priceUsd: Math.round((Number(pkg.price) / usdRate) * 100) / 100,
+        }));
     }
 
     // EDITAR UN PAQUETE
