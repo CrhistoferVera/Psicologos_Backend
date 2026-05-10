@@ -629,6 +629,7 @@ enum TransactionType {
   PROMOTIONAL_GRANT
   REFERRAL_REWARD
   REFERRAL_REWARD_REVERSAL
+  BOOKING_PAYMENT
 }
 
 enum ServiceType {
@@ -717,6 +718,7 @@ enum BookingPaymentStatus {
 enum BookingPaymentMethod {
   BANECO_QR
   STRIPE
+  WALLET
 }
 
 enum BookingEarningStatus {
