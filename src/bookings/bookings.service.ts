@@ -12,6 +12,7 @@ import {
   BookingStatus,
   Prisma,
   ProfessionalAvailabilityException,
+  TransactionType,
   UserRole,
   WeekDay,
 } from '@prisma/client';
@@ -36,6 +37,8 @@ import { CreateAvailabilityExceptionDto } from './dto/create-availability-except
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { BookingListQueryDto } from './dto/booking-list-query.dto';
 import { buildActiveBookingOverlapWhere } from './helpers/booking-query.helper';
+import { allocateCreditDebit } from '../wallet/utils/credit-allocation.util';
+import { BookingEarningsService } from '../booking-earnings/booking-earnings.service';
 import {
   assertValidDate,
   ensureValidTimeZone,
@@ -78,6 +81,7 @@ export class BookingsService {
     private readonly banecoQrService: BanecoQrService,
     private readonly stripeService: StripeService,
     private readonly notificationsService: NotificationsService,
+    private readonly bookingEarningsService: BookingEarningsService,
   ) {}
 
   private newReqId() {
@@ -755,14 +759,14 @@ export class BookingsService {
     if (billingRegion === BILLING_REGION_BOLIVIA) {
       return {
         currency: CURRENCY_BOB,
-        paymentMethod: BookingPaymentMethod.BANECO_QR,
+        paymentMethod: BookingPaymentMethod.WALLET,
       };
     }
 
     if (billingRegion === BILLING_REGION_INTERNATIONAL) {
       return {
         currency: CURRENCY_USD,
-        paymentMethod: BookingPaymentMethod.STRIPE,
+        paymentMethod: BookingPaymentMethod.WALLET,
       };
     }
 
@@ -777,6 +781,10 @@ export class BookingsService {
   }) {
     if (!booking.paymentMethod) {
       throw new BadRequestException('El booking no tiene metodo de pago definido.');
+    }
+
+    if (booking.paymentMethod === BookingPaymentMethod.WALLET) {
+      return;
     }
 
     if (
@@ -1330,7 +1338,7 @@ export class BookingsService {
 
     const client = await this.prisma.user.findUnique({
       where: { id: clientId },
-      select: { id: true, role: true, billingRegion: true },
+      select: { id: true, role: true, billingRegion: true, firstName: true, lastName: true },
     });
 
     if (!client) throw new NotFoundException('Cliente no encontrado.');
@@ -1358,6 +1366,8 @@ export class BookingsService {
     );
 
     const region = this.normalizeBookingRegion(client);
+    const isUsd = region.currency === CURRENCY_USD;
+    const chargeAmount = isUsd ? sessionOffering.priceUsd : sessionOffering.priceBob;
 
     const result = await this.prisma.$transaction(
       async (tx) => {
@@ -1372,7 +1382,29 @@ export class BookingsService {
           timeZone: timezone,
         });
 
-        const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+        const clientWallet = await tx.wallet.upsert({
+          where: { userId: clientId },
+          create: { userId: clientId, balance: 0, promotionalBalance: 0, balanceUsd: 0 },
+          update: {},
+        });
+
+        let breakdown: ReturnType<typeof allocateCreditDebit> | null = null;
+
+        if (isUsd) {
+          if (Number(clientWallet.balanceUsd ?? 0) < Number(chargeAmount)) {
+            throw new BadRequestException('Saldo insuficiente para reservar esta sesion.');
+          }
+        } else {
+          try {
+            breakdown = allocateCreditDebit(
+              Number(clientWallet.balance),
+              Number(clientWallet.promotionalBalance),
+              Number(chargeAmount),
+            );
+          } catch {
+            throw new BadRequestException('Saldo insuficiente para reservar esta sesion.');
+          }
+        }
 
         const booking = await tx.booking.create({
           data: {
@@ -1382,24 +1414,61 @@ export class BookingsService {
             scheduledStartAt,
             scheduledEndAt,
             timezone,
-            status: BookingStatus.PENDING_PAYMENT,
-            paymentStatus: BookingPaymentStatus.PENDING,
-            paymentMethod: region.paymentMethod,
+            status: BookingStatus.CONFIRMED,
+            paymentStatus: BookingPaymentStatus.PAID,
+            paymentMethod: BookingPaymentMethod.WALLET,
             currency: region.currency,
             priceBob: sessionOffering.priceBob,
-            priceUsd: new Prisma.Decimal(Math.round((Number(sessionOffering.priceBob) / this.getBobToUsdRate()) * 100) / 100),
-            expiresAt,
+            priceUsd: sessionOffering.priceUsd,
+            expiresAt: null,
           },
         });
 
         await tx.bookingPayment.create({
           data: {
             bookingId: booking.id,
-            method: region.paymentMethod,
-            status: BookingPaymentStatus.PENDING,
-            amountBob: region.currency === CURRENCY_BOB ? sessionOffering.priceBob : null,
-            amountUsd: region.currency === CURRENCY_USD ? new Prisma.Decimal(Math.round((Number(sessionOffering.priceBob) / this.getBobToUsdRate()) * 100) / 100) : null,
+            method: BookingPaymentMethod.WALLET,
+            status: BookingPaymentStatus.PAID,
+            amountBob: isUsd ? null : sessionOffering.priceBob,
+            amountUsd: isUsd ? sessionOffering.priceUsd : null,
             currency: region.currency,
+          },
+        });
+
+        if (isUsd) {
+          await tx.wallet.update({
+            where: { id: clientWallet.id },
+            data: { balanceUsd: { decrement: chargeAmount } },
+          });
+        } else {
+          await tx.wallet.update({
+            where: { id: clientWallet.id },
+            data: {
+              balance: { decrement: chargeAmount },
+              promotionalBalance: { decrement: new Prisma.Decimal(breakdown!.promotionalDebited) },
+            },
+          });
+        }
+
+        await tx.transaction.create({
+          data: {
+            walletId: clientWallet.id,
+            type: TransactionType.BOOKING_PAYMENT,
+            amount: chargeAmount,
+            promotionalAmount: isUsd
+              ? new Prisma.Decimal(0)
+              : new Prisma.Decimal(breakdown!.promotionalDebited),
+            realAmount: isUsd
+              ? chargeAmount
+              : new Prisma.Decimal(breakdown!.realDebited),
+            isPromotional: false,
+            description: JSON.stringify({
+              event: 'BOOKING_PAYMENT',
+              bookingId: booking.id,
+              professionalId: dto.professionalId,
+              sessionOfferingId: dto.sessionOfferingId,
+              currency: region.currency,
+            }),
           },
         });
 
@@ -1407,6 +1476,31 @@ export class BookingsService {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+
+    // Pasos post-transacción: no deben fallar el endpoint, el booking ya está confirmado y pagado
+    this.bookingEarningsService.creditProfessionalEarningForBooking({
+      bookingId: result.id,
+      source: 'WALLET_PAYMENT',
+    }).catch((err) => {
+      this.logger.error(`[BOOKING-WALLET] earning credit failed bookingId=${result.id} err=${err?.message}`);
+    });
+
+    this.prisma.user.findUnique({
+      where: { id: dto.professionalId },
+      select: { fcmToken: true },
+    }).then((professional) => {
+      if (!professional?.fcmToken) return;
+      const clientName = this.fullName(client);
+      const scheduled = this.formatBookingDateTime(result.scheduledStartAt, result.timezone);
+      return this.notificationsService.sendPushNotification(
+        professional.fcmToken,
+        'Nueva sesion reservada',
+        `${clientName} reservo ${sessionOffering.title} para ${scheduled}.`,
+        { type: 'BOOKING_PURCHASE_CONFIRMED', bookingId: result.id },
+      );
+    }).catch((err) => {
+      this.logger.error(`[BOOKING-WALLET] notification failed bookingId=${result.id} err=${err?.message}`);
+    });
 
     return {
       ...result,
