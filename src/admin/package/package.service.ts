@@ -62,6 +62,21 @@ export class PackageService {
         }));
     }
 
+    async findAllAdmin() {
+        const [packages, config] = await Promise.all([
+            this.prisma.package.findMany({ orderBy: { createdAt: 'desc' } }),
+            this.systemConfig.getRuntimeConfig(),
+        ]);
+
+        const usdRate = config.usdExchangeRate > 0 ? config.usdExchangeRate : 7;
+
+        return packages.map((pkg) => ({
+            ...pkg,
+            price: Number(pkg.price),
+            priceUsd: Math.round((Number(pkg.price) / usdRate) * 100) / 100,
+        }));
+    }
+
     // EDITAR UN PAQUETE
     async update(id: string, editPackageDto: EditPackageDto) {
         // 1. Verificar si el paquete existe

@@ -21,6 +21,16 @@ export class PackageController {
     return this.packageService.findAll();
   }
 
+  //LISTA TODOS LOS PAQUETES INCLUYENDO INACTIVOS (solo ADMIN)
+  @Get('admin/all')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Listar todos los paquetes incluyendo inactivos (admin)' })
+  findAllAdmin() {
+    return this.packageService.findAllAdmin();
+  }
+
   //OBTENER UN PAQUETE POR SU ID (público)
   @Get(':id')
   @ApiOperation({ summary: 'Obtener un paquete específico por ID' })
