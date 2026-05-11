@@ -563,8 +563,9 @@ export class StripeService {
     const wallet = deposit.user.wallet;
     if (!wallet) return;
 
-   // const bonusPercentage = Number(this.config.get<string>('STRIPE_BONUS_PERCENTAGE')) || 0.35;
-    const totalCredits = deposit.creditsToDeliver;
+    const { usdExchangeRate } = await this.systemConfigService.getRuntimeConfig();
+    const usdRate = usdExchangeRate > 0 ? usdExchangeRate : 7;
+    const amountUsd = Number(deposit.amount) / usdRate;
 
     await this.prisma.$transaction([
       this.prisma.depositRequest.update({
@@ -573,7 +574,7 @@ export class StripeService {
       }),
       this.prisma.wallet.update({
         where: { id: wallet.id },
-        data: { balanceUsd: { increment: totalCredits } },
+        data: { balanceUsd: { increment: amountUsd } },
       }),
       this.prisma.transaction.create({
         data: {
@@ -582,7 +583,7 @@ export class StripeService {
           type: 'DEPOSIT',
           amount: deposit.amount,
           realAmount: deposit.amount,
-          description: `Recarga Stripe: ${deposit.packageNameAtMoment} (${deposit.creditsToDeliver} créditos)`,
+          description: `Recarga Stripe: ${deposit.packageNameAtMoment}`,
         },
       }),
     ]);

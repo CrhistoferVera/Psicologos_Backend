@@ -273,19 +273,34 @@ export class BanecoQrService {
   }
 
   async applyPaymentByQrId(qrId: string, payment: PaymentQR | null) {
+    this.logger.log(`[APPLY][${qrId}] start`);
+
     const deposit = await this.prisma.depositRequest.findUnique({
       where: { bancoQrId: qrId },
       include: { user: { include: { wallet: true } } },
     });
-    if (!deposit) {
 
+    if (!deposit) {
+      this.logger.warn(`[APPLY][${qrId}] no deposit found`);
       return;
     }
-    if (deposit.status !== DepositStatus.PENDING) return;
+    this.logger.log(`[APPLY][${qrId}] deposit=${deposit.id} status=${deposit.status} creditsToDeliver=${deposit.creditsToDeliver}`);
 
     const wallet = deposit.user.wallet;
     if (!wallet) {
-   
+      this.logger.error(`[APPLY][${qrId}] user has no wallet userId=${deposit.userId}`);
+      return;
+    }
+    this.logger.log(`[APPLY][${qrId}] wallet=${wallet.id} currentBalance=${wallet.balance}`);
+
+    // Atomic claim: only the first concurrent call will get count=1
+    const claimed = await this.prisma.depositRequest.updateMany({
+      where: { id: deposit.id, status: DepositStatus.PENDING },
+      data: { status: DepositStatus.APPROVED },
+    });
+    this.logger.log(`[APPLY][${qrId}] claimed.count=${claimed.count}`);
+    if (claimed.count === 0) {
+      this.logger.warn(`[APPLY][${qrId}] already claimed by another call, skipping`);
       return;
     }
 
@@ -294,13 +309,9 @@ export class BanecoQrService {
       : `Recarga QR Baneco: ${deposit.packageNameAtMoment}`;
 
     await this.prisma.$transaction([
-      this.prisma.depositRequest.update({
-        where: { id: deposit.id },
-        data: { status: DepositStatus.APPROVED },
-      }),
       this.prisma.wallet.update({
         where: { id: wallet.id },
-        data: { balance: { increment: deposit.creditsToDeliver } },
+        data: { balance: { increment: deposit.amount } },
       }),
       this.prisma.transaction.create({
         data: {
@@ -313,6 +324,7 @@ export class BanecoQrService {
         },
       }),
     ]);
+    this.logger.log(`[APPLY][${qrId}] wallet recharged +${deposit.amount} BOB`);
   }
 
   async reconcile(userId: string, qrId: string, reqId?: string) {
@@ -585,7 +597,6 @@ export class BanecoQrService {
       this.logger.warn(`Pago QR ${payment.qrId} sin deposito asociado`);
       return;
     }
-    if (deposit.status !== DepositStatus.PENDING) return;
 
     const wallet = deposit.user.wallet;
     if (!wallet) {
@@ -593,14 +604,17 @@ export class BanecoQrService {
       return;
     }
 
+    // Atomic claim: only the first concurrent call will get count=1
+    const claimed = await this.prisma.depositRequest.updateMany({
+      where: { id: deposit.id, status: DepositStatus.PENDING },
+      data: { status: DepositStatus.APPROVED },
+    });
+    if (claimed.count === 0) return;
+
     await this.prisma.$transaction([
-      this.prisma.depositRequest.update({
-        where: { id: deposit.id },
-        data: { status: DepositStatus.APPROVED },
-      }),
       this.prisma.wallet.update({
         where: { id: wallet.id },
-        data: { balance: { increment: deposit.creditsToDeliver } },
+        data: { balance: { increment: deposit.amount } },
       }),
       this.prisma.transaction.create({
         data: {

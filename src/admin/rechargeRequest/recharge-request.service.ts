@@ -3,12 +3,14 @@ import { DepositStatus, Prisma, UserRole, TransactionType } from '@prisma/client
 import { PrismaService } from '../../../prisma/prisma.service';
 import { UpdateDepositStatusDto } from './dto/update-depositsRequest.dto';
 import { MailService } from 'src/mail/mail.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
 
 @Injectable()
 export class RechargeRequestService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
+    private readonly systemConfig: SystemConfigService,
   ) {}
 
   async getAllRechargeRequests(search?: string, cursor?: string, limit = 10) {
@@ -126,9 +128,13 @@ export class RechargeRequestService {
       return updated;
     }
 
-    const creditsToSum = depositRequest.creditsToDeliver || 0;
-    const packageName = depositRequest.packageNameAtMoment || 'Paquete de Credito';
+    const packageName = depositRequest.packageNameAtMoment || 'Paquete';
     const isStripePayment = depositRequest.stripePaymentIntentId != null;
+    const amountBob = Number(depositRequest.amount);
+
+    const { usdExchangeRate } = await this.systemConfig.getRuntimeConfig();
+    const usdRate = usdExchangeRate > 0 ? usdExchangeRate : 7;
+    const walletIncrement = isStripePayment ? amountBob / usdRate : amountBob;
 
     try {
       const result = await this.prisma.$transaction(async (tx) => {
@@ -143,20 +149,20 @@ export class RechargeRequestService {
         const updatedWallet = await tx.wallet.update({
           where: { userId: depositRequest.userId },
           data: isStripePayment
-            ? { balanceUsd: { increment: new Prisma.Decimal(creditsToSum) } }
-            : { balance: { increment: new Prisma.Decimal(creditsToSum) } },
+            ? { balanceUsd: { increment: new Prisma.Decimal(walletIncrement) } }
+            : { balance: { increment: new Prisma.Decimal(walletIncrement) } },
         });
 
         await tx.transaction.create({
           data: {
             walletId: updatedWallet.id,
             depositRequestId: depositRequest.id,
-            amount: new Prisma.Decimal(creditsToSum),
+            amount: new Prisma.Decimal(walletIncrement),
             promotionalAmount: new Prisma.Decimal(0),
-            realAmount: new Prisma.Decimal(creditsToSum),
+            realAmount: new Prisma.Decimal(walletIncrement),
             isPromotional: false,
             type: TransactionType.DEPOSIT,
-            description: `Recarga aprobada: ${creditsToSum} creditos - Paquete ${packageName}`,
+            description: `Recarga aprobada: ${isStripePayment ? `$${walletIncrement.toFixed(2)} USD` : `Bs ${walletIncrement.toFixed(2)}`} - Paquete ${packageName}`,
           },
         });
 
@@ -170,7 +176,7 @@ export class RechargeRequestService {
         depositRequest.user.email,
         depositRequest.user.firstName,
         'APPROVED',
-        creditsToSum,
+        walletIncrement,
         null,
       );
 
