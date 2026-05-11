@@ -27,6 +27,7 @@ import {
   BILLING_REGION_INTERNATIONAL,
   CURRENCY_BOB,
   CURRENCY_USD,
+  deriveBillingFields,
 } from '../common/phone-metadata.util';
 import { PROFESSIONAL_ROLES } from '../common/professional-role';
 import { CreateSessionOfferingDto } from './dto/create-session-offering.dto';
@@ -777,26 +778,23 @@ export class BookingsService {
     };
   }
 
-  private normalizeBookingRegion(user: { billingRegion: string | null }) {
+  private normalizeBookingRegion(user: { billingRegion: string | null; phoneCountryIso: string | null }) {
     const billingRegion = (user.billingRegion ?? '').trim().toUpperCase();
 
     if (billingRegion === BILLING_REGION_BOLIVIA) {
-      return {
-        currency: CURRENCY_BOB,
-        paymentMethod: BookingPaymentMethod.WALLET,
-      };
+      return { currency: CURRENCY_BOB, paymentMethod: BookingPaymentMethod.WALLET };
     }
 
     if (billingRegion === BILLING_REGION_INTERNATIONAL) {
-      return {
-        currency: CURRENCY_USD,
-        paymentMethod: BookingPaymentMethod.WALLET,
-      };
+      return { currency: CURRENCY_USD, paymentMethod: BookingPaymentMethod.WALLET };
     }
 
-    throw new BadRequestException(
-      'No se pudo determinar la region de facturacion del cliente. Actualiza tus datos de pais/telefono.',
-    );
+    // billingRegion es null: derivar desde el código de país del teléfono
+    const derived = deriveBillingFields(user.phoneCountryIso ?? '');
+    if (derived.billingRegion === BILLING_REGION_BOLIVIA) {
+      return { currency: CURRENCY_BOB, paymentMethod: BookingPaymentMethod.WALLET };
+    }
+    return { currency: CURRENCY_USD, paymentMethod: BookingPaymentMethod.WALLET };
   }
 
   private validateBookingPaymentMethodAndCurrency(booking: {
@@ -1367,7 +1365,7 @@ export class BookingsService {
 
     const client = await this.prisma.user.findUnique({
       where: { id: clientId },
-      select: { id: true, role: true, billingRegion: true, firstName: true, lastName: true },
+      select: { id: true, role: true, billingRegion: true, phoneCountryIso: true, firstName: true, lastName: true },
     });
 
     if (!client) throw new NotFoundException('Cliente no encontrado.');
