@@ -73,6 +73,7 @@ export type CommunicationAccessResult = {
 @Injectable()
 export class BookingsService {
   private readonly logger = new Logger(BookingsService.name);
+  private static readonly HARD_FALLBACK_BOB_TO_USD_RATE = 6.96;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -631,10 +632,33 @@ export class BookingsService {
     }
   }
 
-  private getBobToUsdRate(): number {
-    const raw = this.config.get<string>('BOB_TO_USD_RATE');
-    const rate = raw ? Number(raw) : NaN;
-    return Number.isFinite(rate) && rate > 0 ? rate : 7;
+  private async getBobToUsdRate(): Promise<number> {
+    try {
+      const runtimeConfig = await this.systemConfigService.getRuntimeConfig();
+      const configRate = Number(runtimeConfig.usdExchangeRate);
+      if (Number.isFinite(configRate) && configRate > 0) {
+        return configRate;
+      }
+      this.logger.warn(
+        `[FX] SystemConfig.usdExchangeRate inválido (${runtimeConfig.usdExchangeRate}). Se intentará fallback.`,
+      );
+    } catch (error: any) {
+      this.logger.warn(
+        `[FX] No se pudo leer SystemConfig.usdExchangeRate. Se intentará fallback. reason=${error?.message ?? 'unknown'}`,
+      );
+    }
+
+    const envRaw = this.config.get<string>('BOB_TO_USD_RATE');
+    const envRate = envRaw ? Number(envRaw) : NaN;
+    if (Number.isFinite(envRate) && envRate > 0) {
+      this.logger.warn('[FX] Usando fallback BOB_TO_USD_RATE desde entorno.');
+      return envRate;
+    }
+
+    this.logger.warn(
+      `[FX] Usando fallback duro ${BookingsService.HARD_FALLBACK_BOB_TO_USD_RATE} para BOB→USD.`,
+    );
+    return BookingsService.HARD_FALLBACK_BOB_TO_USD_RATE;
   }
 
   private formatOffering(offering: {
@@ -648,11 +672,11 @@ export class BookingsService {
     isActive: boolean;
     createdAt: Date;
     updatedAt: Date;
-  }) {
+  }, bobToUsdRate: number) {
     return {
       ...offering,
       priceBob: Number(offering.priceBob),
-      priceUsd: Math.round((Number(offering.priceBob) / this.getBobToUsdRate()) * 100) / 100,
+      priceUsd: Math.round((Number(offering.priceBob) / bobToUsdRate) * 100) / 100,
     };
   }
 
@@ -956,13 +980,14 @@ export class BookingsService {
 
   async listProfessionalSessionOfferings(professionalId: string) {
     await this.ensureProfessionalExists(professionalId);
+    const bobToUsdRate = await this.getBobToUsdRate();
 
     const rows = await this.prisma.professionalSessionOffering.findMany({
       where: { professionalId },
       orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
     });
 
-    return rows.map((row) => this.formatOffering(row));
+    return rows.map((row) => this.formatOffering(row, bobToUsdRate));
   }
 
   async createProfessionalSessionOffering(professionalId: string, dto: CreateSessionOfferingDto) {
@@ -976,7 +1001,7 @@ export class BookingsService {
       throw new BadRequestException('priceBob debe ser mayor que 0.');
     }
 
-    const rate = this.getBobToUsdRate();
+    const rate = await this.getBobToUsdRate();
     const priceUsd = Math.round((dto.priceBob / rate) * 100) / 100;
 
     const created = await this.prisma.professionalSessionOffering.create({
@@ -990,7 +1015,7 @@ export class BookingsService {
       },
     });
 
-    return this.formatOffering(created);
+    return this.formatOffering(created, rate);
   }
 
   async updateProfessionalSessionOffering(
@@ -1021,10 +1046,11 @@ export class BookingsService {
       payload.durationMinutes = dto.durationMinutes;
     }
 
+    const bobToUsdRate = await this.getBobToUsdRate();
+
     if (dto.priceBob !== undefined) {
       if (dto.priceBob <= 0) throw new BadRequestException('priceBob debe ser mayor que 0.');
-      const rate = this.getBobToUsdRate();
-      const priceUsd = Math.round((dto.priceBob / rate) * 100) / 100;
+      const priceUsd = Math.round((dto.priceBob / bobToUsdRate) * 100) / 100;
       payload.priceBob = new Prisma.Decimal(dto.priceBob);
       payload.priceUsd = new Prisma.Decimal(priceUsd);
     }
@@ -1034,7 +1060,7 @@ export class BookingsService {
       data: payload,
     });
 
-    return this.formatOffering(updated);
+    return this.formatOffering(updated, bobToUsdRate);
   }
 
   async updateProfessionalSessionOfferingStatus(
@@ -1052,16 +1078,19 @@ export class BookingsService {
       throw new ForbiddenException('No puedes editar sesiones ofrecidas de otro profesional.');
     }
 
+    const bobToUsdRate = await this.getBobToUsdRate();
+
     const updated = await this.prisma.professionalSessionOffering.update({
       where: { id: offeringId },
       data: { isActive },
     });
 
-    return this.formatOffering(updated);
+    return this.formatOffering(updated, bobToUsdRate);
   }
 
   async listPublicSessionOfferings(professionalId: string) {
     await this.ensureProfessionalExists(professionalId);
+    const bobToUsdRate = await this.getBobToUsdRate();
 
     const rows = await this.prisma.professionalSessionOffering.findMany({
       where: {
@@ -1082,7 +1111,7 @@ export class BookingsService {
     return rows.map((row) => ({
       ...row,
       priceBob: Number(row.priceBob),
-      priceUsd: Math.round((Number(row.priceBob) / this.getBobToUsdRate()) * 100) / 100,
+      priceUsd: Math.round((Number(row.priceBob) / bobToUsdRate) * 100) / 100,
     }));
   }
 
@@ -1361,13 +1390,16 @@ export class BookingsService {
       throw new NotFoundException('Sesion ofrecida no encontrada o inactiva.');
     }
 
+    const bobToUsdRate = await this.getBobToUsdRate();
+    const bookingPriceUsd = Math.round((Number(sessionOffering.priceBob) / bobToUsdRate) * 100) / 100;
+
     const scheduledEndAt = new Date(
       scheduledStartAt.getTime() + sessionOffering.durationMinutes * 60 * 1000,
     );
 
     const region = this.normalizeBookingRegion(client);
     const isUsd = region.currency === CURRENCY_USD;
-    const chargeAmount = isUsd ? sessionOffering.priceUsd : sessionOffering.priceBob;
+    const chargeAmount = isUsd ? new Prisma.Decimal(bookingPriceUsd) : sessionOffering.priceBob;
 
     const result = await this.prisma.$transaction(
       async (tx) => {
@@ -1419,7 +1451,7 @@ export class BookingsService {
             paymentMethod: BookingPaymentMethod.WALLET,
             currency: region.currency,
             priceBob: sessionOffering.priceBob,
-            priceUsd: sessionOffering.priceUsd,
+            priceUsd: new Prisma.Decimal(bookingPriceUsd),
             expiresAt: null,
           },
         });
@@ -1430,7 +1462,7 @@ export class BookingsService {
             method: BookingPaymentMethod.WALLET,
             status: BookingPaymentStatus.PAID,
             amountBob: isUsd ? null : sessionOffering.priceBob,
-            amountUsd: isUsd ? sessionOffering.priceUsd : null,
+            amountUsd: isUsd ? new Prisma.Decimal(bookingPriceUsd) : null,
             currency: region.currency,
           },
         });

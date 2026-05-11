@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -9,26 +10,54 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { BanecoQrService } from '../baneco-qr/baneco-qr.service';
 import { StripeService } from '../stripe/stripe.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { UpdateSessionDto } from './dto/update-session.dto';
 
 @Injectable()
 export class SessionsService {
+  private readonly logger = new Logger(SessionsService.name);
+  private static readonly HARD_FALLBACK_BOB_TO_USD_RATE = 6.96;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly systemConfigService: SystemConfigService,
     private readonly banecoQrService: BanecoQrService,
     private readonly stripeService: StripeService,
   ) {}
 
-  private get bobToUsdRate(): number {
-    const raw = this.config.get<string>('BOB_TO_USD_RATE');
-    const parsed = raw ? Number(raw) : NaN;
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 7;
+  private async getBobToUsdRate(): Promise<number> {
+    try {
+      const runtimeConfig = await this.systemConfigService.getRuntimeConfig();
+      const configRate = Number(runtimeConfig.usdExchangeRate);
+      if (Number.isFinite(configRate) && configRate > 0) {
+        return configRate;
+      }
+      this.logger.warn(
+        `[FX] SystemConfig.usdExchangeRate inválido (${runtimeConfig.usdExchangeRate}). Se intentará fallback.`,
+      );
+    } catch (error: any) {
+      this.logger.warn(
+        `[FX] No se pudo leer SystemConfig.usdExchangeRate. Se intentará fallback. reason=${error?.message ?? 'unknown'}`,
+      );
+    }
+
+    const envRaw = this.config.get<string>('BOB_TO_USD_RATE');
+    const envRate = envRaw ? Number(envRaw) : NaN;
+    if (Number.isFinite(envRate) && envRate > 0) {
+      this.logger.warn('[FX] Usando fallback BOB_TO_USD_RATE desde entorno.');
+      return envRate;
+    }
+
+    this.logger.warn(
+      `[FX] Usando fallback duro ${SessionsService.HARD_FALLBACK_BOB_TO_USD_RATE} para BOB→USD.`,
+    );
+    return SessionsService.HARD_FALLBACK_BOB_TO_USD_RATE;
   }
 
-  private calcPriceInUsd(priceInBs: number): number {
-    return Math.round((priceInBs / this.bobToUsdRate) * 100) / 100;
+  private calcPriceInUsd(priceInBs: number, bobToUsdRate: number): number {
+    return Math.round((priceInBs / bobToUsdRate) * 100) / 100;
   }
 
   private formatSession(s: any) {
@@ -39,7 +68,7 @@ export class SessionsService {
       title: s.title,
       durationMinutes: s.durationMinutes,
       priceInBs,
-      priceInUsd: this.calcPriceInUsd(priceInBs),
+      priceInUsd: Number(s.priceInUsd),
       status: s.status,
       startedAt: s.startedAt,
       endedAt: s.endedAt,
@@ -58,13 +87,16 @@ export class SessionsService {
   }
 
   async createSession(professionalUserId: string, dto: CreateSessionDto) {
+    const bobToUsdRate = await this.getBobToUsdRate();
+    const priceInUsd = this.calcPriceInUsd(dto.priceInBs, bobToUsdRate);
+
     const session = await this.prisma.session.create({
       data: {
         professionalUserId,
         title: dto.title,
         durationMinutes: dto.durationMinutes,
         priceInBs: new Prisma.Decimal(dto.priceInBs),
-        priceInUsd: new Prisma.Decimal(this.calcPriceInUsd(dto.priceInBs)),
+        priceInUsd: new Prisma.Decimal(priceInUsd),
         status: 'OPEN',
       },
       include: {
@@ -94,8 +126,9 @@ export class SessionsService {
     if (dto.title !== undefined) data.title = dto.title;
     if (dto.durationMinutes !== undefined) data.durationMinutes = dto.durationMinutes;
     if (dto.priceInBs !== undefined) {
+      const bobToUsdRate = await this.getBobToUsdRate();
       data.priceInBs = new Prisma.Decimal(dto.priceInBs);
-      data.priceInUsd = new Prisma.Decimal(this.calcPriceInUsd(dto.priceInBs));
+      data.priceInUsd = new Prisma.Decimal(this.calcPriceInUsd(dto.priceInBs, bobToUsdRate));
     }
 
     const updated = await this.prisma.session.update({
@@ -325,7 +358,7 @@ export class SessionsService {
       sessionStatus: p.session.status,
       durationMinutes: p.session.durationMinutes,
       priceInBs: Number(p.session.priceInBs),
-      priceInUsd: this.calcPriceInUsd(Number(p.session.priceInBs)),
+      priceInUsd: Number(p.session.priceInUsd),
       currency: p.currency,
       amountPaid: Number(p.currency === 'USD' ? p.amountUsd : p.amountBs),
       endedAt: p.session.endedAt,
