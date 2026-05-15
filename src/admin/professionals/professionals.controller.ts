@@ -77,7 +77,7 @@ export class AdminProfessionalsController {
   }
 
   @Patch(':id/edit')
-  @ApiOperation({ summary: 'Editar telefono, username, bio, rateCredits o email de un profesional' })
+  @ApiOperation({ summary: 'Editar telefono, username, bio o email de un profesional' })
   editProfessional(@Param('id') id: string, @Body() dto: EditProfessionalDto) {
     return this.professionalsService.editProfessional(id, dto);
   }

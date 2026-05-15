@@ -107,7 +107,6 @@ export class AdminProfessionalsService {
             username: true,
             avatarUrl: true,
             bio: true,
-            rateCredits: true,
             isOnline: true,
             idDocUrl: true,
             reviewStatus: true,
@@ -161,7 +160,6 @@ export class AdminProfessionalsService {
             username: true,
             avatarUrl: true,
             bio: true,
-            rateCredits: true,
             isOnline: true,
             idDocUrl: true,
             reviewStatus: true,
@@ -301,13 +299,12 @@ export class AdminProfessionalsService {
       },
     });
 
-    if (dto.username || dto.bio || dto.rateCredits) {
+    if (dto.username || dto.bio) {
       await this.prisma.professionalProfile.update({
         where: { userId: id },
         data: {
           ...(dto.username && { username: dto.username }),
           ...(dto.bio !== undefined && { bio: dto.bio }),
-          ...(dto.rateCredits && { rateCredits: dto.rateCredits }),
         },
       });
     }

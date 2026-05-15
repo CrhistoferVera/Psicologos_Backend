@@ -44,9 +44,6 @@ export class ProfessionalPublicDetailDto {
   })
   images: string[];
 
-  @ApiProperty({ example: 10, nullable: true, description: 'Creditos por conversacion' })
-  rateCredits: number | null;
-
   @ApiProperty({ example: true })
   isOnline: boolean;
 
