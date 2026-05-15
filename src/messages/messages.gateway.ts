@@ -6,6 +6,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
+import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '@prisma/client';
@@ -42,6 +43,7 @@ type RegisterPayload =
 export class MessagesGateway implements OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
+  private readonly logger = new Logger(MessagesGateway.name);
 
   private readonly callSessions = new Map<string, CallSession>();
   private readonly socketUsers = new Map<string, RegisteredSocketUser>();
@@ -55,6 +57,10 @@ export class MessagesGateway implements OnGatewayDisconnect {
   ) {}
 
   handleDisconnect(client: Socket) {
+    const socketUser = this.socketUsers.get(client.id);
+    this.logger.log(
+      `[socket_disconnect] socketId=${client.id} userId=${socketUser?.userId ?? 'unknown'} role=${socketUser?.role ?? 'unknown'}`,
+    );
     this.socketUsers.delete(client.id);
   }
 
@@ -139,6 +145,7 @@ export class MessagesGateway implements OnGatewayDisconnect {
   ) {
     const socketUser = await this.resolveSocketUser(client, payload);
     if (!socketUser) {
+      this.logger.warn(`[socket_register_failed] socketId=${client.id}`);
       client.emit('register_error', {
         message: 'No se pudo autenticar el socket.',
       });
@@ -146,7 +153,28 @@ export class MessagesGateway implements OnGatewayDisconnect {
     }
 
     client.join(`user_${socketUser.userId}`);
+    this.logger.log(
+      `[socket_registered] socketId=${client.id} userId=${socketUser.userId} role=${socketUser.role}`,
+    );
     client.emit('registered', { userId: socketUser.userId });
+  }
+
+  private async resolveProfessionalReceiver(receiverId: string) {
+    const userById = await this.prisma.user.findUnique({
+      where: { id: receiverId },
+      select: { id: true, role: true, fcmToken: true, isActive: true },
+    });
+    if (userById) return userById;
+
+    const profile = await this.prisma.professionalProfile.findUnique({
+      where: { id: receiverId },
+      select: {
+        user: {
+          select: { id: true, role: true, fcmToken: true, isActive: true },
+        },
+      },
+    });
+    return profile?.user ?? null;
   }
 
   @SubscribeMessage('send_message')
@@ -224,10 +252,15 @@ export class MessagesGateway implements OnGatewayDisconnect {
     }
 
     try {
-      const receiver = await this.prisma.user.findUnique({
-        where: { id: data.receiverId },
-        select: { id: true, role: true, fcmToken: true, isActive: true },
-      });
+      this.logger.log(
+        `[call_request] callerUserId=${socketUser.userId} receiverIdPayload=${data.receiverId} callId=${data.callId} callType=${data.callType}`,
+      );
+
+      const receiver = await this.resolveProfessionalReceiver(data.receiverId);
+      this.logger.log(
+        `[call_request_resolved_receiver] callId=${data.callId} professionalUserId=${receiver?.id ?? 'not_found'}`,
+      );
+
       if (!receiver || !receiver.isActive || !PROFESSIONAL_ROLES.includes(receiver.role)) {
         client.emit('call_error', {
           message: 'Solo puedes llamar a profesionales disponibles.',
@@ -250,7 +283,13 @@ export class MessagesGateway implements OnGatewayDisconnect {
         startedAt: null,
       });
 
-      this.server.to(`user_${receiver.id}`).emit('incoming_call', {
+      const roomName = `user_${receiver.id}`;
+      const receiverSocketFound = (this.server.sockets.adapter.rooms.get(roomName)?.size ?? 0) > 0;
+      this.logger.log(
+        `[call_request_delivery] callId=${data.callId} professionalUserId=${receiver.id} receiverSocketFound=${receiverSocketFound}`,
+      );
+
+      this.server.to(roomName).emit('incoming_call', {
         callId: data.callId,
         callerId: socketUser.userId,
         receiverId: receiver.id,
@@ -258,6 +297,7 @@ export class MessagesGateway implements OnGatewayDisconnect {
         callerName,
         callerAvatar: null,
       });
+      this.logger.log(`[call_request_delivery] callId=${data.callId} emittedIncomingCall=true`);
       client.emit('call_ringing', { callId: data.callId });
 
       if (receiver.fcmToken) {
@@ -275,8 +315,14 @@ export class MessagesGateway implements OnGatewayDisconnect {
             type: 'INCOMING_CALL',
           },
         );
+        this.logger.log(`[call_request_delivery] callId=${data.callId} pushSent=true`);
+      } else {
+        this.logger.log(`[call_request_delivery] callId=${data.callId} pushSent=false reason=NO_FCM_TOKEN`);
       }
     } catch (error: any) {
+      this.logger.warn(
+        `[call_request_error] callerUserId=${socketUser.userId} receiverIdPayload=${data.receiverId} callId=${data.callId} message=${error?.message ?? 'unknown'}`,
+      );
       client.emit('call_error', {
         message: error?.message ?? 'Las llamadas estan disponibles solo durante una sesion activa.',
       });
