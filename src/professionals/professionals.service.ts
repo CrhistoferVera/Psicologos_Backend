@@ -226,7 +226,7 @@ export class ProfessionalsService {
         username: profile?.username ?? null,
         avatar: profile?.avatarUrl ?? null,
         shortDescription: profile?.bio ?? u.userProfile?.bio ?? null,
-        mainImage:
+        mainImage,
         images: mainImage ? [mainImage] : [],
         isOnline: profile?.isOnline ?? false,
         specialties: u.professionalSpecialties.map((ps) => ps.specialty),

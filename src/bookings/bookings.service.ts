@@ -702,7 +702,7 @@ export class BookingsService {
     return where;
   }
 
-  private async ensureProfessionalExists(professionalId: string) {
+  private async ensureProfessionalExists(professionalId: string, allowInactive = false) {
     const professional = await this.prisma.user.findFirst({
       where: {
         id: professionalId,
@@ -711,7 +711,7 @@ export class BookingsService {
       select: { id: true, isActive: true, role: true },
     });
 
-    if (!professional || !professional.isActive) {
+    if (!professional || (!allowInactive && !professional.isActive)) {
       throw new NotFoundException('Profesional no encontrado o inactivo.');
     }
 
@@ -977,7 +977,7 @@ export class BookingsService {
   }
 
   async listProfessionalSessionOfferings(professionalId: string) {
-    await this.ensureProfessionalExists(professionalId);
+    await this.ensureProfessionalExists(professionalId, true);
     const bobToUsdRate = await this.getBobToUsdRate();
 
     const rows = await this.prisma.professionalSessionOffering.findMany({
@@ -989,7 +989,7 @@ export class BookingsService {
   }
 
   async createProfessionalSessionOffering(professionalId: string, dto: CreateSessionOfferingDto) {
-    await this.ensureProfessionalExists(professionalId);
+    await this.ensureProfessionalExists(professionalId, true);
 
     if (dto.durationMinutes <= 0) {
       throw new BadRequestException('durationMinutes debe ser mayor que 0.');
