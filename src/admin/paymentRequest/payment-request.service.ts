@@ -114,12 +114,13 @@ export class PaymentRequestService {
 
       return {
         ...updated,
-        bankAccountId: updated.bankAccountId.toString(),
+        bankAccountId: updated.bankAccountId?.toString() ?? null,
         amountBs: Number(updated.soles),
       };
     }
 
-    if (status === WithdrawalStatus.APPROVED && !receiptData) {
+    const isCryptoMethod = withdrawalRequest.method === 'CRYPTO';
+    if (status === WithdrawalStatus.APPROVED && !receiptData && !isCryptoMethod) {
       throw new BadRequestException('Debes subir el comprobante de pago para aprobar.');
     }
 
@@ -131,8 +132,8 @@ export class PaymentRequestService {
             status: WithdrawalStatus.APPROVED,
             rejectionReason: null,
             notes: notes?.trim() || null,
-            receiptUrl: receiptData!.url,
-            receiptPublicId: receiptData!.publicId,
+            txId: updateDto.txId?.trim() || null,
+            ...(receiptData && { receiptUrl: receiptData.url, receiptPublicId: receiptData.publicId }),
           },
         });
 
@@ -180,7 +181,7 @@ export class PaymentRequestService {
         message: 'Retiro aprobado con exito.',
         request: {
           ...result,
-          bankAccountId: result.bankAccountId.toString(),
+          bankAccountId: result.bankAccountId?.toString() ?? null,
           amountBs: Number(result.soles),
           receipt: {
             url: result.receiptUrl,

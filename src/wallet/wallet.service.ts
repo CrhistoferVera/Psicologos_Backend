@@ -227,8 +227,24 @@ export class WalletService {
       throw new BadRequestException('El monto debe ser mayor a 0');
     }
 
-    if (!dto.bankAccountId || !/^\d+$/.test(dto.bankAccountId)) {
-      throw new BadRequestException('ID de cuenta bancaria invalido.');
+    const method = dto.method ?? 'BANK_TRANSFER';
+    const isCrypto = method === 'CRYPTO';
+
+    // Validaciones según método
+    if (!isCrypto) {
+      if (!dto.bankAccountId || !/^\d+$/.test(dto.bankAccountId)) {
+        throw new BadRequestException('ID de cuenta bancaria inválido.');
+      }
+    } else {
+      if (!dto.cryptoAddress) {
+        throw new BadRequestException('La dirección del wallet crypto es requerida.');
+      }
+      if (!dto.cryptoCurrency) {
+        throw new BadRequestException('La criptomoneda es requerida.');
+      }
+      if (!dto.cryptoNetwork) {
+        throw new BadRequestException('La red blockchain es requerida.');
+      }
     }
 
     const withdrawalsEnabled = await this.systemConfigService.isWithdrawalsEnabled();
@@ -252,16 +268,21 @@ export class WalletService {
       throw new BadRequestException('Saldo disponible para retiro insuficiente.');
     }
 
-    const bankAccount = await this.prisma.bankAccount.findFirst({
-      where: { id: BigInt(dto.bankAccountId), userId },
-    });
-    if (!bankAccount) {
-      throw new NotFoundException('Cuenta bancaria no encontrada');
+    // Validar cuenta bancaria si aplica
+    let bankAccount: Awaited<ReturnType<typeof this.prisma.bankAccount.findFirst>> = null;
+    if (!isCrypto) {
+      bankAccount = await this.prisma.bankAccount.findFirst({
+        where: { id: BigInt(dto.bankAccountId!), userId },
+      });
+      if (!bankAccount) {
+        throw new NotFoundException('Cuenta bancaria no encontrada');
+      }
     }
 
-    const creditValueBs = await this.systemConfigService.getCreditToSolesRate();
-    const payoutAmount = isUsd ? dto.credits : dto.credits * creditValueBs;
-    const payoutLabel = isUsd ? `$ ${payoutAmount.toFixed(2)} USD` : `Bs ${payoutAmount.toFixed(2)}`;
+    const payoutAmount = dto.credits;
+    const payoutLabel = isUsd
+      ? `$ ${payoutAmount.toFixed(2)} USD`
+      : `Bs ${payoutAmount.toFixed(2)}`;
 
     const request = await this.prisma.$transaction(async (tx) => {
       await tx.wallet.update({
@@ -274,7 +295,11 @@ export class WalletService {
       const createdRequest = await tx.withdrawalRequest.create({
         data: {
           walletId: wallet.id,
-          bankAccountId: BigInt(dto.bankAccountId),
+          method,
+          bankAccountId: !isCrypto ? BigInt(dto.bankAccountId!) : null,
+          cryptoAddress: isCrypto ? dto.cryptoAddress : null,
+          cryptoCurrency: isCrypto ? dto.cryptoCurrency : null,
+          cryptoNetwork: isCrypto ? dto.cryptoNetwork : null,
           credits: dto.credits,
           soles: payoutAmount,
           currency,
@@ -293,10 +318,14 @@ export class WalletService {
           description: JSON.stringify({
             event: 'WITHDRAWAL_REQUEST_CREATED',
             withdrawalRequestId: createdRequest.id,
+            method,
             credits: dto.credits,
             payoutAmount,
             currency,
-            bankAccountId: dto.bankAccountId,
+            ...(isCrypto
+              ? { cryptoAddress: dto.cryptoAddress, cryptoCurrency: dto.cryptoCurrency, cryptoNetwork: dto.cryptoNetwork }
+              : { bankAccountId: dto.bankAccountId }
+            ),
           }),
         },
       });
@@ -324,15 +353,20 @@ export class WalletService {
       [professional?.firstName, professional?.lastName].filter(Boolean).join(' ') || 'Un profesional';
     const adminTokens = admins.map((a) => a.fcmToken!);
 
+    const notifBody = isCrypto
+      ? `${professionalName} solicito un retiro de ${payoutLabel} a wallet ${dto.cryptoCurrency} (${dto.cryptoNetwork})`
+      : `${professionalName} solicito un retiro de ${payoutLabel}`;
+
     this.notificationsService.sendMulticastNotification(
       adminTokens,
       'Nueva solicitud de retiro',
-      `${professionalName} solicito un retiro de ${dto.credits} creditos (${payoutLabel})`,
+      notifBody,
       { withdrawalRequestId: request.id, type: 'NEW_WITHDRAWAL_REQUEST' },
     );
 
     return {
       id: created!.id,
+      method: created!.method,
       credits: Number(created!.credits),
       amountBs: Number(created!.soles),
       soles: Number(created!.soles),
@@ -341,9 +375,14 @@ export class WalletService {
       notes: created!.notes,
       rejectionReason: created!.rejectionReason,
       receiptUrl: created!.receiptUrl,
-      bankName: created!.bankAccount.bank.name,
-      accountNumber: created!.bankAccount.accountNumber,
-      accountHolderName: created!.bankAccount.accountHolderName,
+      // Banco
+      bankName: created!.bankAccount?.bank.name ?? null,
+      accountNumber: created!.bankAccount?.accountNumber ?? null,
+      accountHolderName: created!.bankAccount?.accountHolderName ?? null,
+      // Crypto
+      cryptoAddress: created!.cryptoAddress ?? null,
+      cryptoCurrency: created!.cryptoCurrency ?? null,
+      cryptoNetwork: created!.cryptoNetwork ?? null,
       createdAt: created!.createdAt,
       updatedAt: created!.updatedAt,
     };
@@ -361,6 +400,7 @@ export class WalletService {
 
     return requests.map((r) => ({
       id: r.id,
+      method: r.method,
       credits: Number(r.credits),
       amountBs: Number(r.soles),
       soles: Number(r.soles),
@@ -369,9 +409,13 @@ export class WalletService {
       notes: r.notes,
       rejectionReason: r.rejectionReason,
       receiptUrl: r.receiptUrl,
-      bankName: r.bankAccount.bank.name,
-      accountNumber: r.bankAccount.accountNumber,
-      accountHolderName: r.bankAccount.accountHolderName,
+      txId: r.txId ?? null,
+      bankName: r.bankAccount?.bank.name ?? null,
+      accountNumber: r.bankAccount?.accountNumber ?? null,
+      accountHolderName: r.bankAccount?.accountHolderName ?? null,
+      cryptoAddress: r.cryptoAddress ?? null,
+      cryptoCurrency: r.cryptoCurrency ?? null,
+      cryptoNetwork: r.cryptoNetwork ?? null,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     }));

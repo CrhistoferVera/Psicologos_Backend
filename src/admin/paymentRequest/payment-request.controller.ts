@@ -50,9 +50,7 @@ export class PaymentRequestController {
 
     let receiptData: { url: string; publicId: string } | undefined;
 
-    if (updateDto.status === WithdrawalStatus.APPROVED) {
-      if (!file) throw new BadRequestException('Debes subir el comprobante de pago.');
-
+    if (updateDto.status === WithdrawalStatus.APPROVED && file) {
       const uploaded = await this.cloudinaryService.uploadWithdrawalProof({
         file,
         userId: admin.userId,

@@ -294,7 +294,16 @@ model BankAccount {
 model WithdrawalRequest {
   id               String            @id @default(uuid())
   walletId         String
-  bankAccountId    BigInt
+  method           WithdrawalMethod  @default(BANK_TRANSFER)
+
+  // Cuenta bancaria (requerido si method = BANK_TRANSFER)
+  bankAccountId    BigInt?
+
+  // Crypto wallet (requerido si method = CRYPTO)
+  cryptoAddress    String?           // Dirección 0x... del wallet
+  cryptoCurrency   String?           // USDT, BNB, BTC, etc.
+  cryptoNetwork    String?           // BEP20, ERC20, TRC20, etc.
+
   credits          Decimal           @db.Decimal(10, 2)
   soles            Decimal           @db.Decimal(10, 2)
   currency         String            @default("BOB")
@@ -303,11 +312,12 @@ model WithdrawalRequest {
   rejectionReason  String?
   receiptUrl       String?
   receiptPublicId  String?
+  txId             String?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
   wallet           Wallet            @relation(fields: [walletId], references: [id])
-  bankAccount      BankAccount       @relation(fields: [bankAccountId], references: [id])
+  bankAccount      BankAccount?      @relation(fields: [bankAccountId], references: [id])
 
   @@map("withdrawal_requests")
 }
@@ -661,6 +671,11 @@ enum WithdrawalStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+enum WithdrawalMethod {
+  BANK_TRANSFER
+  CRYPTO
 }
 
 enum ReferralStatus {

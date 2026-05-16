@@ -38,5 +38,9 @@ export class UpdateWithdrawalRequestDto {
   notes?: string;
 
   @IsOptional()
+  @IsString()
+  txId?: string;
+
+  @IsOptional()
   receipt?: any;
 }
