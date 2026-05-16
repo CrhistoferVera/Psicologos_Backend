@@ -38,9 +38,6 @@ export class ProfessionalPublicListItemDto {
   @ApiProperty({ example: 'Psicologa clinica enfocada en ansiedad y duelo', nullable: true })
   shortDescription: string | null;
 
-  @ApiProperty({ example: 10, nullable: true, description: 'Creditos por conversacion' })
-  rateCredits: number | null;
-
   @ApiProperty({
     example: 'https://res.cloudinary.com/demo/image/upload/v1/main.jpg',
     nullable: true,

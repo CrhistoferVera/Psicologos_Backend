@@ -189,7 +189,6 @@ export class ProfessionalsService {
               username: true,
               avatarUrl: true,
               bio: true,
-              rateCredits: true,
               isOnline: true,
               coverUrl: true,
               servicePrices: {
@@ -227,7 +226,6 @@ export class ProfessionalsService {
         username: profile?.username ?? null,
         avatar: profile?.avatarUrl ?? null,
         shortDescription: profile?.bio ?? u.userProfile?.bio ?? null,
-        rateCredits: profile?.rateCredits ?? null,
         mainImage,
         images: mainImage ? [mainImage] : [],
         isOnline: profile?.isOnline ?? false,
@@ -266,7 +264,6 @@ export class ProfessionalsService {
             avatarUrl: true,
             coverUrl: true,
             bio: true,
-            rateCredits: true,
             isOnline: true,
           },
         },
@@ -300,7 +297,6 @@ export class ProfessionalsService {
       avatar: profile?.avatarUrl ?? null,
       coverImage,
       images: coverImage ? [coverImage] : [],
-      rateCredits: profile?.rateCredits ?? null,
       isOnline: profile?.isOnline ?? false,
       specialties: user.professionalSpecialties.map((ps) => ps.specialty),
     };
@@ -318,7 +314,6 @@ export class ProfessionalsService {
           select: {
             username: true,
             bio: true,
-            rateCredits: true,
             isOnline: true,
             avatarUrl: true,
             coverUrl: true,
@@ -338,7 +333,6 @@ export class ProfessionalsService {
       lastName: user.lastName,
       username: user.professionalProfile?.username ?? '',
       bio: user.professionalProfile?.bio ?? '',
-      rateCredits: user.professionalProfile?.rateCredits ?? 0,
       isOnline: user.professionalProfile?.isOnline ?? false,
       avatarUrl: user.professionalProfile?.avatarUrl ?? null,
       coverUrl: user.professionalProfile?.coverUrl ?? null,
@@ -416,7 +410,6 @@ export class ProfessionalsService {
     const profileData: Prisma.ProfessionalProfileUpdateInput = {
       ...(profileFields.username !== undefined && { username: profileFields.username }),
       ...(profileFields.bio !== undefined && { bio: profileFields.bio }),
-      ...(profileFields.rateCredits !== undefined && { rateCredits: profileFields.rateCredits }),
       ...(profileFields.isOnline !== undefined && { isOnline: profileFields.isOnline }),
       ...(profileFields.availability !== undefined && {
         availability: profileFields.availability as Prisma.InputJsonValue,
@@ -442,7 +435,6 @@ export class ProfessionalsService {
         cedula: null,
       };
       if (profileFields.bio !== undefined) createData.bio = profileFields.bio;
-      if (profileFields.rateCredits !== undefined) createData.rateCredits = profileFields.rateCredits;
       if (profileFields.isOnline !== undefined) createData.isOnline = profileFields.isOnline;
       if (profileFields.availability !== undefined) {
         createData.availability = profileFields.availability as Prisma.InputJsonValue;

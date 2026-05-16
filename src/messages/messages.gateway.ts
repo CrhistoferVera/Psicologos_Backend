@@ -1,15 +1,20 @@
-﻿import {
+import {
+  ConnectedSocket,
+  MessageBody,
+  OnGatewayDisconnect,
+  SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
-  SubscribeMessage,
-  MessageBody,
-  ConnectedSocket,
 } from '@nestjs/websockets';
+import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
+import { JwtService } from '@nestjs/jwt';
+import { UserRole } from '@prisma/client';
 import { MessagesService } from './messages.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma.service';
 import { BookingsService } from '../bookings/bookings.service';
+import { PROFESSIONAL_ROLES } from '../common/professional-role';
 
 interface CallSession {
   callerId: string;
@@ -18,40 +23,178 @@ interface CallSession {
   startedAt: number | null;
 }
 
+type RegisteredSocketUser = {
+  userId: string;
+  role: UserRole;
+};
+
+type RegisterPayload =
+  | string
+  | {
+      userId?: string;
+      token?: string;
+    };
+
 @WebSocketGateway({
   cors: {
     origin: '*',
   },
 })
-export class MessagesGateway {
+export class MessagesGateway implements OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
+  private readonly logger = new Logger(MessagesGateway.name);
 
   private readonly callSessions = new Map<string, CallSession>();
+  private readonly socketUsers = new Map<string, RegisteredSocketUser>();
 
   constructor(
     private readonly messagesService: MessagesService,
     private readonly notificationsService: NotificationsService,
     private readonly prisma: PrismaService,
     private readonly bookingsService: BookingsService,
+    private readonly jwtService: JwtService,
   ) {}
 
+  handleDisconnect(client: Socket) {
+    const socketUser = this.socketUsers.get(client.id);
+    this.logger.log(
+      `[socket_disconnect] socketId=${client.id} userId=${socketUser?.userId ?? 'unknown'} role=${socketUser?.role ?? 'unknown'}`,
+    );
+    this.socketUsers.delete(client.id);
+  }
+
+  private getBearerToken(rawValue: unknown): string | null {
+    if (Array.isArray(rawValue)) {
+      return this.getBearerToken(rawValue[0]);
+    }
+    if (typeof rawValue !== 'string') return null;
+    const value = rawValue.trim();
+    if (!value) return null;
+    if (value.toLowerCase().startsWith('bearer ')) {
+      const token = value.slice(7).trim();
+      return token || null;
+    }
+    return value;
+  }
+
+  private getTokenFromSocket(client: Socket, payload?: RegisterPayload): string | null {
+    const handshakeAuthToken = this.getBearerToken(client.handshake.auth?.token);
+    if (handshakeAuthToken) return handshakeAuthToken;
+
+    const headerToken = this.getBearerToken(client.handshake.headers?.authorization);
+    if (headerToken) return headerToken;
+
+    const queryToken = this.getBearerToken(client.handshake.query?.token);
+    if (queryToken) return queryToken;
+
+    if (payload && typeof payload !== 'string') {
+      const payloadToken = this.getBearerToken(payload.token);
+      if (payloadToken) return payloadToken;
+    }
+
+    return null;
+  }
+
+  private async resolveSocketUser(
+    client: Socket,
+    payload?: RegisterPayload,
+  ): Promise<RegisteredSocketUser | null> {
+    const cached = this.socketUsers.get(client.id);
+    if (cached) return cached;
+
+    const token = this.getTokenFromSocket(client, payload);
+    if (!token) return null;
+
+    try {
+      const jwtPayload = await this.jwtService.verifyAsync<{ sub?: string; role?: UserRole }>(token);
+      if (!jwtPayload?.sub || !jwtPayload.role) return null;
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: jwtPayload.sub },
+        select: { id: true, role: true, isActive: true },
+      });
+      if (!user || !user.isActive) return null;
+
+      const resolved: RegisteredSocketUser = { userId: user.id, role: user.role };
+      this.socketUsers.set(client.id, resolved);
+      return resolved;
+    } catch {
+      return null;
+    }
+  }
+
+  private async getRequiredSocketUser(
+    client: Socket,
+    payload?: RegisterPayload,
+  ): Promise<RegisteredSocketUser | null> {
+    const socketUser = await this.resolveSocketUser(client, payload);
+    if (!socketUser) {
+      client.emit('auth_error', {
+        message: 'Sesion invalida para socket. Inicia sesion nuevamente.',
+      });
+      return null;
+    }
+    return socketUser;
+  }
+
   @SubscribeMessage('register')
-  handleRegister(
-    @MessageBody() userId: string,
+  async handleRegister(
+    @MessageBody() payload: RegisterPayload,
     @ConnectedSocket() client: Socket,
   ) {
-    client.join(`user_${userId}`);
+    const socketUser = await this.resolveSocketUser(client, payload);
+    if (!socketUser) {
+      this.logger.warn(`[socket_register_failed] socketId=${client.id}`);
+      client.emit('register_error', {
+        message: 'No se pudo autenticar el socket.',
+      });
+      return;
+    }
+
+    client.join(`user_${socketUser.userId}`);
+    this.logger.log(
+      `[socket_registered] socketId=${client.id} userId=${socketUser.userId} role=${socketUser.role}`,
+    );
+    client.emit('registered', { userId: socketUser.userId });
+  }
+
+  private async resolveProfessionalReceiver(receiverId: string) {
+    const userById = await this.prisma.user.findUnique({
+      where: { id: receiverId },
+      select: { id: true, role: true, fcmToken: true, isActive: true },
+    });
+    if (userById) return userById;
+
+    const profile = await this.prisma.professionalProfile.findUnique({
+      where: { id: receiverId },
+      select: {
+        user: {
+          select: { id: true, role: true, fcmToken: true, isActive: true },
+        },
+      },
+    });
+    return profile?.user ?? null;
   }
 
   @SubscribeMessage('send_message')
   async handleMessage(
-    @MessageBody() data: { senderId: string; receiverId: string; text: string },
+    @MessageBody() data: { receiverId: string; text: string },
     @ConnectedSocket() client: Socket,
   ) {
+    const socketUser = await this.getRequiredSocketUser(client);
+    if (!socketUser) return;
+
+    if (!data?.receiverId) {
+      client.emit('message_error', {
+        message: 'No se encontro el destinatario del mensaje.',
+      });
+      return;
+    }
+
     try {
       const message = await this.messagesService.createMessage(
-        data.senderId,
+        socketUser.userId,
         data.receiverId,
         data.text,
         false,
@@ -61,7 +204,7 @@ export class MessagesGateway {
       client.emit('message_sent', message);
     } catch (error: any) {
       client.emit('message_error', {
-        message: error?.message ?? 'Solo puedes enviar mensajes durante una sesion activa.',
+        message: error?.message ?? 'Los mensajes estan disponibles solo durante una sesion activa.',
       });
     }
   }
@@ -75,44 +218,113 @@ export class MessagesGateway {
     @MessageBody()
     data: {
       callId: string;
-      callerId: string;
+      callerId?: string;
       receiverId: string;
       callType: 'CALL' | 'VIDEO_CALL';
-      callerName: string;
-      callerAvatar: string | null;
-      pricePerMinute: number;
+      callerName?: string;
+      callerAvatar?: string | null;
+      pricePerMinute?: number;
     },
     @ConnectedSocket() client: Socket,
   ) {
+    const socketUser = await this.getRequiredSocketUser(client);
+    if (!socketUser) return;
+
+    if (!data?.callId || !data?.receiverId || !data?.callType) {
+      client.emit('call_error', {
+        message: 'Datos de llamada incompletos.',
+      });
+      return;
+    }
+
+    if (socketUser.role !== UserRole.USER) {
+      client.emit('call_error', {
+        message: 'Solo el cliente puede iniciar la llamada durante la sesion activa.',
+      });
+      return;
+    }
+
+    if (data.receiverId === socketUser.userId) {
+      client.emit('call_error', {
+        message: 'No puedes iniciar una llamada contigo mismo.',
+      });
+      return;
+    }
+
     try {
-      await this.bookingsService.assertActiveBookingAccess(data.callerId, data.receiverId, 'CALL');
+      this.logger.log(
+        `[call_request] callerUserId=${socketUser.userId} receiverIdPayload=${data.receiverId} callId=${data.callId} callType=${data.callType}`,
+      );
+
+      const receiver = await this.resolveProfessionalReceiver(data.receiverId);
+      this.logger.log(
+        `[call_request_resolved_receiver] callId=${data.callId} professionalUserId=${receiver?.id ?? 'not_found'}`,
+      );
+
+      if (!receiver || !receiver.isActive || !PROFESSIONAL_ROLES.includes(receiver.role)) {
+        client.emit('call_error', {
+          message: 'Solo puedes llamar a profesionales disponibles.',
+        });
+        return;
+      }
+
+      await this.bookingsService.assertActiveBookingAccess(socketUser.userId, receiver.id, 'CALL');
+
+      const caller = await this.prisma.user.findUnique({
+        where: { id: socketUser.userId },
+        select: { firstName: true, lastName: true, email: true },
+      });
+      const callerName = `${caller?.firstName ?? ''} ${caller?.lastName ?? ''}`.trim() || caller?.email || 'Cliente';
 
       this.callSessions.set(data.callId, {
-        callerId: data.callerId,
-        professionalId: data.receiverId,
+        callerId: socketUser.userId,
+        professionalId: receiver.id,
         callType: data.callType,
         startedAt: null,
       });
 
-      this.server.to(`user_${data.receiverId}`).emit('incoming_call', data);
+      const roomName = `user_${receiver.id}`;
+      const receiverSocketFound = (this.server.sockets.adapter.rooms.get(roomName)?.size ?? 0) > 0;
+      this.logger.log(
+        `[call_request_delivery] callId=${data.callId} professionalUserId=${receiver.id} receiverSocketFound=${receiverSocketFound}`,
+      );
+
+      this.server.to(roomName).emit('incoming_call', {
+        callId: data.callId,
+        callerId: socketUser.userId,
+        receiverId: receiver.id,
+        callType: data.callType,
+        callerName,
+        callerAvatar: null,
+      });
+      this.logger.log(`[call_request_delivery] callId=${data.callId} emittedIncomingCall=true`);
       client.emit('call_ringing', { callId: data.callId });
 
-      const professional = await this.prisma.user.findUnique({
-        where: { id: data.receiverId },
-        select: { fcmToken: true },
-      });
-      if (professional?.fcmToken) {
+      if (receiver.fcmToken) {
         const label = data.callType === 'VIDEO_CALL' ? 'Video llamada' : 'Llamada de voz';
         this.notificationsService.sendPushNotification(
-          professional.fcmToken,
-          `📞 ${label} entrante`,
-          `${data.callerName} te esta llamando`,
-          { callId: data.callId, callerId: data.callerId, type: 'INCOMING_CALL' },
+          receiver.fcmToken,
+          `${label} entrante`,
+          `${callerName} te esta llamando`,
+          {
+            callId: data.callId,
+            callerId: socketUser.userId,
+            receiverId: receiver.id,
+            callType: data.callType,
+            callerName,
+            type: 'INCOMING_CALL',
+          },
         );
+        this.logger.log(`[call_request_delivery] callId=${data.callId} pushSent=true`);
+      } else {
+        this.logger.log(`[call_request_delivery] callId=${data.callId} pushSent=false reason=NO_FCM_TOKEN`);
       }
     } catch (error: any) {
+      this.logger.warn(
+        `[call_request_error] callerUserId=${socketUser.userId} receiverIdPayload=${data.receiverId} callId=${data.callId} message=${error?.message ?? 'unknown'}`,
+      );
       client.emit('call_error', {
-        message: error?.message ?? 'Solo puedes iniciar llamadas durante una sesion activa.',
+        message: error?.message ?? 'Las llamadas estan disponibles solo durante una sesion activa.',
       });
     }
   }
@@ -122,15 +334,22 @@ export class MessagesGateway {
     @MessageBody()
     data: {
       callId: string;
-      callerId: string;
-      professionalName?: string;
-      // Deprecated legacy alias kept for backwards compatibility with old clients.
-      anfitrionaName?: string;
     },
-    @ConnectedSocket() _client: Socket,
+    @ConnectedSocket() client: Socket,
   ) {
+    const socketUser = await this.getRequiredSocketUser(client);
+    if (!socketUser) return;
+
     const session = this.callSessions.get(data.callId);
     if (!session) return;
+
+    if (socketUser.userId !== session.professionalId) {
+      client.emit('call_error', {
+        callId: data.callId,
+        message: 'Solo el profesional receptor puede aceptar esta llamada.',
+      });
+      return;
+    }
 
     try {
       await this.bookingsService.assertActiveBookingAccess(session.callerId, session.professionalId, 'CALL');
@@ -138,25 +357,34 @@ export class MessagesGateway {
       this.callSessions.delete(data.callId);
       this.server.to(`user_${session.callerId}`).emit('call_error', {
         callId: data.callId,
-        message: error?.message ?? 'Solo puedes iniciar llamadas durante una sesion activa.',
+        message: error?.message ?? 'Las llamadas estan disponibles solo durante una sesion activa.',
       });
       this.server.to(`user_${session.professionalId}`).emit('call_error', {
         callId: data.callId,
-        message: error?.message ?? 'Solo puedes iniciar llamadas durante una sesion activa.',
+        message: error?.message ?? 'Las llamadas estan disponibles solo durante una sesion activa.',
       });
       return;
     }
 
     session.startedAt = Date.now();
 
-    this.server.to(`user_${data.callerId}`).emit('call_accepted', { callId: data.callId });
+    this.server.to(`user_${session.callerId}`).emit('call_accepted', { callId: data.callId });
 
-    const caller = await this.prisma.user.findUnique({
-      where: { id: data.callerId },
-      select: { fcmToken: true },
-    });
+    const [caller, professional] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: session.callerId },
+        select: { fcmToken: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: session.professionalId },
+        select: { firstName: true, lastName: true, email: true },
+      }),
+    ]);
     if (caller?.fcmToken) {
-      const professionalName = data.professionalName ?? data.anfitrionaName ?? 'El profesional';
+      const professionalName =
+        `${professional?.firstName ?? ''} ${professional?.lastName ?? ''}`.trim() ||
+        professional?.email ||
+        'El profesional';
       this.notificationsService.sendPushNotification(
         caller.fcmToken,
         'Llamada aceptada',
@@ -171,22 +399,41 @@ export class MessagesGateway {
     @MessageBody()
     data: {
       callId: string;
-      callerId: string;
-      professionalName?: string;
-      // Deprecated legacy alias kept for backwards compatibility with old clients.
-      anfitrionaName?: string;
     },
-    @ConnectedSocket() _client: Socket,
+    @ConnectedSocket() client: Socket,
   ) {
-    this.callSessions.delete(data.callId);
-    this.server.to(`user_${data.callerId}`).emit('call_rejected', { callId: data.callId });
+    const socketUser = await this.getRequiredSocketUser(client);
+    if (!socketUser) return;
 
-    const caller = await this.prisma.user.findUnique({
-      where: { id: data.callerId },
-      select: { fcmToken: true },
-    });
+    const session = this.callSessions.get(data.callId);
+    if (!session) return;
+
+    if (socketUser.userId !== session.professionalId) {
+      client.emit('call_error', {
+        callId: data.callId,
+        message: 'Solo el profesional receptor puede rechazar esta llamada.',
+      });
+      return;
+    }
+
+    this.callSessions.delete(data.callId);
+    this.server.to(`user_${session.callerId}`).emit('call_rejected', { callId: data.callId });
+
+    const [caller, professional] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: session.callerId },
+        select: { fcmToken: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: session.professionalId },
+        select: { firstName: true, lastName: true, email: true },
+      }),
+    ]);
     if (caller?.fcmToken) {
-      const professionalName = data.professionalName ?? data.anfitrionaName ?? 'El profesional';
+      const professionalName =
+        `${professional?.firstName ?? ''} ${professional?.lastName ?? ''}`.trim() ||
+        professional?.email ||
+        'El profesional';
       this.notificationsService.sendPushNotification(
         caller.fcmToken,
         'Llamada rechazada',
@@ -198,18 +445,34 @@ export class MessagesGateway {
 
   @SubscribeMessage('call_ended')
   async handleCallEnded(
-    @MessageBody() data: { callId: string; otherUserId: string },
-    @ConnectedSocket() _client: Socket,
+    @MessageBody() data: { callId: string },
+    @ConnectedSocket() client: Socket,
   ) {
+    const socketUser = await this.getRequiredSocketUser(client);
+    if (!socketUser) return;
+
     const session = this.callSessions.get(data.callId);
+    if (
+      session &&
+      socketUser.userId !== session.callerId &&
+      socketUser.userId !== session.professionalId
+    ) {
+      client.emit('call_error', {
+        callId: data.callId,
+        message: 'No tienes permiso para finalizar esta llamada.',
+      });
+      return;
+    }
+
     this.callSessions.delete(data.callId);
 
-    if (session) {
-      this.server.to(`user_${session.callerId}`).emit('call_ended', { callId: data.callId });
-      this.server.to(`user_${session.professionalId}`).emit('call_ended', { callId: data.callId });
-    } else {
-      this.server.to(`user_${data.otherUserId}`).emit('call_ended', { callId: data.callId });
+    if (!session) {
+      // Idempotencia: si la llamada ya fue limpiada, no es un error funcional.
+      return;
     }
+
+    this.server.to(`user_${session.callerId}`).emit('call_ended', { callId: data.callId });
+    this.server.to(`user_${session.professionalId}`).emit('call_ended', { callId: data.callId });
 
     if (session?.startedAt) {
       const durationSeconds = Math.floor((Date.now() - session.startedAt) / 1000);
@@ -223,7 +486,7 @@ export class MessagesGateway {
         this.notificationsService.sendPushNotification(
           caller.fcmToken,
           'Llamada finalizada',
-          `Duración: ${minutes} min`,
+          `Duracion: ${minutes} min`,
           { callId: data.callId, type: 'CALL_ENDED', durationSeconds },
         );
       }
@@ -231,7 +494,7 @@ export class MessagesGateway {
         this.notificationsService.sendPushNotification(
           professional.fcmToken,
           'Llamada finalizada',
-          `Duración: ${minutes} min`,
+          `Duracion: ${minutes} min`,
           { callId: data.callId, type: 'CALL_ENDED', durationSeconds },
         );
       }

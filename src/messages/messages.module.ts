@@ -5,9 +5,10 @@ import { MessagesGateway } from './messages.gateway';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { BookingsModule } from '../bookings/bookings.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [NotificationsModule, PrismaModule, BookingsModule],
+  imports: [NotificationsModule, PrismaModule, BookingsModule, AuthModule],
   controllers: [MessagesController],
   providers: [MessagesService, MessagesGateway],
 })

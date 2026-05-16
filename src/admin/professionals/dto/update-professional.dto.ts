@@ -1,6 +1,5 @@
-import { IsBoolean, IsEmail, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
 import { ProfessionalReviewStatus } from '@prisma/client';
 
 export class UpdateProfessionalDto {
@@ -39,13 +38,6 @@ export class EditProfessionalDto {
     @IsOptional()
     @IsString()
     bio?: string;
-
-    @ApiProperty({ example: 10, description: 'Creditos por conversacion', required: false })
-    @IsOptional()
-    @IsInt()
-    @Min(1)
-    @Type(() => Number)
-    rateCredits?: number;
 
     @ApiProperty({ example: 'camila@gmail.com', description: 'Correo electronico', required: false })
     @IsOptional()

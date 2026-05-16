@@ -1,5 +1,5 @@
-import { IsBoolean, IsInt, IsObject, IsOptional, IsString, Min } from 'class-validator';
-import { Transform, Type } from 'class-transformer';
+import { IsBoolean, IsObject, IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateProfessionalProfileDto {
@@ -22,13 +22,6 @@ export class UpdateProfessionalProfileDto {
   @IsString()
   @IsOptional()
   bio?: string;
-
-  @ApiPropertyOptional({ example: 10, description: 'Creditos por conversacion' })
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  @IsOptional()
-  rateCredits?: number;
 
   @ApiPropertyOptional({ example: true, description: 'Estado de disponibilidad visible en el feed' })
   @Transform(({ value }) => {
