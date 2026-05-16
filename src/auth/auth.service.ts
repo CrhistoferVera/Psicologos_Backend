@@ -328,6 +328,7 @@ export class AuthService {
           dateOfBirth: new Date(dto.dateOfBirth),
           cedula: dto.cedula,
           username: dto.username,
+          bio: dto.bio?.trim() || null,
           idDocUrl: idDocResult?.secureUrl ?? null,
           idDocPublicId: idDocResult?.publicId ?? null,
           kycVideoUrl: kycVideoResult?.secureUrl ?? null,
