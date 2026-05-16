@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -413,14 +414,9 @@ export class AuthService {
     } else if (userByEmail) {
       user = userByEmail;
     } else {
-      const [firstName, lastName] = this.extractNames(tokenInfo);
-      user = await this.usersService.create({
-        phoneNumber: googlePhoneNumber,
-        email: normalizedEmail,
-        firstName,
-        lastName,
-        isProfileComplete: true,
-      });
+      throw new NotFoundException(
+        'No tienes una cuenta registrada con este correo. Regístrate primero desde la app.',
+      );
     }
 
     if (!user) {
