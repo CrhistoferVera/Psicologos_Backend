@@ -44,6 +44,14 @@ export class CompleteProfessionalRegistrationDto {
   @IsNotEmpty()
   username: string;
 
+  @ApiProperty({
+    example: 'Psicologa clinica con enfoque cognitivo conductual.',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  bio?: string;
+
   @ApiProperty({ example: '1995-06-15' })
   @IsDateString()
   @IsNotEmpty()
