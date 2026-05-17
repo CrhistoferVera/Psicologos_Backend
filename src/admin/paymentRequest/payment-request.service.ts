@@ -172,7 +172,9 @@ export class PaymentRequestService {
         this.notificationsService.sendPushNotification(
           withdrawalRequest.wallet.user.fcmToken,
           'Solicitud de retiro aprobada',
-          `Tu retiro de ${credits} creditos fue procesado exitosamente.`,
+          isUsd
+            ? `Tu retiro de $${payoutAmountBs} USD fue procesado exitosamente.`
+            : `Tu retiro de Bs ${payoutAmountBs} BOB fue procesado exitosamente.`,
           { withdrawalRequestId: id, type: 'WITHDRAWAL_APPROVED' },
         );
       }
