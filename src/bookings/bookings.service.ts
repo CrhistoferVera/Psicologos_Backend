@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import {
+  Booking,
   BookingPaymentMethod,
   BookingPaymentStatus,
   BookingStatus,
@@ -1770,6 +1771,248 @@ export class BookingsService {
       priceBob: Number(item.priceBob),
       priceUsd: Number(item.priceUsd),
     }));
+  }
+
+  async createBatchBookings(clientId: string, dtos: CreateBookingDto[]) {
+    if (dtos.length === 0 || dtos.length > 3) {
+      throw new BadRequestException('Debes reservar entre 1 y 3 sesiones.');
+    }
+
+    for (const dto of dtos) {
+      if (dto.professionalId === clientId) {
+        throw new BadRequestException('No puedes reservar una sesion contigo mismo.');
+      }
+      if (Number.isNaN(new Date(dto.scheduledStartAt).getTime())) {
+        throw new BadRequestException('scheduledStartAt invalido.');
+      }
+    }
+
+    const client = await this.prisma.user.findUnique({
+      where: { id: clientId },
+      select: { id: true, role: true, billingRegion: true, phoneCountryIso: true, firstName: true, lastName: true },
+    });
+    if (!client) throw new NotFoundException('Cliente no encontrado.');
+    if (client.role !== UserRole.USER) {
+      throw new ForbiddenException('Solo clientes pueden crear reservas.');
+    }
+
+    const uniqueProfIds = [...new Set(dtos.map((d) => d.professionalId))];
+    for (const profId of uniqueProfIds) {
+      await this.ensureProfessionalExists(profId);
+    }
+
+    const bobToUsdRate = await this.getBobToUsdRate();
+    const region = this.normalizeBookingRegion(client);
+    const isUsd = region.currency === CURRENCY_USD;
+
+    const batchItems = await Promise.all(
+      dtos.map(async (dto) => {
+        const timezone = ensureValidTimeZone(dto.timezone ?? DEFAULT_BOOKING_TIMEZONE);
+        const offering = await this.prisma.professionalSessionOffering.findFirst({
+          where: { id: dto.sessionOfferingId, professionalId: dto.professionalId, isActive: true },
+        });
+        if (!offering) throw new NotFoundException('Sesion ofrecida no encontrada o inactiva.');
+        const priceUsd = Math.round((Number(offering.priceBob) / bobToUsdRate) * 100) / 100;
+        const scheduledStartAt = new Date(dto.scheduledStartAt);
+        const scheduledEndAt = new Date(scheduledStartAt.getTime() + offering.durationMinutes * 60 * 1000);
+        const chargeAmount = isUsd ? new Prisma.Decimal(priceUsd) : offering.priceBob;
+        return { dto, timezone, offering, scheduledStartAt, scheduledEndAt, chargeAmount, priceUsd };
+      }),
+    );
+
+    const slotKeys = batchItems.map((item) => item.dto.scheduledStartAt);
+    if (new Set(slotKeys).size !== slotKeys.length) {
+      throw new BadRequestException('No puedes reservar el mismo horario dos veces.');
+    }
+
+    const results = await this.prisma.$transaction(
+      async (tx) => {
+        await this.expirePendingBookings(tx);
+
+        for (const item of batchItems) {
+          await this.assertSlotIsBookable(tx, {
+            professionalId: item.dto.professionalId,
+            sessionOfferingId: item.dto.sessionOfferingId,
+            scheduledStartAt: item.scheduledStartAt,
+            scheduledEndAt: item.scheduledEndAt,
+            durationMinutes: item.offering.durationMinutes,
+            timeZone: item.timezone,
+          });
+        }
+
+        for (let i = 0; i < batchItems.length; i++) {
+          for (let j = i + 1; j < batchItems.length; j++) {
+            const a = batchItems[i];
+            const b = batchItems[j];
+            if (a.dto.professionalId === b.dto.professionalId) {
+              const overlaps = a.scheduledStartAt < b.scheduledEndAt && b.scheduledStartAt < a.scheduledEndAt;
+              if (overlaps) {
+                throw new BadRequestException('Dos de las sesiones seleccionadas se solapan en horario.');
+              }
+            }
+          }
+        }
+
+        const clientWallet = await tx.wallet.upsert({
+          where: { userId: clientId },
+          create: { userId: clientId, balance: 0, promotionalBalance: 0, balanceUsd: 0 },
+          update: {},
+        });
+
+        let runningBalance = Number(clientWallet.balance);
+        let runningPromo = Number(clientWallet.promotionalBalance);
+        const breakdowns: Array<ReturnType<typeof allocateCreditDebit> | null> = [];
+
+        if (isUsd) {
+          const totalUsd = batchItems.reduce((sum, item) => sum + Number(item.chargeAmount), 0);
+          if (Number(clientWallet.balanceUsd ?? 0) < totalUsd) {
+            throw new BadRequestException(
+              `Saldo insuficiente para reservar ${dtos.length} sesion${dtos.length > 1 ? 'es' : ''}.`,
+            );
+          }
+          batchItems.forEach(() => breakdowns.push(null));
+        } else {
+          for (const item of batchItems) {
+            let bd: ReturnType<typeof allocateCreditDebit>;
+            try {
+              bd = allocateCreditDebit(runningBalance, runningPromo, Number(item.chargeAmount));
+            } catch {
+              throw new BadRequestException(
+                `Saldo insuficiente para reservar ${dtos.length} sesion${dtos.length > 1 ? 'es' : ''}.`,
+              );
+            }
+            runningBalance -= Number(item.chargeAmount);
+            runningPromo -= bd.promotionalDebited;
+            breakdowns.push(bd);
+          }
+        }
+
+        const bookings: Booking[] = [];
+        for (let i = 0; i < batchItems.length; i++) {
+          const item = batchItems[i];
+          const booking = await tx.booking.create({
+            data: {
+              clientId,
+              professionalId: item.dto.professionalId,
+              sessionOfferingId: item.dto.sessionOfferingId,
+              scheduledStartAt: item.scheduledStartAt,
+              scheduledEndAt: item.scheduledEndAt,
+              timezone: item.timezone,
+              status: BookingStatus.CONFIRMED,
+              paymentStatus: BookingPaymentStatus.PAID,
+              paymentMethod: BookingPaymentMethod.WALLET,
+              currency: region.currency,
+              priceBob: item.offering.priceBob,
+              priceUsd: new Prisma.Decimal(item.priceUsd),
+              expiresAt: null,
+            },
+          });
+
+          await tx.bookingPayment.create({
+            data: {
+              bookingId: booking.id,
+              method: BookingPaymentMethod.WALLET,
+              status: BookingPaymentStatus.PAID,
+              amountBob: isUsd ? null : item.offering.priceBob,
+              amountUsd: isUsd ? new Prisma.Decimal(item.priceUsd) : null,
+              currency: region.currency,
+            },
+          });
+
+          bookings.push(booking);
+        }
+
+        const totalBobCharge = batchItems.reduce(
+          (acc, item) => acc.add(item.chargeAmount),
+          new Prisma.Decimal(0),
+        );
+        const totalPromoDebited = breakdowns.reduce((sum, bd) => sum + (bd?.promotionalDebited ?? 0), 0);
+        const totalRealDebited = breakdowns.reduce((sum, bd) => sum + (bd?.realDebited ?? 0), 0);
+
+        await tx.transaction.create({
+          data: {
+            walletId: clientWallet.id,
+            type: TransactionType.BOOKING_PAYMENT,
+            amount: totalBobCharge,
+            promotionalAmount: isUsd ? new Prisma.Decimal(0) : new Prisma.Decimal(totalPromoDebited),
+            realAmount: isUsd ? totalBobCharge : new Prisma.Decimal(totalRealDebited),
+            isPromotional: false,
+            description: JSON.stringify({
+              event: 'BATCH_BOOKING_PAYMENT',
+              bookingIds: bookings.map((b) => b.id),
+              currency: region.currency,
+            }),
+          },
+        });
+
+        if (isUsd) {
+          await tx.wallet.update({
+            where: { id: clientWallet.id },
+            data: { balanceUsd: { decrement: totalBobCharge } },
+          });
+        } else {
+          await tx.wallet.update({
+            where: { id: clientWallet.id },
+            data: {
+              balance: { decrement: totalBobCharge },
+              promotionalBalance: { decrement: new Prisma.Decimal(totalPromoDebited) },
+            },
+          });
+        }
+
+        return bookings;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15000 },
+    );
+
+    // Sequential to avoid deadlock when crediting the same professional wallet multiple times
+    void results.reduce(
+      (chain, booking) =>
+        chain
+          .then(() =>
+            this.bookingEarningsService.creditProfessionalEarningForBooking({
+              bookingId: booking.id,
+              source: 'WALLET_PAYMENT',
+            }),
+          )
+          .catch((err: any) => {
+            this.logger.error(`[BATCH-BOOKING] earning credit failed bookingId=${booking.id} err=${err?.message}`);
+          }),
+      Promise.resolve() as Promise<unknown>,
+    );
+
+    const notifMap = new Map<string, string[]>();
+    for (let i = 0; i < results.length; i++) {
+      const profId = batchItems[i].dto.professionalId;
+      if (!notifMap.has(profId)) notifMap.set(profId, []);
+      notifMap.get(profId)!.push(results[i].id);
+    }
+
+    const clientName = this.fullName(client);
+    for (const [profId, bookingIds] of notifMap) {
+      const count = bookingIds.length;
+      this.prisma.user.findUnique({ where: { id: profId }, select: { fcmToken: true } })
+        .then((professional) => {
+          if (!professional?.fcmToken) return;
+          return this.notificationsService.sendPushNotification(
+            professional.fcmToken,
+            `${count} sesion${count > 1 ? 'es' : ''} reservada${count > 1 ? 's' : ''}`,
+            `${clientName} reservo ${count} sesion${count > 1 ? 'es' : ''}.`,
+            { type: 'BATCH_BOOKING_CONFIRMED', bookingIds: bookingIds.join(',') },
+          );
+        })
+        .catch((err) => {
+          this.logger.error(`[BATCH-BOOKING] notification failed profId=${profId} err=${err?.message}`);
+        });
+    }
+
+    return {
+      bookings: results.map((b) => ({
+        ...b,
+        priceBob: Number(b.priceBob),
+        priceUsd: Number(b.priceUsd),
+      })),
+    };
   }
 }
 

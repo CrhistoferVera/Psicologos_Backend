@@ -21,6 +21,7 @@ import { BookingListQueryDto } from './dto/booking-list-query.dto';
 import { BookingPaymentInitResponseDto } from './dto/booking-payment-init-response.dto';
 import { CreateAvailabilityExceptionDto } from './dto/create-availability-exception.dto';
 import { CreateAvailabilityRuleDto } from './dto/create-availability-rule.dto';
+import { CreateBatchBookingDto } from './dto/create-batch-booking.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { CreateSessionOfferingDto } from './dto/create-session-offering.dto';
 import { UpdateAvailabilityRuleDto } from './dto/update-availability-rule.dto';
@@ -171,6 +172,14 @@ export class BookingsController {
   @ApiOperation({ summary: 'Crear reserva en estado PENDING_PAYMENT' })
   createBooking(@CurrentUser() user: JwtUser, @Body() dto: CreateBookingDto) {
     return this.bookingsService.createBooking(user.userId, dto);
+  }
+
+  @Post('bookings/batch')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER)
+  @ApiOperation({ summary: 'Crear hasta 3 reservas en una sola transaccion atomica' })
+  createBatchBookings(@CurrentUser() user: JwtUser, @Body() dto: CreateBatchBookingDto) {
+    return this.bookingsService.createBatchBookings(user.userId, dto.bookings);
   }
 
   @Post('bookings/:bookingId/payment')
