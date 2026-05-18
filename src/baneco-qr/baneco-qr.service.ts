@@ -19,6 +19,7 @@ import { BanecoApiService, PaymentQR } from './baneco-api.service';
 import { BILLING_REGION_BOLIVIA, CURRENCY_BOB } from '../common/phone-metadata.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { BookingEarningsService } from '../booking-earnings/booking-earnings.service';
+import { ReferralsService } from '../referrals/referrals.service';
 
 @Injectable()
 export class BanecoQrService {
@@ -31,6 +32,7 @@ export class BanecoQrService {
     private readonly banecoApi: BanecoApiService,
     private readonly notificationsService: NotificationsService,
     private readonly bookingEarningsService: BookingEarningsService,
+    private readonly referralsService: ReferralsService,
   ) {}
 
   private get usdToBob(): number {
@@ -308,12 +310,12 @@ export class BanecoQrService {
       ? `Recarga QR Baneco: ${deposit.packageNameAtMoment} (txn ${payment.transactionId ?? deposit.id})`
       : `Recarga QR Baneco: ${deposit.packageNameAtMoment}`;
 
-    await this.prisma.$transaction([
-      this.prisma.wallet.update({
+    await this.prisma.$transaction(async (tx) => {
+      await tx.wallet.update({
         where: { id: wallet.id },
         data: { balance: { increment: deposit.amount } },
-      }),
-      this.prisma.transaction.create({
+      });
+      await tx.transaction.create({
         data: {
           walletId: wallet.id,
           depositRequestId: deposit.id,
@@ -322,8 +324,9 @@ export class BanecoQrService {
           realAmount: deposit.amount,
           description,
         },
-      }),
-    ]);
+      });
+      await this.referralsService.handleApprovedDepositForReferral(tx, deposit.userId);
+    });
     this.logger.log(`[APPLY][${qrId}] wallet recharged +${deposit.amount} BOB`);
   }
 
@@ -415,6 +418,22 @@ export class BanecoQrService {
 
     if (!bookingPayment) return false;
     if (bookingPayment.status === BookingPaymentStatus.PAID) {
+      await this.prisma.$transaction(async (tx) => {
+        await this.referralsService.consumeClientDiscountForPaidBooking(tx, {
+          bookingId: bookingPayment.bookingId,
+          bookingPaymentId: bookingPayment.id,
+        });
+      });
+      try {
+        await this.referralsService.refreshReferralQualificationFromPaidBookingDetached({
+          bookingId: bookingPayment.bookingId,
+          bookingPaymentId: bookingPayment.id,
+        });
+      } catch (err: any) {
+        this.logger.error(
+          `[QR-BOOKING] referral qualification failed bookingId=${bookingPayment.bookingId} bookingPaymentId=${bookingPayment.id} err=${err?.message}`,
+        );
+      }
       await this.bookingEarningsService.creditProfessionalEarningForBooking({
         bookingId: bookingPayment.bookingId,
         bookingPaymentId: bookingPayment.id,
@@ -496,6 +515,11 @@ export class BanecoQrService {
         },
       });
 
+      await this.referralsService.consumeClientDiscountForPaidBooking(tx, {
+        bookingId: fresh.id,
+        bookingPaymentId: bookingPayment.id,
+      });
+
       const bookingUpdate = await tx.booking.updateMany({
         where: {
           id: fresh.id,
@@ -561,6 +585,17 @@ export class BanecoQrService {
       );
     }
 
+    try {
+      await this.referralsService.refreshReferralQualificationFromPaidBookingDetached({
+        bookingId: bookingPayment.bookingId,
+        bookingPaymentId: bookingPayment.id,
+      });
+    } catch (err: any) {
+      this.logger.error(
+        `[QR-BOOKING] referral qualification failed bookingId=${bookingPayment.bookingId} bookingPaymentId=${bookingPayment.id} err=${err?.message}`,
+      );
+    }
+
     await this.bookingEarningsService.creditProfessionalEarningForBooking({
       bookingId: bookingPayment.bookingId,
       bookingPaymentId: bookingPayment.id,
@@ -611,12 +646,12 @@ export class BanecoQrService {
     });
     if (claimed.count === 0) return;
 
-    await this.prisma.$transaction([
-      this.prisma.wallet.update({
+    await this.prisma.$transaction(async (tx) => {
+      await tx.wallet.update({
         where: { id: wallet.id },
         data: { balance: { increment: deposit.amount } },
-      }),
-      this.prisma.transaction.create({
+      });
+      await tx.transaction.create({
         data: {
           walletId: wallet.id,
           depositRequestId: deposit.id,
@@ -625,8 +660,9 @@ export class BanecoQrService {
           realAmount: deposit.amount,
           description: `Recarga QR Baneco: ${deposit.packageNameAtMoment}`,
         },
-      }),
-    ]);
+      });
+      await this.referralsService.handleApprovedDepositForReferral(tx, deposit.userId);
+    });
   }
 
   async createQrForSession(clientUserId: string, session: { id: string; title: string; priceInBs: any; priceInUsd: any; professionalUserId: string }) {

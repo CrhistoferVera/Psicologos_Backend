@@ -4,6 +4,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { UpdateDepositStatusDto } from './dto/update-depositsRequest.dto';
 import { MailService } from 'src/mail/mail.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
+import { ReferralsService } from '../../referrals/referrals.service';
 
 @Injectable()
 export class RechargeRequestService {
@@ -11,6 +12,7 @@ export class RechargeRequestService {
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
     private readonly systemConfig: SystemConfigService,
+    private readonly referralsService: ReferralsService,
   ) {}
 
   async getAllRechargeRequests(search?: string, cursor?: string, limit = 10) {
@@ -165,6 +167,8 @@ export class RechargeRequestService {
             description: `Recarga aprobada: ${isStripePayment ? `$${walletIncrement.toFixed(2)} USD` : `Bs ${walletIncrement.toFixed(2)}`} - Paquete ${packageName}`,
           },
         });
+
+        await this.referralsService.handleApprovedDepositForReferral(tx, depositRequest.userId);
 
         return {
           message: 'Deposito aprobado con exito. Saldo actualizado.',

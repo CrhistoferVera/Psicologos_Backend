@@ -7,51 +7,55 @@ datasource db {
 }
 
 model User {
-  id                          String                    @id @default(uuid())
-  phoneNumber                 String                    @unique
-  phoneDialCode               String?
-  phoneNationalNumber         String?
-  phoneCountryIso             String?
-  phoneCountryName            String?
-  billingRegion               String?
-  preferredCurrency           String?
-  email                       String?                   @unique
-  referralCode                String?                   @unique
-  password                    String?
-  firstName                   String?
-  lastName                    String?
-  fcmToken                    String?
-  isProfileComplete           Boolean                   @default(false)
-  createdAt                   DateTime                  @default(now())
-  updatedAt                   DateTime                  @updatedAt
-  lastLogin                   DateTime?
-  role                        UserRole                  @default(USER)
-  resetPasswordExpiry         DateTime?
-  resetPasswordToken          String?
-  isActive                    Boolean                   @default(true)
-  stripeCustomerId            String?                   @unique
+  id                  String    @id @default(uuid())
+  phoneNumber         String    @unique
+  phoneDialCode       String?
+  phoneNationalNumber String?
+  phoneCountryIso     String?
+  phoneCountryName    String?
+  billingRegion       String?
+  preferredCurrency   String?
+  email               String?   @unique
+  referralCode        String?   @unique
+  password            String?
+  firstName           String?
+  lastName            String?
+  fcmToken            String?
+  isProfileComplete   Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  lastLogin           DateTime?
+  role                UserRole  @default(USER)
+  resetPasswordExpiry DateTime?
+  resetPasswordToken  String?
+  isActive            Boolean   @default(true)
+  stripeCustomerId    String?   @unique
 
-  professionalProfile         ProfessionalProfile?
-  userProfile                 UserProfile?
-  wallet                      Wallet?
-  depositRequests             DepositRequest[]
-  conversationsAsUser1        Conversation[]            @relation("ConversationUser1")
-  conversationsAsUser2        Conversation[]            @relation("ConversationUser2")
-  sentMessages                Message[]                 @relation("SentMessages")
-  professionalSpecialties     ProfessionalSpecialty[]
-  promotionalCreditsGranted   PromotionalCreditGrant[]  @relation("PromotionalCreditsGrantedBy")
-  promotionalCreditsReceived  PromotionalCreditGrant[]  @relation("PromotionalCreditsReceivedBy")
-  referralsSent               Referral[]                @relation("ReferralReferrer")
-  referralAsReferred          Referral?                 @relation("ReferralReferred")
-  sessionsAsProfessional      Session[]                 @relation("ProfessionalSessions")
-  sessionPayments             SessionPayment[]          @relation("ClientSessionPayments")
-  professionalSessionOfferings ProfessionalSessionOffering[] @relation("ProfessionalSessionOfferings")
-  professionalAvailabilityRules ProfessionalAvailabilityRule[] @relation("ProfessionalAvailabilityRules")
-  professionalAvailabilityExceptions ProfessionalAvailabilityException[] @relation("ProfessionalAvailabilityExceptions")
-  bookingsAsClient            Booking[]                 @relation("ClientBookings")
-  bookingsAsProfessional      Booking[]                 @relation("ProfessionalBookings")
-  bookingEarningsAsClient     BookingEarning[]          @relation("ClientBookingEarnings")
-  bookingEarningsAsProfessional BookingEarning[]        @relation("ProfessionalBookingEarnings")
+  professionalProfile                         ProfessionalProfile?
+  userProfile                                 UserProfile?
+  wallet                                      Wallet?
+  depositRequests                             DepositRequest[]
+  conversationsAsUser1                        Conversation[]                        @relation("ConversationUser1")
+  conversationsAsUser2                        Conversation[]                        @relation("ConversationUser2")
+  sentMessages                                Message[]                             @relation("SentMessages")
+  professionalSpecialties                     ProfessionalSpecialty[]
+  promotionalCreditsGranted                   PromotionalCreditGrant[]              @relation("PromotionalCreditsGrantedBy")
+  promotionalCreditsReceived                  PromotionalCreditGrant[]              @relation("PromotionalCreditsReceivedBy")
+  referralsSent                               Referral[]                            @relation("ReferralReferrer")
+  referralAsReferred                          Referral?                             @relation("ReferralReferred")
+  referralClientBenefits                      ReferralClientBenefit[]               @relation("ReferralClientBenefitReferrer")
+  referralProfessionalCampaigns               ReferralProfessionalBenefitCampaign[] @relation("ReferralProfessionalCampaignReferrer")
+  referralProfessionalBeneficiariesAsReferrer ReferralProfessionalBeneficiary[]     @relation("ReferralProfessionalBenefitReferrer")
+  referralProfessionalBeneficiariesAsReferred ReferralProfessionalBeneficiary[]     @relation("ReferralProfessionalBenefitReferred")
+  sessionsAsProfessional                      Session[]                             @relation("ProfessionalSessions")
+  sessionPayments                             SessionPayment[]                      @relation("ClientSessionPayments")
+  professionalSessionOfferings                ProfessionalSessionOffering[]         @relation("ProfessionalSessionOfferings")
+  professionalAvailabilityRules               ProfessionalAvailabilityRule[]        @relation("ProfessionalAvailabilityRules")
+  professionalAvailabilityExceptions          ProfessionalAvailabilityException[]   @relation("ProfessionalAvailabilityExceptions")
+  bookingsAsClient                            Booking[]                             @relation("ClientBookings")
+  bookingsAsProfessional                      Booking[]                             @relation("ProfessionalBookings")
+  bookingEarningsAsClient                     BookingEarning[]                      @relation("ClientBookingEarnings")
+  bookingEarningsAsProfessional               BookingEarning[]                      @relation("ProfessionalBookingEarnings")
 
   @@index([billingRegion])
   @@index([phoneCountryIso])
@@ -59,63 +63,63 @@ model User {
 }
 
 model UserProfile {
-  id             String    @id @default(uuid())
-  userId         String    @unique
+  id             String   @id @default(uuid())
+  userId         String   @unique
   userName       String?
-  bio            String?   @db.Text
+  bio            String?  @db.Text
   avatarUrl      String?
   avatarPublicId String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_profile")
 }
 
 model Conversation {
-  id             String    @id @default(uuid())
-  user1Id        String
-  user2Id        String
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id        String   @id @default(uuid())
+  user1Id   String
+  user2Id   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user1          User      @relation("ConversationUser1", fields: [user1Id], references: [id], onDelete: Cascade)
-  user2          User      @relation("ConversationUser2", fields: [user2Id], references: [id], onDelete: Cascade)
-  messages       Message[]
+  user1    User      @relation("ConversationUser1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2    User      @relation("ConversationUser2", fields: [user2Id], references: [id], onDelete: Cascade)
+  messages Message[]
 
   @@unique([user1Id, user2Id])
   @@map("conversations")
 }
 
 model Message {
-  id             String        @id @default(uuid())
+  id             String   @id @default(uuid())
   conversationId String
   senderId       String
   text           String
-  read           Boolean       @default(false)
-  createdAt      DateTime      @default(now())
+  read           Boolean  @default(false)
+  createdAt      DateTime @default(now())
 
-  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender         User          @relation("SentMessages", fields: [senderId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("SentMessages", fields: [senderId], references: [id])
 
   @@index([conversationId, createdAt])
   @@map("messages")
 }
 
 model ProfessionalProfile {
-  id             String            @id @default(uuid())
-  userId         String            @unique
-  username       String            @unique
+  id             String                   @id @default(uuid())
+  userId         String                   @unique
+  username       String                   @unique
   dateOfBirth    DateTime?
-  cedula         String?           @unique
+  cedula         String?                  @unique
   idDocUrl       String?
   idDocPublicId  String?
   avatarUrl      String?
   avatarPublicId String?
   bio            String?
   rateCredits    Int?
-  isOnline       Boolean           @default(false)
+  isOnline       Boolean                  @default(false)
   reviewStatus   ProfessionalReviewStatus @default(PENDING)
   reviewNotes    String?
   availability   Json?
@@ -134,24 +138,24 @@ model ProfessionalProfile {
   kycFaceMatchScore         Float?
   kycFaceMatchStatus        KycFaceMatchStatus @default(PENDING)
 
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bankAccounts   BankAccount[]
-  servicePrices  ServicePrice[]
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccounts  BankAccount[]
+  servicePrices ServicePrice[]
 
   @@map("professional_profiles")
 }
 
 model Wallet {
-  id                 String              @id @default(uuid())
-  userId             String              @unique
-  balance            Decimal             @default(0.00) @db.Decimal(10, 2)
-  promotionalBalance Decimal             @default(0.00) @db.Decimal(10, 2)
-  balanceUsd         Decimal             @default(0.00) @db.Decimal(10, 2)
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  balance            Decimal  @default(0.00) @db.Decimal(10, 2)
+  promotionalBalance Decimal  @default(0.00) @db.Decimal(10, 2)
+  balanceUsd         Decimal  @default(0.00) @db.Decimal(10, 2)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions       Transaction[]
@@ -162,58 +166,58 @@ model Wallet {
 }
 
 model Package {
-  id               String            @id @default(uuid())
-  name             String            @db.VarChar(100)
-  credits          Int
-  price            Decimal           @db.Decimal(10, 2)
-  isActive         Boolean           @default(true)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id        String   @id @default(uuid())
+  name      String   @db.VarChar(100)
+  credits   Int
+  price     Decimal  @db.Decimal(10, 2)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  depositRequests  DepositRequest[]
+  depositRequests DepositRequest[]
 
   @@map("packages")
 }
 
 model DepositRequest {
-  id                  String          @id @default(uuid())
-  userId              String
-  packageId           String?
-  paymentMethodId     String?
-  amount              Decimal         @db.Decimal(10, 2)
-  receiptUrl                String?
-  receiptPublicId           String?
-  stripePaymentIntentId     String?                 @unique
-  bancoQrId                 String?                 @unique
-  status              DepositStatus   @default(PENDING)
-  rejectionReason     String?
-  creditsToDeliver    Int             @default(0)
-  packageNameAtMoment String?
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
+  id                    String        @id @default(uuid())
+  userId                String
+  packageId             String?
+  paymentMethodId       String?
+  amount                Decimal       @db.Decimal(10, 2)
+  receiptUrl            String?
+  receiptPublicId       String?
+  stripePaymentIntentId String?       @unique
+  bancoQrId             String?       @unique
+  status                DepositStatus @default(PENDING)
+  rejectionReason       String?
+  creditsToDeliver      Int           @default(0)
+  packageNameAtMoment   String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
-  user                User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  package             Package?        @relation(fields: [packageId], references: [id])
-  paymentMethod       PaymentMethod?  @relation(fields: [paymentMethodId], references: [id])
-  transaction         Transaction?
-  qualifyingReferral  Referral?
+  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  package            Package?       @relation(fields: [packageId], references: [id])
+  paymentMethod      PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+  transaction        Transaction?
+  qualifyingReferral Referral?
 
   @@map("deposit_requests")
 }
 
 model PaymentMethod {
-  id              String            @id @default(uuid())
-  type            PaymentType
-  bankName        String?
-  accountName     String?
-  accountNumber   String?
-  qrImageUrl      String?
-  qrPublicId      String?
-  logoPublicId    String?
-  logoUrl         String?
-  isActive        Boolean           @default(true)
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  id            String      @id @default(uuid())
+  type          PaymentType
+  bankName      String?
+  accountName   String?
+  accountNumber String?
+  qrImageUrl    String?
+  qrPublicId    String?
+  logoPublicId  String?
+  logoUrl       String?
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   depositRequests DepositRequest[]
 
@@ -221,25 +225,28 @@ model PaymentMethod {
 }
 
 model Transaction {
-  id                     String                  @id @default(uuid())
-  walletId               String
-  depositRequestId       String?                 @unique
-  type                   TransactionType
-  amount                 Decimal                 @db.Decimal(10, 2)
-  promotionalAmount      Decimal                 @default(0.00) @db.Decimal(10, 2)
-  realAmount             Decimal                 @default(0.00) @db.Decimal(10, 2)
-  isPromotional          Boolean                 @default(false)
-  description            String?
-  createdAt              DateTime                @default(now())
+  id                String          @id @default(uuid())
+  walletId          String
+  depositRequestId  String?         @unique
+  type              TransactionType
+  amount            Decimal         @db.Decimal(10, 2)
+  promotionalAmount Decimal         @default(0.00) @db.Decimal(10, 2)
+  realAmount        Decimal         @default(0.00) @db.Decimal(10, 2)
+  isPromotional     Boolean         @default(false)
+  description       String?
+  createdAt         DateTime        @default(now())
 
-  wallet                 Wallet                  @relation(fields: [walletId], references: [id], onDelete: Cascade)
-  depositRequest         DepositRequest?         @relation(fields: [depositRequestId], references: [id])
-  promotionalCreditGrant PromotionalCreditGrant?
-  referralReward         Referral?
-  asSourceReferralReward   ReferralRewardEvent?   @relation("ReferralRewardSource")
-  asRewardReferralReward   ReferralRewardEvent?   @relation("ReferralRewardTarget")
-  asReversalReferralReward ReferralRewardEvent?   @relation("ReferralRewardReversal")
-  bookingEarning           BookingEarning?
+  wallet                               Wallet                           @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  depositRequest                       DepositRequest?                  @relation(fields: [depositRequestId], references: [id])
+  promotionalCreditGrant               PromotionalCreditGrant?
+  referralReward                       Referral?
+  asSourceReferralReward               ReferralRewardEvent?             @relation("ReferralRewardSource")
+  asRewardReferralReward               ReferralRewardEvent?             @relation("ReferralRewardTarget")
+  asReversalReferralReward             ReferralRewardEvent?             @relation("ReferralRewardReversal")
+  asProfessionalReferralRewardSource   ReferralProfessionalRewardEvent? @relation("ProfessionalReferralRewardSource")
+  asProfessionalReferralRewardTarget   ReferralProfessionalRewardEvent? @relation("ProfessionalReferralRewardTarget")
+  asProfessionalReferralRewardReversal ReferralProfessionalRewardEvent? @relation("ProfessionalReferralRewardReversal")
+  bookingEarning                       BookingEarning?
 
   @@index([walletId, createdAt])
   @@index([type, createdAt])
@@ -247,12 +254,12 @@ model Transaction {
 }
 
 model ServicePrice {
-  id             String            @id @default(uuid())
-  profileId      String
-  serviceType    ServiceType
-  price          Float
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  id          String      @id @default(uuid())
+  profileId   String
+  serviceType ServiceType
+  price       Float
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
   professionalProfile ProfessionalProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
@@ -261,25 +268,25 @@ model ServicePrice {
 }
 
 model Banks {
-  id             Int               @id @default(autoincrement())
-  name           String
-  logo_url       String
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime?         @updatedAt
+  id        Int       @id @default(autoincrement())
+  name      String
+  logo_url  String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime? @updatedAt
 
-  bankAccounts   BankAccount[]
+  bankAccounts BankAccount[]
 }
 
 model BankAccount {
-  id                  BigInt              @id @default(autoincrement())
-  userId              String
-  bankId              Int
+  id                    BigInt    @id @default(autoincrement())
+  userId                String
+  bankId                Int
   professionalProfileId String
-  accountNumber       String              @db.VarChar(50)
-  accountHolderName   String?             @db.VarChar(100)
-  currency            String              @default("BOB")
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime?           @updatedAt
+  accountNumber         String    @db.VarChar(50)
+  accountHolderName     String?   @db.VarChar(100)
+  currency              String    @default("BOB")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime? @updatedAt
 
   bank                Banks               @relation(fields: [bankId], references: [id])
   professionalProfile ProfessionalProfile @relation(fields: [professionalProfileId], references: [id], onDelete: Cascade)
@@ -292,58 +299,58 @@ model BankAccount {
 }
 
 model WithdrawalRequest {
-  id               String            @id @default(uuid())
-  walletId         String
-  method           WithdrawalMethod  @default(BANK_TRANSFER)
+  id       String           @id @default(uuid())
+  walletId String
+  method   WithdrawalMethod @default(BANK_TRANSFER)
 
   // Cuenta bancaria (requerido si method = BANK_TRANSFER)
-  bankAccountId    BigInt?
+  bankAccountId BigInt?
 
   // Crypto wallet (requerido si method = CRYPTO)
-  cryptoAddress    String?           // Dirección 0x... del wallet
-  cryptoCurrency   String?           // USDT, BNB, BTC, etc.
-  cryptoNetwork    String?           // BEP20, ERC20, TRC20, etc.
+  cryptoAddress  String? // Dirección 0x... del wallet
+  cryptoCurrency String? // USDT, BNB, BTC, etc.
+  cryptoNetwork  String? // BEP20, ERC20, TRC20, etc.
 
-  credits          Decimal           @db.Decimal(10, 2)
-  soles            Decimal           @db.Decimal(10, 2)
-  currency         String            @default("BOB")
-  status           WithdrawalStatus  @default(PENDING)
-  notes            String?
-  rejectionReason  String?
-  receiptUrl       String?
-  receiptPublicId  String?
-  txId             String?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  credits         Decimal          @db.Decimal(10, 2)
+  soles           Decimal          @db.Decimal(10, 2)
+  currency        String           @default("BOB")
+  status          WithdrawalStatus @default(PENDING)
+  notes           String?
+  rejectionReason String?
+  receiptUrl      String?
+  receiptPublicId String?
+  txId            String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
-  wallet           Wallet            @relation(fields: [walletId], references: [id])
-  bankAccount      BankAccount?      @relation(fields: [bankAccountId], references: [id])
+  wallet      Wallet       @relation(fields: [walletId], references: [id])
+  bankAccount BankAccount? @relation(fields: [bankAccountId], references: [id])
 
   @@map("withdrawal_requests")
 }
 
 model Specialty {
-  id             String                  @id @default(uuid())
-  name           String                  @unique
-  slug           String                  @unique
-  description    String?
-  isActive       Boolean                 @default(true)
-  createdAt      DateTime                @default(now())
-  updatedAt      DateTime                @updatedAt
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  professionals  ProfessionalSpecialty[]
+  professionals ProfessionalSpecialty[]
 
   @@map("specialties")
 }
 
 model ProfessionalSpecialty {
-  id             String     @id @default(uuid())
+  id             String   @id @default(uuid())
   professionalId String
   specialtyId    String
-  createdAt      DateTime   @default(now())
+  createdAt      DateTime @default(now())
 
-  professional   User       @relation(fields: [professionalId], references: [id], onDelete: Cascade)
-  specialty      Specialty  @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
+  professional User      @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  specialty    Specialty @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
 
   @@unique([professionalId, specialtyId])
   @@index([specialtyId])
@@ -351,17 +358,17 @@ model ProfessionalSpecialty {
 }
 
 model PromotionalCreditGrant {
-  id               String       @id @default(uuid())
-  adminUserId      String
-  recipientUserId  String
-  transactionId    String       @unique
-  amount           Decimal      @db.Decimal(10, 2)
-  reason           String?
-  createdAt        DateTime     @default(now())
+  id              String   @id @default(uuid())
+  adminUserId     String
+  recipientUserId String
+  transactionId   String   @unique
+  amount          Decimal  @db.Decimal(10, 2)
+  reason          String?
+  createdAt       DateTime @default(now())
 
-  adminUser        User         @relation("PromotionalCreditsGrantedBy", fields: [adminUserId], references: [id], onDelete: Cascade)
-  recipientUser    User         @relation("PromotionalCreditsReceivedBy", fields: [recipientUserId], references: [id], onDelete: Cascade)
-  transaction      Transaction  @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  adminUser     User        @relation("PromotionalCreditsGrantedBy", fields: [adminUserId], references: [id], onDelete: Cascade)
+  recipientUser User        @relation("PromotionalCreditsReceivedBy", fields: [recipientUserId], references: [id], onDelete: Cascade)
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
 
   @@index([recipientUserId])
   @@index([adminUserId])
@@ -369,24 +376,26 @@ model PromotionalCreditGrant {
 }
 
 model Referral {
-  id                       String               @id @default(uuid())
+  id                       String         @id @default(uuid())
   referrerUserId           String
-  referredUserId           String               @unique
+  referredUserId           String         @unique
   codeUsed                 String
-  status                   ReferralStatus       @default(PENDING)
-  referredDepositRequestId String?              @unique
-  rewardTransactionId      String?              @unique
-  rewardCredits            Decimal              @default(0.00) @db.Decimal(10, 2)
+  status                   ReferralStatus @default(PENDING)
+  referredDepositRequestId String?        @unique
+  rewardTransactionId      String?        @unique
+  rewardCredits            Decimal        @default(0.00) @db.Decimal(10, 2)
+  validPurchasesCount      Int            @default(0)
   qualifiedAt              DateTime?
   rewardedAt               DateTime?
-  createdAt                DateTime             @default(now())
-  updatedAt                DateTime             @default(now()) @updatedAt
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @default(now()) @updatedAt
 
-  referrer                 User                 @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
-  referred                 User                 @relation("ReferralReferred", fields: [referredUserId], references: [id], onDelete: Cascade)
-  referredDepositRequest   DepositRequest?      @relation(fields: [referredDepositRequestId], references: [id], onDelete: SetNull)
-  rewardTransaction        Transaction?         @relation(fields: [rewardTransactionId], references: [id], onDelete: SetNull)
-  rewardEvents             ReferralRewardEvent[]
+  referrer                     User                              @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  referred                     User                              @relation("ReferralReferred", fields: [referredUserId], references: [id], onDelete: Cascade)
+  referredDepositRequest       DepositRequest?                   @relation(fields: [referredDepositRequestId], references: [id], onDelete: SetNull)
+  rewardTransaction            Transaction?                      @relation(fields: [rewardTransactionId], references: [id], onDelete: SetNull)
+  rewardEvents                 ReferralRewardEvent[]
+  professionalBeneficiaryLinks ReferralProfessionalBeneficiary[]
 
   @@index([referrerUserId])
   @@index([status, createdAt])
@@ -394,21 +403,21 @@ model Referral {
 }
 
 model ReferralRewardEvent {
-  id                    String       @id @default(uuid())
+  id                    String    @id @default(uuid())
   referralId            String
-  sourceTransactionId   String       @unique
-  rewardTransactionId   String       @unique
-  rewardAmount          Decimal      @db.Decimal(10, 2)
-  percentageApplied     Decimal      @db.Decimal(5, 2)
-  bonusPercentApplied   Decimal      @default(0.00) @db.Decimal(5, 2)
+  sourceTransactionId   String    @unique
+  rewardTransactionId   String    @unique
+  rewardAmount          Decimal   @db.Decimal(10, 2)
+  percentageApplied     Decimal   @db.Decimal(5, 2)
+  bonusPercentApplied   Decimal   @default(0.00) @db.Decimal(5, 2)
   reversedAt            DateTime?
-  reversalTransactionId String?      @unique
-  createdAt             DateTime     @default(now())
+  reversalTransactionId String?   @unique
+  createdAt             DateTime  @default(now())
 
-  referral              Referral     @relation(fields: [referralId], references: [id], onDelete: Cascade)
-  sourceTransaction     Transaction  @relation("ReferralRewardSource", fields: [sourceTransactionId], references: [id], onDelete: Cascade)
-  rewardTransaction     Transaction  @relation("ReferralRewardTarget", fields: [rewardTransactionId], references: [id], onDelete: Cascade)
-  reversalTransaction   Transaction? @relation("ReferralRewardReversal", fields: [reversalTransactionId], references: [id], onDelete: SetNull)
+  referral            Referral     @relation(fields: [referralId], references: [id], onDelete: Cascade)
+  sourceTransaction   Transaction  @relation("ReferralRewardSource", fields: [sourceTransactionId], references: [id], onDelete: Cascade)
+  rewardTransaction   Transaction  @relation("ReferralRewardTarget", fields: [rewardTransactionId], references: [id], onDelete: Cascade)
+  reversalTransaction Transaction? @relation("ReferralRewardReversal", fields: [reversalTransactionId], references: [id], onDelete: SetNull)
 
   @@index([referralId])
   @@map("referral_reward_events")
@@ -426,21 +435,130 @@ model ReferralBonusTier {
   @@map("referral_bonus_tiers")
 }
 
+model ReferralClientBenefit {
+  id                String                      @id @default(uuid())
+  referrerUserId    String
+  cycleNumber       Int
+  threshold         Int
+  discountPercent   Decimal                     @db.Decimal(5, 2)
+  totalSessions     Int
+  remainingSessions Int
+  status            ReferralClientBenefitStatus @default(ACTIVE)
+  activatedAt       DateTime                    @default(now())
+  consumedAt        DateTime?
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+
+  referrer User                          @relation("ReferralClientBenefitReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+  usages   ReferralClientDiscountUsage[]
+
+  @@unique([referrerUserId, cycleNumber])
+  @@index([referrerUserId, status])
+  @@map("referral_client_benefits")
+}
+
+model ReferralClientDiscountUsage {
+  id                String   @id @default(uuid())
+  benefitId         String
+  bookingId         String   @unique
+  bookingPaymentId  String?  @unique
+  currency          String
+  discountPercent   Decimal  @db.Decimal(5, 2)
+  discountAmountBob Decimal? @db.Decimal(10, 2)
+  discountAmountUsd Decimal? @db.Decimal(10, 2)
+  createdAt         DateTime @default(now())
+
+  benefit        ReferralClientBenefit @relation(fields: [benefitId], references: [id], onDelete: Cascade)
+  booking        Booking               @relation("ReferralDiscountUsageBooking", fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingPayment BookingPayment?       @relation("ReferralDiscountUsageBookingPayment", fields: [bookingPaymentId], references: [id], onDelete: SetNull)
+
+  @@index([benefitId, createdAt])
+  @@map("referral_client_discount_usages")
+}
+
+model ReferralProfessionalBenefitCampaign {
+  id                     String                            @id @default(uuid())
+  professionalReferrerId String
+  cycleNumber            Int
+  threshold              Int
+  rewardPercent          Decimal                           @db.Decimal(5, 2)
+  status                 ReferralProfessionalBenefitStatus @default(ACTIVE)
+  activatedAt            DateTime                          @default(now())
+  createdAt              DateTime                          @default(now())
+  updatedAt              DateTime                          @updatedAt
+
+  professionalReferrer User                              @relation("ReferralProfessionalCampaignReferrer", fields: [professionalReferrerId], references: [id], onDelete: Cascade)
+  beneficiaries        ReferralProfessionalBeneficiary[]
+
+  @@unique([professionalReferrerId, cycleNumber])
+  @@index([professionalReferrerId, status])
+  @@map("referral_professional_benefit_campaigns")
+}
+
+model ReferralProfessionalBeneficiary {
+  id                     String   @id @default(uuid())
+  campaignId             String
+  professionalReferrerId String
+  referredUserId         String
+  referralId             String?
+  rewardPercent          Decimal  @db.Decimal(5, 2)
+  isActive               Boolean  @default(true)
+  activatedAt            DateTime @default(now())
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  campaign             ReferralProfessionalBenefitCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  professionalReferrer User                                @relation("ReferralProfessionalBenefitReferrer", fields: [professionalReferrerId], references: [id], onDelete: Cascade)
+  referredUser         User                                @relation("ReferralProfessionalBenefitReferred", fields: [referredUserId], references: [id], onDelete: Cascade)
+  referral             Referral?                           @relation(fields: [referralId], references: [id], onDelete: SetNull)
+  rewardEvents         ReferralProfessionalRewardEvent[]
+
+  @@unique([professionalReferrerId, referredUserId])
+  @@index([campaignId])
+  @@index([referredUserId, isActive])
+  @@map("referral_professional_beneficiaries")
+}
+
+model ReferralProfessionalRewardEvent {
+  id                    String    @id @default(uuid())
+  beneficiaryId         String
+  bookingEarningId      String    @unique
+  sourceTransactionId   String?   @unique
+  rewardTransactionId   String    @unique
+  reversalTransactionId String?   @unique
+  currency              String
+  sourceAmount          Decimal   @db.Decimal(10, 2)
+  rewardPercent         Decimal   @db.Decimal(5, 2)
+  rewardAmount          Decimal   @db.Decimal(10, 2)
+  reversedAt            DateTime?
+  createdAt             DateTime  @default(now())
+
+  beneficiary         ReferralProfessionalBeneficiary @relation(fields: [beneficiaryId], references: [id], onDelete: Cascade)
+  bookingEarning      BookingEarning                  @relation(fields: [bookingEarningId], references: [id], onDelete: Cascade)
+  sourceTransaction   Transaction?                    @relation("ProfessionalReferralRewardSource", fields: [sourceTransactionId], references: [id], onDelete: SetNull)
+  rewardTransaction   Transaction                     @relation("ProfessionalReferralRewardTarget", fields: [rewardTransactionId], references: [id], onDelete: Cascade)
+  reversalTransaction Transaction?                    @relation("ProfessionalReferralRewardReversal", fields: [reversalTransactionId], references: [id], onDelete: SetNull)
+
+  @@index([beneficiaryId, createdAt])
+  @@map("referral_professional_reward_events")
+}
+
 model Session {
-  id                 String          @id @default(uuid())
+  id                 String        @id @default(uuid())
   professionalUserId String
-  title              String          @db.VarChar(200)
+  title              String        @db.VarChar(200)
   durationMinutes    Int
-  priceInBs          Decimal         @db.Decimal(10, 2)
-  priceInUsd         Decimal         @db.Decimal(10, 2)
-  status             SessionStatus   @default(OPEN)
+  priceInBs          Decimal       @db.Decimal(10, 2)
+  priceInUsd         Decimal       @db.Decimal(10, 2)
+  status             SessionStatus @default(OPEN)
   startedAt          DateTime?
   endedAt            DateTime?
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
-  professional       User            @relation("ProfessionalSessions", fields: [professionalUserId], references: [id], onDelete: Cascade)
-  payments           SessionPayment[]
+  professional User             @relation("ProfessionalSessions", fields: [professionalUserId], references: [id], onDelete: Cascade)
+  payments     SessionPayment[]
 
   @@index([professionalUserId])
   @@index([status])
@@ -460,8 +578,8 @@ model SessionPayment {
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 
-  session               Session              @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  client                User                 @relation("ClientSessionPayments", fields: [clientUserId], references: [id], onDelete: Cascade)
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  client  User    @relation("ClientSessionPayments", fields: [clientUserId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, clientUserId])
   @@index([clientUserId])
@@ -469,19 +587,19 @@ model SessionPayment {
 }
 
 model ProfessionalSessionOffering {
-  id              String    @id @default(uuid())
+  id              String   @id @default(uuid())
   professionalId  String
   title           String
   description     String?
   durationMinutes Int
-  priceBob        Decimal   @db.Decimal(10, 2)
-  priceUsd        Decimal   @db.Decimal(10, 2)
-  isActive        Boolean   @default(true)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  priceBob        Decimal  @db.Decimal(10, 2)
+  priceUsd        Decimal  @db.Decimal(10, 2)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  professional    User      @relation("ProfessionalSessionOfferings", fields: [professionalId], references: [id], onDelete: Cascade)
-  bookings        Booking[]
+  professional User      @relation("ProfessionalSessionOfferings", fields: [professionalId], references: [id], onDelete: Cascade)
+  bookings     Booking[]
 
   @@index([professionalId])
   @@index([isActive])
@@ -489,16 +607,16 @@ model ProfessionalSessionOffering {
 }
 
 model ProfessionalAvailabilityRule {
-  id              String   @id @default(uuid())
-  professionalId  String
-  dayOfWeek       WeekDay
-  startTime       String
-  endTime         String
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(uuid())
+  professionalId String
+  dayOfWeek      WeekDay
+  startTime      String
+  endTime        String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  professional    User     @relation("ProfessionalAvailabilityRules", fields: [professionalId], references: [id], onDelete: Cascade)
+  professional User @relation("ProfessionalAvailabilityRules", fields: [professionalId], references: [id], onDelete: Cascade)
 
   @@index([professionalId])
   @@index([professionalId, dayOfWeek, isActive])
@@ -506,17 +624,17 @@ model ProfessionalAvailabilityRule {
 }
 
 model ProfessionalAvailabilityException {
-  id              String   @id @default(uuid())
-  professionalId  String
-  date            DateTime @db.Date
-  startTime       String?
-  endTime         String?
-  reason          String?
-  isFullDay       Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(uuid())
+  professionalId String
+  date           DateTime @db.Date
+  startTime      String?
+  endTime        String?
+  reason         String?
+  isFullDay      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  professional    User     @relation("ProfessionalAvailabilityExceptions", fields: [professionalId], references: [id], onDelete: Cascade)
+  professional User @relation("ProfessionalAvailabilityExceptions", fields: [professionalId], references: [id], onDelete: Cascade)
 
   @@index([professionalId])
   @@index([professionalId, date])
@@ -524,32 +642,40 @@ model ProfessionalAvailabilityException {
 }
 
 model Booking {
-  id                String               @id @default(uuid())
-  clientId          String
-  professionalId    String
-  sessionOfferingId String
-  scheduledStartAt  DateTime
-  scheduledEndAt    DateTime
-  timezone          String               @default("America/La_Paz")
-  status            BookingStatus        @default(PENDING_PAYMENT)
-  priceBob          Decimal              @db.Decimal(10, 2)
-  priceUsd          Decimal              @db.Decimal(10, 2)
-  currency          String
-  paymentMethod     BookingPaymentMethod?
-  paymentStatus     BookingPaymentStatus @default(PENDING)
-  expiresAt         DateTime?
-  reminder15SentAt  DateTime?
-  reminder10BeforeStartSentAt DateTime?
-  reminder15BeforeEndSentAt DateTime?
+  id                             String                @id @default(uuid())
+  clientId                       String
+  professionalId                 String
+  sessionOfferingId              String
+  scheduledStartAt               DateTime
+  scheduledEndAt                 DateTime
+  timezone                       String                @default("America/La_Paz")
+  status                         BookingStatus         @default(PENDING_PAYMENT)
+  priceBob                       Decimal               @db.Decimal(10, 2)
+  priceUsd                       Decimal               @db.Decimal(10, 2)
+  originalPriceBob               Decimal?              @db.Decimal(10, 2)
+  originalPriceUsd               Decimal?              @db.Decimal(10, 2)
+  referralDiscountPercent        Decimal               @default(0.00) @db.Decimal(5, 2)
+  referralDiscountAmountBob      Decimal               @default(0.00) @db.Decimal(10, 2)
+  referralDiscountAmountUsd      Decimal               @default(0.00) @db.Decimal(10, 2)
+  referralClientBenefitId        String?
+  currency                       String
+  paymentMethod                  BookingPaymentMethod?
+  paymentStatus                  BookingPaymentStatus  @default(PENDING)
+  expiresAt                      DateTime?
+  reminder15SentAt               DateTime?
+  reminder10BeforeStartSentAt    DateTime?
+  reminder15BeforeEndSentAt      DateTime?
   professionalPurchaseNotifiedAt DateTime?
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
+  createdAt                      DateTime              @default(now())
+  updatedAt                      DateTime              @updatedAt
 
-  client            User                 @relation("ClientBookings", fields: [clientId], references: [id], onDelete: Cascade)
-  professional      User                 @relation("ProfessionalBookings", fields: [professionalId], references: [id], onDelete: Cascade)
-  sessionOffering   ProfessionalSessionOffering @relation(fields: [sessionOfferingId], references: [id], onDelete: Restrict)
-  payments          BookingPayment[]
-  earning           BookingEarning?
+  client                User                         @relation("ClientBookings", fields: [clientId], references: [id], onDelete: Cascade)
+  professional          User                         @relation("ProfessionalBookings", fields: [professionalId], references: [id], onDelete: Cascade)
+  sessionOffering       ProfessionalSessionOffering  @relation(fields: [sessionOfferingId], references: [id], onDelete: Restrict)
+  payments              BookingPayment[]
+  earning               BookingEarning?
+  referralClientBenefit ReferralClientBenefit?       @relation(fields: [referralClientBenefitId], references: [id], onDelete: SetNull)
+  referralDiscountUsage ReferralClientDiscountUsage? @relation("ReferralDiscountUsageBooking")
 
   @@index([clientId])
   @@index([professionalId])
@@ -567,14 +693,17 @@ model BookingPayment {
   status            BookingPaymentStatus @default(PENDING)
   amountBob         Decimal?             @db.Decimal(10, 2)
   amountUsd         Decimal?             @db.Decimal(10, 2)
+  originalAmountBob Decimal?             @db.Decimal(10, 2)
+  originalAmountUsd Decimal?             @db.Decimal(10, 2)
   currency          String
   providerReference String?
   providerPayload   Json?
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
-  booking           Booking              @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  earning           BookingEarning?
+  booking               Booking                      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  earning               BookingEarning?
+  referralDiscountUsage ReferralClientDiscountUsage? @relation("ReferralDiscountUsageBookingPayment")
 
   @@index([bookingId])
   @@index([status])
@@ -582,29 +711,30 @@ model BookingPayment {
 }
 
 model BookingEarning {
-  id                       String               @id @default(uuid())
-  bookingId                String               @unique
-  bookingPaymentId         String               @unique
-  professionalId           String
-  clientId                 String
-  walletId                 String
-  transactionId            String?              @unique
-  currency                 String
-  grossAmount              Decimal              @db.Decimal(10, 2)
-  platformCommissionPercent Decimal             @db.Decimal(5, 2)
-  platformCommissionAmount Decimal              @db.Decimal(10, 2)
-  professionalAmount       Decimal              @db.Decimal(10, 2)
-  paymentMethod            BookingPaymentMethod
-  status                   BookingEarningStatus @default(CREDITED)
-  createdAt                DateTime             @default(now())
-  updatedAt                DateTime             @updatedAt
+  id                        String               @id @default(uuid())
+  bookingId                 String               @unique
+  bookingPaymentId          String               @unique
+  professionalId            String
+  clientId                  String
+  walletId                  String
+  transactionId             String?              @unique
+  currency                  String
+  grossAmount               Decimal              @db.Decimal(10, 2)
+  platformCommissionPercent Decimal              @db.Decimal(5, 2)
+  platformCommissionAmount  Decimal              @db.Decimal(10, 2)
+  professionalAmount        Decimal              @db.Decimal(10, 2)
+  paymentMethod             BookingPaymentMethod
+  status                    BookingEarningStatus @default(CREDITED)
+  createdAt                 DateTime             @default(now())
+  updatedAt                 DateTime             @updatedAt
 
-  booking                  Booking              @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  bookingPayment           BookingPayment       @relation(fields: [bookingPaymentId], references: [id], onDelete: Cascade)
-  professional             User                 @relation("ProfessionalBookingEarnings", fields: [professionalId], references: [id], onDelete: Cascade)
-  client                   User                 @relation("ClientBookingEarnings", fields: [clientId], references: [id], onDelete: Cascade)
-  wallet                   Wallet               @relation(fields: [walletId], references: [id], onDelete: Cascade)
-  transaction              Transaction?         @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  booking                          Booking                           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingPayment                   BookingPayment                    @relation(fields: [bookingPaymentId], references: [id], onDelete: Cascade)
+  professional                     User                              @relation("ProfessionalBookingEarnings", fields: [professionalId], references: [id], onDelete: Cascade)
+  client                           User                              @relation("ClientBookingEarnings", fields: [clientId], references: [id], onDelete: Cascade)
+  wallet                           Wallet                            @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  transaction                      Transaction?                      @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  professionalReferralRewardEvents ReferralProfessionalRewardEvent[]
 
   @@index([professionalId, createdAt])
   @@index([clientId, createdAt])
@@ -613,19 +743,24 @@ model BookingEarning {
 }
 
 model SystemConfig {
-  id                       String   @id @default("global")
-  platformFeePercent       Decimal  @default(50.00) @db.Decimal(5, 2)
-  creditToSolesRate        Decimal  @default(1.00) @db.Decimal(10, 2)
-  usdExchangeRate          Decimal  @default(6.96) @db.Decimal(10, 4)
-  minAppVersion            String   @default("1.0")
-  referralPercentage       Decimal  @default(2.50) @db.Decimal(5, 2)
-  referralRewardCredits    Decimal  @default(10.00) @db.Decimal(10, 2)
-  referralMinDepositAmount Decimal  @default(0.00) @db.Decimal(10, 2)
-  referralEnabled          Boolean  @default(true)
-  paymentsEnabled          Boolean  @default(true)
-  withdrawalsEnabled       Boolean  @default(true)
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @default(now()) @updatedAt
+  id                                String   @id @default("global")
+  platformFeePercent                Decimal  @default(50.00) @db.Decimal(5, 2)
+  creditToSolesRate                 Decimal  @default(1.00) @db.Decimal(10, 2)
+  usdExchangeRate                   Decimal  @default(6.96) @db.Decimal(10, 4)
+  minAppVersion                     String   @default("1.0")
+  referralPercentage                Decimal  @default(2.50) @db.Decimal(5, 2)
+  referralRewardCredits             Decimal  @default(10.00) @db.Decimal(10, 2)
+  referralMinDepositAmount          Decimal  @default(0.00) @db.Decimal(10, 2)
+  referralEnabled                   Boolean  @default(true)
+  referralValidPurchasesRequired    Int      @default(1)
+  referralThreshold                 Int      @default(10)
+  referralClientDiscountPercent     Decimal  @default(5.00) @db.Decimal(5, 2)
+  referralClientDiscountSessions    Int      @default(10)
+  referralProfessionalRewardPercent Decimal  @default(5.00) @db.Decimal(5, 2)
+  paymentsEnabled                   Boolean  @default(true)
+  withdrawalsEnabled                Boolean  @default(true)
+  createdAt                         DateTime @default(now())
+  updatedAt                         DateTime @default(now()) @updatedAt
 
   @@map("system_config")
 }
@@ -639,6 +774,8 @@ enum TransactionType {
   PROMOTIONAL_GRANT
   REFERRAL_REWARD
   REFERRAL_REWARD_REVERSAL
+  REFERRAL_PROFESSIONAL_REWARD
+  REFERRAL_PROFESSIONAL_REWARD_REVERSAL
   BOOKING_PAYMENT
 }
 
@@ -684,7 +821,6 @@ enum ReferralStatus {
   QUALIFIED
   REWARDED
 }
-
 
 enum ProfessionalReviewStatus {
   PENDING
@@ -740,6 +876,15 @@ enum BookingEarningStatus {
   CREDITED
 }
 
+enum ReferralClientBenefitStatus {
+  ACTIVE
+  CONSUMED
+}
+
+enum ReferralProfessionalBenefitStatus {
+  ACTIVE
+}
+
 enum WeekDay {
   MONDAY
   TUESDAY
@@ -749,6 +894,3 @@ enum WeekDay {
   SATURDAY
   SUNDAY
 }
-
-
-

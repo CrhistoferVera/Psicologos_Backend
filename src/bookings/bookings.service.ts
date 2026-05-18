@@ -41,6 +41,7 @@ import { BookingListQueryDto } from './dto/booking-list-query.dto';
 import { buildActiveBookingOverlapWhere } from './helpers/booking-query.helper';
 import { allocateCreditDebit } from '../wallet/utils/credit-allocation.util';
 import { BookingEarningsService } from '../booking-earnings/booking-earnings.service';
+import { ReferralsService } from '../referrals/referrals.service';
 import {
   assertValidDate,
   ensureValidTimeZone,
@@ -85,6 +86,7 @@ export class BookingsService {
     private readonly stripeService: StripeService,
     private readonly notificationsService: NotificationsService,
     private readonly bookingEarningsService: BookingEarningsService,
+    private readonly referralsService: ReferralsService,
   ) {}
 
   private newReqId() {
@@ -1398,8 +1400,6 @@ export class BookingsService {
 
     const region = this.normalizeBookingRegion(client);
     const isUsd = region.currency === CURRENCY_USD;
-    const chargeAmount = isUsd ? new Prisma.Decimal(bookingPriceUsd) : sessionOffering.priceBob;
-
     const result = await this.prisma.$transaction(
       async (tx) => {
         await this.expirePendingBookings(tx);
@@ -1412,6 +1412,15 @@ export class BookingsService {
           durationMinutes: sessionOffering.durationMinutes,
           timeZone: timezone,
         });
+
+        const bookingPrices = await this.referralsService.resolveClientBookingDiscount(
+          tx,
+          clientId,
+          sessionOffering.priceBob,
+          new Prisma.Decimal(bookingPriceUsd),
+        );
+
+        const chargeAmount = isUsd ? bookingPrices.priceUsd : bookingPrices.priceBob;
 
         const clientWallet = await tx.wallet.upsert({
           where: { userId: clientId },
@@ -1449,19 +1458,27 @@ export class BookingsService {
             paymentStatus: BookingPaymentStatus.PAID,
             paymentMethod: BookingPaymentMethod.WALLET,
             currency: region.currency,
-            priceBob: sessionOffering.priceBob,
-            priceUsd: new Prisma.Decimal(bookingPriceUsd),
+            priceBob: bookingPrices.priceBob,
+            priceUsd: bookingPrices.priceUsd,
+            originalPriceBob: bookingPrices.originalPriceBob,
+            originalPriceUsd: bookingPrices.originalPriceUsd,
+            referralDiscountPercent: bookingPrices.referralDiscountPercent,
+            referralDiscountAmountBob: bookingPrices.referralDiscountAmountBob,
+            referralDiscountAmountUsd: bookingPrices.referralDiscountAmountUsd,
+            referralClientBenefitId: bookingPrices.referralClientBenefitId,
             expiresAt: null,
           },
         });
 
-        await tx.bookingPayment.create({
+        const bookingPayment = await tx.bookingPayment.create({
           data: {
             bookingId: booking.id,
             method: BookingPaymentMethod.WALLET,
             status: BookingPaymentStatus.PAID,
-            amountBob: isUsd ? null : sessionOffering.priceBob,
-            amountUsd: isUsd ? new Prisma.Decimal(bookingPriceUsd) : null,
+            amountBob: isUsd ? null : bookingPrices.priceBob,
+            amountUsd: isUsd ? bookingPrices.priceUsd : null,
+            originalAmountBob: isUsd ? null : bookingPrices.originalPriceBob,
+            originalAmountUsd: isUsd ? bookingPrices.originalPriceUsd : null,
             currency: region.currency,
           },
         });
@@ -1499,8 +1516,16 @@ export class BookingsService {
               professionalId: dto.professionalId,
               sessionOfferingId: dto.sessionOfferingId,
               currency: region.currency,
+              referralDiscountPercent: Number(bookingPrices.referralDiscountPercent ?? 0),
+              referralDiscountAmountBob: Number(bookingPrices.referralDiscountAmountBob ?? 0),
+              referralDiscountAmountUsd: Number(bookingPrices.referralDiscountAmountUsd ?? 0),
             }),
           },
+        });
+
+        await this.referralsService.consumeClientDiscountForPaidBooking(tx, {
+          bookingId: booking.id,
+          bookingPaymentId: bookingPayment.id,
         });
 
         return booking;
@@ -1509,6 +1534,12 @@ export class BookingsService {
     );
 
     // Pasos post-transacción: no deben fallar el endpoint, el booking ya está confirmado y pagado
+    this.referralsService.refreshReferralQualificationFromPaidBookingDetached({
+      bookingId: result.id,
+    }).catch((err) => {
+      this.logger.error(`[BOOKING-WALLET] referral qualification failed bookingId=${result.id} err=${err?.message}`);
+    });
+
     this.bookingEarningsService.creditProfessionalEarningForBooking({
       bookingId: result.id,
       source: 'WALLET_PAYMENT',

@@ -56,6 +56,38 @@ export class UpdateSystemConfigDto {
   @IsBoolean()
   referralEnabled?: boolean;
 
+  @ApiPropertyOptional({ example: 1, description: 'Cantidad minima de compras validas para que un referido sea valido (recargas aprobadas + sesiones pagadas, >= 0).' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  referralValidPurchasesRequired?: number;
+
+  @ApiPropertyOptional({ example: 10, description: 'Cantidad de referidos validos requeridos para activar un beneficio.' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  referralThreshold?: number;
+
+  @ApiPropertyOptional({ example: 5, description: 'Porcentaje de descuento para beneficio de cliente (0-100).' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  referralClientDiscountPercent?: number;
+
+  @ApiPropertyOptional({ example: 10, description: 'Cantidad de sesiones con descuento por ciclo de beneficio cliente.' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  referralClientDiscountSessions?: number;
+
+  @ApiPropertyOptional({ example: 5, description: 'Porcentaje de recompensa permanente para referente profesional (0-100).' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  referralProfessionalRewardPercent?: number;
+
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
