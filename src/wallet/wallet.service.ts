@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, TransactionType } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SystemConfigService } from '../system-config/system-config.service';
@@ -50,14 +50,18 @@ export class WalletService {
 
     const [transactions, weekTransactions, withdrawalsEnabled] = await Promise.all([
       this.prisma.transaction.findMany({
-        where: { walletId: wallet.id, type: 'EARNING', isPromotional: false },
+        where: {
+          walletId: wallet.id,
+          type: { in: [TransactionType.EARNING, TransactionType.REFERRAL_PROFESSIONAL_REWARD] },
+          isPromotional: false,
+        },
         orderBy: { createdAt: 'desc' },
         take: 50,
       }),
       this.prisma.transaction.findMany({
         where: {
           walletId: wallet.id,
-          type: 'EARNING',
+          type: { in: [TransactionType.EARNING, TransactionType.REFERRAL_PROFESSIONAL_REWARD] },
           isPromotional: false,
           createdAt: { gte: startOfWeek },
         },
@@ -67,13 +71,23 @@ export class WalletService {
     ]);
 
     const parseTransaction = (tx: (typeof transactions)[number]) => {
-      let service = 'Transaccion';
+      let service = tx.type === TransactionType.REFERRAL_PROFESSIONAL_REWARD
+        ? 'Recompensa por referido'
+        : 'Ganancia por sesion';
       let clientName = '';
       let currency: 'BOB' | 'USD' = 'BOB';
       try {
         const meta = JSON.parse(tx.description ?? '{}');
-        service = meta.service ?? service;
-        clientName = meta.clientName ?? '';
+        if (tx.type === TransactionType.REFERRAL_PROFESSIONAL_REWARD) {
+          service = 'Recompensa por referido';
+          clientName = meta.referredUserName ?? meta.referredEmail ?? '';
+        } else if (meta.event === 'BOOKING_EARNING_CREDITED' || meta.event === 'SESSION_PAYMENT') {
+          service = 'Ganancia por sesion';
+          clientName = meta.clientName ?? '';
+        } else {
+          service = meta.service ?? service;
+          clientName = meta.clientName ?? '';
+        }
         const maybeCurrency = String(meta.currency ?? '').toUpperCase();
         if (maybeCurrency === 'USD') currency = 'USD';
       } catch {

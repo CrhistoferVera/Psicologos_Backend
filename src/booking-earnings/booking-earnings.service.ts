@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { ReferralsService } from '../referrals/referrals.service';
 
 type CreditBookingEarningPayload = {
   bookingId: string;
@@ -23,6 +24,7 @@ export class BookingEarningsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly systemConfigService: SystemConfigService,
+    private readonly referralsService: ReferralsService,
   ) {}
 
   private newReqId() {
@@ -101,6 +103,11 @@ export class BookingEarningsService {
             return { credited: false, reason: 'BOOKING_PAYMENT_NOT_FOUND' as const };
           }
 
+          await this.referralsService.consumeClientDiscountForPaidBooking(tx, {
+            bookingId: booking.id,
+            bookingPaymentId: bookingPayment.id,
+          });
+
           const existing = await tx.bookingEarning.findFirst({
             where: {
               OR: [{ bookingId: booking.id }, { bookingPaymentId: bookingPayment.id }],
@@ -109,7 +116,11 @@ export class BookingEarningsService {
           });
 
           if (existing) {
-            return { credited: false, reason: 'ALREADY_CREDITED' as const };
+            return {
+              credited: false,
+              reason: 'ALREADY_CREDITED' as const,
+              bookingEarningId: existing.id,
+            };
           }
 
           const grossAmount =
@@ -212,6 +223,7 @@ export class BookingEarningsService {
             credited: true,
             bookingId: booking.id,
             bookingPaymentId: bookingPayment.id,
+            bookingEarningId: createdEarning.id,
             currency: booking.currency,
             grossAmount: Number(grossAmount),
             professionalAmount: Number(professionalAmount),
@@ -226,10 +238,58 @@ export class BookingEarningsService {
         this.logger.log(
           `[BOOKING-EARNING][${reqId}] credited bookingId=${result.bookingId} bookingPaymentId=${result.bookingPaymentId} gross=${result.grossAmount} net=${result.professionalAmount} currency=${result.currency}`,
         );
+
+        try {
+          await this.referralsService.refreshReferralQualificationFromPaidBookingDetached({
+            bookingId: payload.bookingId,
+            bookingPaymentId: result.bookingPaymentId,
+          });
+        } catch (err: any) {
+          this.logger.error(
+            `[BOOKING-EARNING][${reqId}] referral_qualification_failed bookingId=${payload.bookingId} bookingPaymentId=${result.bookingPaymentId} err=${err?.message}`,
+          );
+        }
+
+        if (result.bookingEarningId) {
+          try {
+            await this.referralsService.maybeRewardProfessionalReferralFromBookingEarningDetached({
+              bookingEarningId: result.bookingEarningId,
+            });
+          } catch (err: any) {
+            this.logger.error(
+              `[BOOKING-EARNING][${reqId}] referral_reward_failed bookingId=${result.bookingId} bookingEarningId=${result.bookingEarningId} err=${err?.message}`,
+            );
+          }
+        }
       } else {
         this.logger.log(
           `[BOOKING-EARNING][${reqId}] skipped bookingId=${payload.bookingId} reason=${result.reason}`,
         );
+
+        if (result.reason === 'ALREADY_CREDITED') {
+          try {
+            await this.referralsService.refreshReferralQualificationFromPaidBookingDetached({
+              bookingId: payload.bookingId,
+              bookingPaymentId: payload.bookingPaymentId,
+            });
+          } catch (err: any) {
+            this.logger.error(
+              `[BOOKING-EARNING][${reqId}] referral_qualification_retry_failed bookingId=${payload.bookingId} bookingPaymentId=${payload.bookingPaymentId ?? 'n/a'} err=${err?.message}`,
+            );
+          }
+        }
+
+        if (result.reason === 'ALREADY_CREDITED' && result.bookingEarningId) {
+          try {
+            await this.referralsService.maybeRewardProfessionalReferralFromBookingEarningDetached({
+              bookingEarningId: result.bookingEarningId,
+            });
+          } catch (err: any) {
+            this.logger.error(
+              `[BOOKING-EARNING][${reqId}] referral_reward_retry_failed bookingId=${payload.bookingId} bookingEarningId=${result.bookingEarningId} err=${err?.message}`,
+            );
+          }
+        }
       }
 
       return result;
@@ -238,14 +298,29 @@ export class BookingEarningsService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
+        const existing = await this.prisma.bookingEarning.findFirst({
+          where: payload.bookingPaymentId
+            ? {
+                OR: [
+                  { bookingId: payload.bookingId },
+                  { bookingPaymentId: payload.bookingPaymentId },
+                ],
+              }
+            : { bookingId: payload.bookingId },
+          select: { id: true },
+        });
+
         this.logger.log(
           `[BOOKING-EARNING][${reqId}] already_credited bookingId=${payload.bookingId} reason=UNIQUE_CONSTRAINT`,
         );
-        return { credited: false, reason: 'ALREADY_CREDITED' as const };
+        return {
+          credited: false,
+          reason: 'ALREADY_CREDITED' as const,
+          bookingEarningId: existing?.id ?? null,
+        };
       }
 
       throw error;
     }
   }
 }
-

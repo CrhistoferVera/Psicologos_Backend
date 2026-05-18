@@ -16,6 +16,7 @@ import {
 } from '../common/phone-metadata.util';
 import { BookingEarningsService } from '../booking-earnings/booking-earnings.service';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { ReferralsService } from '../referrals/referrals.service';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const Stripe = require('stripe');
 
@@ -31,6 +32,7 @@ export class StripeService {
     private readonly notificationsService: NotificationsService,
     private readonly bookingEarningsService: BookingEarningsService,
     private readonly systemConfigService: SystemConfigService,
+    private readonly referralsService: ReferralsService,
   ) {
     this.stripe = new Stripe(this.config.get<string>('STRIPE_SECRET_KEY')!);
   }
@@ -325,6 +327,22 @@ export class StripeService {
     if (!bookingPayment) return false;
 
     if (bookingPayment.status === BookingPaymentStatus.PAID) {
+      await this.prisma.$transaction(async (tx) => {
+        await this.referralsService.consumeClientDiscountForPaidBooking(tx, {
+          bookingId: bookingPayment.bookingId,
+          bookingPaymentId: bookingPayment.id,
+        });
+      });
+      try {
+        await this.referralsService.refreshReferralQualificationFromPaidBookingDetached({
+          bookingId: bookingPayment.bookingId,
+          bookingPaymentId: bookingPayment.id,
+        });
+      } catch (err: any) {
+        this.logger.error(
+          `[STRIPE-BOOKING] referral qualification failed bookingId=${bookingPayment.bookingId} bookingPaymentId=${bookingPayment.id} err=${err?.message}`,
+        );
+      }
       await this.bookingEarningsService.creditProfessionalEarningForBooking({
         bookingId: bookingPayment.bookingId,
         bookingPaymentId: bookingPayment.id,
@@ -398,6 +416,11 @@ export class StripeService {
         },
       });
 
+      await this.referralsService.consumeClientDiscountForPaidBooking(tx, {
+        bookingId: booking.id,
+        bookingPaymentId: bookingPayment.id,
+      });
+
       const bookingUpdate = await tx.booking.updateMany({
         where: {
           id: booking.id,
@@ -460,6 +483,17 @@ export class StripeService {
     } else if (confirmedBookingForNotification) {
       this.logger.warn(
         `[STRIPE-BOOKING] bookingId=${confirmedBookingForNotification.id} professional notification skipped: no FCM token`,
+      );
+    }
+
+    try {
+      await this.referralsService.refreshReferralQualificationFromPaidBookingDetached({
+        bookingId: bookingPayment.bookingId,
+        bookingPaymentId: bookingPayment.id,
+      });
+    } catch (err: any) {
+      this.logger.error(
+        `[STRIPE-BOOKING] referral qualification failed bookingId=${bookingPayment.bookingId} bookingPaymentId=${bookingPayment.id} err=${err?.message}`,
       );
     }
 
@@ -567,16 +601,16 @@ export class StripeService {
     const usdRate = usdExchangeRate > 0 ? usdExchangeRate : 7;
     const amountUsd = Number(deposit.amount) / usdRate;
 
-    await this.prisma.$transaction([
-      this.prisma.depositRequest.update({
+    await this.prisma.$transaction(async (tx) => {
+      await tx.depositRequest.update({
         where: { id: deposit.id },
         data: { status: DepositStatus.APPROVED },
-      }),
-      this.prisma.wallet.update({
+      });
+      await tx.wallet.update({
         where: { id: wallet.id },
         data: { balanceUsd: { increment: amountUsd } },
-      }),
-      this.prisma.transaction.create({
+      });
+      await tx.transaction.create({
         data: {
           walletId: wallet.id,
           depositRequestId: deposit.id,
@@ -585,8 +619,9 @@ export class StripeService {
           realAmount: deposit.amount,
           description: `Recarga Stripe: ${deposit.packageNameAtMoment}`,
         },
-      }),
-    ]);
+      });
+      await this.referralsService.handleApprovedDepositForReferral(tx, deposit.userId);
+    });
   }
 
   // Lista las tarjetas guardadas del usuario
