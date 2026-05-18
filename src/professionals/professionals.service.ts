@@ -152,6 +152,9 @@ export class ProfessionalsService {
       role: { in: PROFESSIONAL_ROLES },
       isActive: true,
       isProfileComplete: true,
+      professionalProfile: {
+        is: { reviewStatus: 'APPROVED' },
+      },
       ...(specialtyFilter
         ? {
             professionalSpecialties: {

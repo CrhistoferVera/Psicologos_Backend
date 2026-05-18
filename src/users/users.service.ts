@@ -159,7 +159,7 @@ export class UsersService {
 
   async getUserFullProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
-      where: { id: userId, role: UserRole.USER },
+      where: { id: userId },
       include: {
         wallet: true,
         userProfile: true,
@@ -184,7 +184,7 @@ export class UsersService {
     },
   ) {
     const user = await this.prisma.user.findUnique({
-      where: { id: userId, role: UserRole.USER },
+      where: { id: userId },
       include: { userProfile: true, wallet: true },
     });
 
