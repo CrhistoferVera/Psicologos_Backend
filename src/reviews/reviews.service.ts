@@ -81,4 +81,91 @@ export class ReviewsService {
 
     return { data: formatted, total, page, limit };
   }
+
+  async findAll(page = 1, limit = 50, search?: string) {
+    const skip = (page - 1) * limit;
+
+    const where = search
+      ? {
+          OR: [
+            {
+              client: {
+                OR: [
+                  { firstName: { contains: search, mode: 'insensitive' as const } },
+                  { lastName: { contains: search, mode: 'insensitive' as const } },
+                ],
+              },
+            },
+            {
+              professional: {
+                OR: [
+                  { firstName: { contains: search, mode: 'insensitive' as const } },
+                  { lastName: { contains: search, mode: 'insensitive' as const } },
+                ],
+              },
+            },
+          ],
+        }
+      : {};
+
+    const [data, total] = await Promise.all([
+      this.prisma.bookingReview.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          rating: true,
+          comment: true,
+          createdAt: true,
+          client: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              userProfile: { select: { avatarUrl: true } },
+            },
+          },
+          professional: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              professionalProfile: { select: { avatarUrl: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.bookingReview.count({ where }),
+    ]);
+
+    const formatted = data.map((r) => ({
+      id: r.id,
+      rating: r.rating,
+      comment: r.comment,
+      createdAt: r.createdAt.toISOString(),
+      client: {
+        id: r.client.id,
+        name: [r.client.firstName, r.client.lastName].filter(Boolean).join(' ') || 'Anónimo',
+        avatarUrl: r.client.userProfile?.avatarUrl ?? null,
+      },
+      professional: {
+        id: r.professional.id,
+        name: [r.professional.firstName, r.professional.lastName].filter(Boolean).join(' ') || 'Profesional',
+        avatarUrl: r.professional.professionalProfile?.avatarUrl ?? null,
+      },
+    }));
+
+    return { data: formatted, total, page, limit };
+  }
+
+  async deleteById(id: string) {
+    const review = await this.prisma.bookingReview.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!review) throw new NotFoundException('Reseña no encontrada.');
+    await this.prisma.bookingReview.delete({ where: { id } });
+  }
 }

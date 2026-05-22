@@ -1,9 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
-  ParseIntPipe,
   ParseUUIDPipe,
   Post,
   Query,
@@ -48,5 +48,25 @@ export class ReviewsController {
       Number(page),
       Number(limit),
     );
+  }
+
+  @Get('admin/all')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Listar todas las reseñas (admin)' })
+  findAll(
+    @Query('page') page = '1',
+    @Query('limit') limit = '50',
+    @Query('search') search?: string,
+  ) {
+    return this.reviewsService.findAll(Number(page), Number(limit), search);
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Eliminar una reseña (admin)' })
+  deleteOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.reviewsService.deleteById(id);
   }
 }
