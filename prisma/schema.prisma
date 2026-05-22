@@ -56,6 +56,8 @@ model User {
   bookingsAsProfessional                      Booking[]                             @relation("ProfessionalBookings")
   bookingEarningsAsClient                     BookingEarning[]                      @relation("ClientBookingEarnings")
   bookingEarningsAsProfessional               BookingEarning[]                      @relation("ProfessionalBookingEarnings")
+  reviewsAsClient                             BookingReview[]                       @relation("ClientReviews")
+  reviewsAsProfessional                       BookingReview[]                       @relation("ProfessionalReviews")
 
   @@index([billingRegion])
   @@index([phoneCountryIso])
@@ -676,6 +678,7 @@ model Booking {
   earning               BookingEarning?
   referralClientBenefit ReferralClientBenefit?       @relation(fields: [referralClientBenefitId], references: [id], onDelete: SetNull)
   referralDiscountUsage ReferralClientDiscountUsage? @relation("ReferralDiscountUsageBooking")
+  review                BookingReview?
 
   @@index([clientId])
   @@index([professionalId])
@@ -763,6 +766,25 @@ model SystemConfig {
   updatedAt                         DateTime @default(now()) @updatedAt
 
   @@map("system_config")
+}
+
+model BookingReview {
+  id             String   @id @default(uuid())
+  bookingId      String   @unique
+  clientId       String
+  professionalId String
+  rating         Int
+  comment        String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  booking      Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  client       User    @relation("ClientReviews", fields: [clientId], references: [id], onDelete: Cascade)
+  professional User    @relation("ProfessionalReviews", fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@index([professionalId])
+  @@index([clientId])
+  @@map("booking_reviews")
 }
 
 enum TransactionType {

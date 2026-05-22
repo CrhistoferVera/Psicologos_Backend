@@ -244,7 +244,8 @@ export class ProfessionalsService {
   }
 
   async findOnePublic(id: string, _currentUserId?: string): Promise<ProfessionalPublicDetailDto> {
-    const user = await this.prisma.user.findFirst({
+    const [user, reviewStats] = await Promise.all([
+    this.prisma.user.findFirst({
       where: {
         id,
         role: { in: PROFESSIONAL_ROLES },
@@ -283,7 +284,13 @@ export class ProfessionalsService {
           },
         },
       },
-    });
+    }),
+    this.prisma.bookingReview.aggregate({
+      where: { professionalId: id },
+      _avg: { rating: true },
+      _count: { rating: true },
+    }),
+    ]);
 
     if (!user) throw new NotFoundException('Profesional no encontrado.');
 
@@ -302,6 +309,8 @@ export class ProfessionalsService {
       images: coverImage ? [coverImage] : [],
       isOnline: profile?.isOnline ?? false,
       specialties: user.professionalSpecialties.map((ps) => ps.specialty),
+      rating: reviewStats._avg.rating ?? null,
+      reviewCount: reviewStats._count.rating,
     };
   }
 

@@ -372,7 +372,18 @@ export class BookingsService {
 
   async getCommunicationAccess(currentUserId: string, otherUserId: string) {
     const result = await this.hasActiveBookingAccess(currentUserId, otherUserId);
-    return this.mapAccessResultForResponse(result);
+    const base = this.mapAccessResultForResponse(result);
+
+    let hasReview = false;
+    if (result.bookingId && result.reason === 'SESSION_ENDED') {
+      const existing = await this.prisma.bookingReview.findUnique({
+        where: { bookingId: result.bookingId },
+        select: { id: true },
+      });
+      hasReview = !!existing;
+    }
+
+    return { ...base, hasReview };
   }
 
   @Cron(CronExpression.EVERY_5_MINUTES)

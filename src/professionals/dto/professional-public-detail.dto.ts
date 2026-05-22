@@ -53,4 +53,10 @@ export class ProfessionalPublicDetailDto {
     example: [{ id: '550e8400-e29b-41d4-a716-446655440001', name: 'Ansiedad', slug: 'ansiedad' }],
   })
   specialties: SpecialtySummaryDto[];
+
+  @ApiProperty({ example: 4.7, nullable: true, description: 'Promedio de calificaciones' })
+  rating: number | null;
+
+  @ApiProperty({ example: 12, description: 'Cantidad de reseñas' })
+  reviewCount: number;
 }

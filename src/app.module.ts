@@ -28,6 +28,7 @@ import { StripeModule } from './stripe/stripe.module';
 import { BanecoQrModule } from './baneco-qr/baneco-qr.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { BookingsModule } from './bookings/bookings.module';
+import { ReviewsModule } from './reviews/reviews.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { BookingsModule } from './bookings/bookings.module';
     BanecoQrModule,
     SessionsModule,
     BookingsModule,
+    ReviewsModule,
   ],
   controllers: [],
   providers: [],
