@@ -31,29 +31,31 @@ model User {
   isActive            Boolean   @default(true)
   stripeCustomerId    String?   @unique
 
-  professionalProfile                         ProfessionalProfile?
-  userProfile                                 UserProfile?
-  wallet                                      Wallet?
-  depositRequests                             DepositRequest[]
-  conversationsAsUser1                        Conversation[]                        @relation("ConversationUser1")
-  conversationsAsUser2                        Conversation[]                        @relation("ConversationUser2")
-  sentMessages                                Message[]                             @relation("SentMessages")
-  professionalSpecialties                     ProfessionalSpecialty[]
-  promotionalCreditsGranted                   PromotionalCreditGrant[]              @relation("PromotionalCreditsGrantedBy")
-  promotionalCreditsReceived                  PromotionalCreditGrant[]              @relation("PromotionalCreditsReceivedBy")
-  referralsSent                               Referral[]                            @relation("ReferralReferrer")
-  referralAsReferred                          Referral?                             @relation("ReferralReferred")
-  sessionsAsProfessional                      Session[]                             @relation("ProfessionalSessions")
-  sessionPayments                             SessionPayment[]                      @relation("ClientSessionPayments")
-  professionalSessionOfferings                ProfessionalSessionOffering[]         @relation("ProfessionalSessionOfferings")
-  professionalAvailabilityRules               ProfessionalAvailabilityRule[]        @relation("ProfessionalAvailabilityRules")
-  professionalAvailabilityExceptions          ProfessionalAvailabilityException[]   @relation("ProfessionalAvailabilityExceptions")
-  bookingsAsClient                            Booking[]                             @relation("ClientBookings")
-  bookingsAsProfessional                      Booking[]                             @relation("ProfessionalBookings")
-  bookingEarningsAsClient                     BookingEarning[]                      @relation("ClientBookingEarnings")
-  bookingEarningsAsProfessional               BookingEarning[]                      @relation("ProfessionalBookingEarnings")
-  reviewsAsClient                             BookingReview[]                       @relation("ClientReviews")
-  reviewsAsProfessional                       BookingReview[]                       @relation("ProfessionalReviews")
+  professionalProfile                ProfessionalProfile?
+  userProfile                        UserProfile?
+  wallet                             Wallet?
+  depositRequests                    DepositRequest[]
+  conversationsAsUser1               Conversation[]                      @relation("ConversationUser1")
+  conversationsAsUser2               Conversation[]                      @relation("ConversationUser2")
+  sentMessages                       Message[]                           @relation("SentMessages")
+  professionalSpecialties            ProfessionalSpecialty[]
+  promotionalCreditsGranted          PromotionalCreditGrant[]            @relation("PromotionalCreditsGrantedBy")
+  promotionalCreditsReceived         PromotionalCreditGrant[]            @relation("PromotionalCreditsReceivedBy")
+  referralsSent                      Referral[]                          @relation("ReferralReferrer")
+  referralAsReferred                 Referral?                           @relation("ReferralReferred")
+  sessionsAsProfessional             Session[]                           @relation("ProfessionalSessions")
+  sessionPayments                    SessionPayment[]                    @relation("ClientSessionPayments")
+  professionalSessionOfferings       ProfessionalSessionOffering[]       @relation("ProfessionalSessionOfferings")
+  professionalAvailabilityRules      ProfessionalAvailabilityRule[]      @relation("ProfessionalAvailabilityRules")
+  professionalAvailabilityExceptions ProfessionalAvailabilityException[] @relation("ProfessionalAvailabilityExceptions")
+  bookingsAsClient                   Booking[]                           @relation("ClientBookings")
+  bookingsAsProfessional             Booking[]                           @relation("ProfessionalBookings")
+  bookingEarningsAsClient            BookingEarning[]                    @relation("ClientBookingEarnings")
+  bookingEarningsAsProfessional      BookingEarning[]                    @relation("ProfessionalBookingEarnings")
+  reviewsAsClient                    BookingReview[]                     @relation("ClientReviews")
+  reviewsAsProfessional              BookingReview[]                     @relation("ProfessionalReviews")
+  bookingRescheduleRequestsRequested BookingRescheduleRequest[]          @relation("BookingRescheduleRequestedBy")
+  bookingRescheduleRequestsResponded BookingRescheduleRequest[]          @relation("BookingRescheduleRespondedBy")
 
   @@index([billingRegion])
   @@index([phoneCountryIso])
@@ -195,10 +197,10 @@ model DepositRequest {
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
 
-  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  package            Package?       @relation(fields: [packageId], references: [id])
-  paymentMethod      PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
-  transaction        Transaction?
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  package       Package?       @relation(fields: [packageId], references: [id])
+  paymentMethod PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+  transaction   Transaction?
 
   @@map("deposit_requests")
 }
@@ -234,12 +236,12 @@ model Transaction {
   description       String?
   createdAt         DateTime        @default(now())
 
-  wallet                               Wallet                           @relation(fields: [walletId], references: [id], onDelete: Cascade)
-  depositRequest                       DepositRequest?                  @relation(fields: [depositRequestId], references: [id])
-  promotionalCreditGrant      PromotionalCreditGrant?
-  asReferralReward            ReferralReward?          @relation("ReferralRewardTransaction")
-  asReferralRewardReversal    ReferralReward?          @relation("ReferralRewardReversalTransaction")
-  bookingEarning              BookingEarning?
+  wallet                   Wallet                  @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  depositRequest           DepositRequest?         @relation(fields: [depositRequestId], references: [id])
+  promotionalCreditGrant   PromotionalCreditGrant?
+  asReferralReward         ReferralReward?         @relation("ReferralRewardTransaction")
+  asReferralRewardReversal ReferralReward?         @relation("ReferralRewardReversalTransaction")
+  bookingEarning           BookingEarning?
 
   @@index([walletId, createdAt])
   @@index([type, createdAt])
@@ -369,20 +371,20 @@ model PromotionalCreditGrant {
 }
 
 model Referral {
-  id                   String         @id @default(uuid())
-  referrerUserId       String
-  referredUserId       String         @unique
-  codeUsed             String
-  status               ReferralStatus @default(PENDING)
-  referrerRole         UserRole
-  referredRole         UserRole
-  rewardPaidAt         DateTime?
-  qualifiedAt          DateTime?
-  createdAt            DateTime       @default(now())
-  updatedAt            DateTime       @default(now()) @updatedAt
+  id             String         @id @default(uuid())
+  referrerUserId String
+  referredUserId String         @unique
+  codeUsed       String
+  status         ReferralStatus @default(PENDING)
+  referrerRole   UserRole
+  referredRole   UserRole
+  rewardPaidAt   DateTime?
+  qualifiedAt    DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @default(now()) @updatedAt
 
-  referrer User            @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
-  referred User            @relation("ReferralReferred", fields: [referredUserId], references: [id], onDelete: Cascade)
+  referrer User             @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  referred User             @relation("ReferralReferred", fields: [referredUserId], references: [id], onDelete: Cascade)
   rewards  ReferralReward[]
 
   @@index([referrerUserId])
@@ -391,25 +393,25 @@ model Referral {
 }
 
 model ReferralReward {
-  id                String            @id @default(uuid())
-  referralId        String
-  type              ReferralRewardType
-  case              ReferralCase
-  currency          String
-  sourceAmount      Decimal           @db.Decimal(10, 2)
-  rewardPercent     Decimal           @db.Decimal(5, 2)
-  rewardAmount      Decimal           @db.Decimal(10, 2)
-  bookingId         String?
-  bookingEarningId  String?
-  depositRequestId  String?
-  transactionId     String?           @unique
-  reversedAt        DateTime?
-  reversalTransactionId String?       @unique
-  createdAt         DateTime          @default(now())
+  id                    String             @id @default(uuid())
+  referralId            String
+  type                  ReferralRewardType
+  case                  ReferralCase
+  currency              String
+  sourceAmount          Decimal            @db.Decimal(10, 2)
+  rewardPercent         Decimal            @db.Decimal(5, 2)
+  rewardAmount          Decimal            @db.Decimal(10, 2)
+  bookingId             String?
+  bookingEarningId      String?
+  depositRequestId      String?
+  transactionId         String?            @unique
+  reversedAt            DateTime?
+  reversalTransactionId String?            @unique
+  createdAt             DateTime           @default(now())
 
-  referral            Referral      @relation(fields: [referralId], references: [id], onDelete: Cascade)
-  transaction         Transaction?  @relation("ReferralRewardTransaction", fields: [transactionId], references: [id], onDelete: SetNull)
-  reversalTransaction Transaction?  @relation("ReferralRewardReversalTransaction", fields: [reversalTransactionId], references: [id], onDelete: SetNull)
+  referral            Referral     @relation(fields: [referralId], references: [id], onDelete: Cascade)
+  transaction         Transaction? @relation("ReferralRewardTransaction", fields: [transactionId], references: [id], onDelete: SetNull)
+  reversalTransaction Transaction? @relation("ReferralRewardReversalTransaction", fields: [reversalTransactionId], references: [id], onDelete: SetNull)
 
   @@index([referralId])
   @@index([bookingEarningId])
@@ -535,15 +537,17 @@ model Booking {
   reminder10BeforeStartSentAt    DateTime?
   reminder15BeforeEndSentAt      DateTime?
   professionalPurchaseNotifiedAt DateTime?
+  rescheduleCount                Int                   @default(0)
   createdAt                      DateTime              @default(now())
   updatedAt                      DateTime              @updatedAt
 
-  client                User                         @relation("ClientBookings", fields: [clientId], references: [id], onDelete: Cascade)
-  professional          User                         @relation("ProfessionalBookings", fields: [professionalId], references: [id], onDelete: Cascade)
-  sessionOffering       ProfessionalSessionOffering  @relation(fields: [sessionOfferingId], references: [id], onDelete: Restrict)
-  payments              BookingPayment[]
-  earning               BookingEarning?
-  review                BookingReview?
+  client             User                        @relation("ClientBookings", fields: [clientId], references: [id], onDelete: Cascade)
+  professional       User                        @relation("ProfessionalBookings", fields: [professionalId], references: [id], onDelete: Cascade)
+  sessionOffering    ProfessionalSessionOffering @relation(fields: [sessionOfferingId], references: [id], onDelete: Restrict)
+  payments           BookingPayment[]
+  earning            BookingEarning?
+  review             BookingReview?
+  rescheduleRequests BookingRescheduleRequest[]
 
   @@index([clientId])
   @@index([professionalId])
@@ -552,6 +556,35 @@ model Booking {
   @@index([status])
   @@index([professionalId, scheduledStartAt, scheduledEndAt])
   @@map("bookings")
+}
+
+model BookingRescheduleRequest {
+  id                String                         @id @default(uuid())
+  bookingId         String
+  requestedByUserId String
+  requestedByRole   UserRole
+  currentStartAt    DateTime
+  currentEndAt      DateTime
+  proposedStartAt   DateTime
+  proposedEndAt     DateTime
+  proposedTimezone  String
+  reason            String?                        @db.Text
+  status            BookingRescheduleRequestStatus @default(PENDING)
+  respondedByUserId String?
+  respondedAt       DateTime?
+  responseNote      String?                        @db.Text
+  requestExpiresAt  DateTime?
+  createdAt         DateTime                       @default(now())
+  updatedAt         DateTime                       @updatedAt
+
+  booking         Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  requestedByUser User    @relation("BookingRescheduleRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Cascade)
+  respondedByUser User?   @relation("BookingRescheduleRespondedBy", fields: [respondedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId, status])
+  @@index([requestedByUserId, status, createdAt])
+  @@index([respondedByUserId, status, createdAt])
+  @@map("booking_reschedule_requests")
 }
 
 model BookingPayment {
@@ -569,8 +602,8 @@ model BookingPayment {
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
-  booking               Booking                      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  earning               BookingEarning?
+  booking Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  earning BookingEarning?
 
   @@index([bookingId])
   @@index([status])
@@ -595,12 +628,12 @@ model BookingEarning {
   createdAt                 DateTime             @default(now())
   updatedAt                 DateTime             @updatedAt
 
-  booking                          Booking                           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  bookingPayment                   BookingPayment                    @relation(fields: [bookingPaymentId], references: [id], onDelete: Cascade)
-  professional                     User                              @relation("ProfessionalBookingEarnings", fields: [professionalId], references: [id], onDelete: Cascade)
-  client                           User                              @relation("ClientBookingEarnings", fields: [clientId], references: [id], onDelete: Cascade)
-  wallet                           Wallet                            @relation(fields: [walletId], references: [id], onDelete: Cascade)
-  transaction                      Transaction?                      @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  booking        Booking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingPayment BookingPayment @relation(fields: [bookingPaymentId], references: [id], onDelete: Cascade)
+  professional   User           @relation("ProfessionalBookingEarnings", fields: [professionalId], references: [id], onDelete: Cascade)
+  client         User           @relation("ClientBookingEarnings", fields: [clientId], references: [id], onDelete: Cascade)
+  wallet         Wallet         @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  transaction    Transaction?   @relation(fields: [transactionId], references: [id], onDelete: SetNull)
 
   @@index([professionalId, createdAt])
   @@index([clientId, createdAt])
@@ -764,6 +797,14 @@ enum BookingEarningStatus {
 enum ReferralRewardType {
   SESSION
   PACKAGE
+}
+
+enum BookingRescheduleRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+  EXPIRED
 }
 
 enum ReferralCase {
