@@ -43,10 +43,6 @@ model User {
   promotionalCreditsReceived                  PromotionalCreditGrant[]              @relation("PromotionalCreditsReceivedBy")
   referralsSent                               Referral[]                            @relation("ReferralReferrer")
   referralAsReferred                          Referral?                             @relation("ReferralReferred")
-  referralClientBenefits                      ReferralClientBenefit[]               @relation("ReferralClientBenefitReferrer")
-  referralProfessionalCampaigns               ReferralProfessionalBenefitCampaign[] @relation("ReferralProfessionalCampaignReferrer")
-  referralProfessionalBeneficiariesAsReferrer ReferralProfessionalBeneficiary[]     @relation("ReferralProfessionalBenefitReferrer")
-  referralProfessionalBeneficiariesAsReferred ReferralProfessionalBeneficiary[]     @relation("ReferralProfessionalBenefitReferred")
   sessionsAsProfessional                      Session[]                             @relation("ProfessionalSessions")
   sessionPayments                             SessionPayment[]                      @relation("ClientSessionPayments")
   professionalSessionOfferings                ProfessionalSessionOffering[]         @relation("ProfessionalSessionOfferings")
@@ -203,7 +199,6 @@ model DepositRequest {
   package            Package?       @relation(fields: [packageId], references: [id])
   paymentMethod      PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
   transaction        Transaction?
-  qualifyingReferral Referral?
 
   @@map("deposit_requests")
 }
@@ -241,15 +236,10 @@ model Transaction {
 
   wallet                               Wallet                           @relation(fields: [walletId], references: [id], onDelete: Cascade)
   depositRequest                       DepositRequest?                  @relation(fields: [depositRequestId], references: [id])
-  promotionalCreditGrant               PromotionalCreditGrant?
-  referralReward                       Referral?
-  asSourceReferralReward               ReferralRewardEvent?             @relation("ReferralRewardSource")
-  asRewardReferralReward               ReferralRewardEvent?             @relation("ReferralRewardTarget")
-  asReversalReferralReward             ReferralRewardEvent?             @relation("ReferralRewardReversal")
-  asProfessionalReferralRewardSource   ReferralProfessionalRewardEvent? @relation("ProfessionalReferralRewardSource")
-  asProfessionalReferralRewardTarget   ReferralProfessionalRewardEvent? @relation("ProfessionalReferralRewardTarget")
-  asProfessionalReferralRewardReversal ReferralProfessionalRewardEvent? @relation("ProfessionalReferralRewardReversal")
-  bookingEarning                       BookingEarning?
+  promotionalCreditGrant      PromotionalCreditGrant?
+  asReferralReward            ReferralReward?          @relation("ReferralRewardTransaction")
+  asReferralRewardReversal    ReferralReward?          @relation("ReferralRewardReversalTransaction")
+  bookingEarning              BookingEarning?
 
   @@index([walletId, createdAt])
   @@index([type, createdAt])
@@ -379,172 +369,52 @@ model PromotionalCreditGrant {
 }
 
 model Referral {
-  id                       String         @id @default(uuid())
-  referrerUserId           String
-  referredUserId           String         @unique
-  codeUsed                 String
-  status                   ReferralStatus @default(PENDING)
-  referredDepositRequestId String?        @unique
-  rewardTransactionId      String?        @unique
-  rewardCredits            Decimal        @default(0.00) @db.Decimal(10, 2)
-  validPurchasesCount      Int            @default(0)
-  qualifiedAt              DateTime?
-  rewardedAt               DateTime?
-  createdAt                DateTime       @default(now())
-  updatedAt                DateTime       @default(now()) @updatedAt
+  id                   String         @id @default(uuid())
+  referrerUserId       String
+  referredUserId       String         @unique
+  codeUsed             String
+  status               ReferralStatus @default(PENDING)
+  referrerRole         UserRole
+  referredRole         UserRole
+  rewardPaidAt         DateTime?
+  qualifiedAt          DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @default(now()) @updatedAt
 
-  referrer                     User                              @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
-  referred                     User                              @relation("ReferralReferred", fields: [referredUserId], references: [id], onDelete: Cascade)
-  referredDepositRequest       DepositRequest?                   @relation(fields: [referredDepositRequestId], references: [id], onDelete: SetNull)
-  rewardTransaction            Transaction?                      @relation(fields: [rewardTransactionId], references: [id], onDelete: SetNull)
-  rewardEvents                 ReferralRewardEvent[]
-  professionalBeneficiaryLinks ReferralProfessionalBeneficiary[]
+  referrer User            @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  referred User            @relation("ReferralReferred", fields: [referredUserId], references: [id], onDelete: Cascade)
+  rewards  ReferralReward[]
 
   @@index([referrerUserId])
   @@index([status, createdAt])
   @@map("referrals")
 }
 
-model ReferralRewardEvent {
-  id                    String    @id @default(uuid())
-  referralId            String
-  sourceTransactionId   String    @unique
-  rewardTransactionId   String    @unique
-  rewardAmount          Decimal   @db.Decimal(10, 2)
-  percentageApplied     Decimal   @db.Decimal(5, 2)
-  bonusPercentApplied   Decimal   @default(0.00) @db.Decimal(5, 2)
-  reversedAt            DateTime?
-  reversalTransactionId String?   @unique
-  createdAt             DateTime  @default(now())
+model ReferralReward {
+  id                String            @id @default(uuid())
+  referralId        String
+  type              ReferralRewardType
+  case              ReferralCase
+  currency          String
+  sourceAmount      Decimal           @db.Decimal(10, 2)
+  rewardPercent     Decimal           @db.Decimal(5, 2)
+  rewardAmount      Decimal           @db.Decimal(10, 2)
+  bookingId         String?
+  bookingEarningId  String?
+  depositRequestId  String?
+  transactionId     String?           @unique
+  reversedAt        DateTime?
+  reversalTransactionId String?       @unique
+  createdAt         DateTime          @default(now())
 
-  referral            Referral     @relation(fields: [referralId], references: [id], onDelete: Cascade)
-  sourceTransaction   Transaction  @relation("ReferralRewardSource", fields: [sourceTransactionId], references: [id], onDelete: Cascade)
-  rewardTransaction   Transaction  @relation("ReferralRewardTarget", fields: [rewardTransactionId], references: [id], onDelete: Cascade)
-  reversalTransaction Transaction? @relation("ReferralRewardReversal", fields: [reversalTransactionId], references: [id], onDelete: SetNull)
+  referral            Referral      @relation(fields: [referralId], references: [id], onDelete: Cascade)
+  transaction         Transaction?  @relation("ReferralRewardTransaction", fields: [transactionId], references: [id], onDelete: SetNull)
+  reversalTransaction Transaction?  @relation("ReferralRewardReversalTransaction", fields: [reversalTransactionId], references: [id], onDelete: SetNull)
 
   @@index([referralId])
-  @@map("referral_reward_events")
-}
-
-model ReferralBonusTier {
-  id                 String   @id @default(uuid())
-  label              String
-  minActiveReferrals Int
-  bonusPercent       Decimal  @db.Decimal(5, 2)
-  isActive           Boolean  @default(true)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-
-  @@map("referral_bonus_tiers")
-}
-
-model ReferralClientBenefit {
-  id                String                      @id @default(uuid())
-  referrerUserId    String
-  cycleNumber       Int
-  threshold         Int
-  discountPercent   Decimal                     @db.Decimal(5, 2)
-  totalSessions     Int
-  remainingSessions Int
-  status            ReferralClientBenefitStatus @default(ACTIVE)
-  activatedAt       DateTime                    @default(now())
-  consumedAt        DateTime?
-  createdAt         DateTime                    @default(now())
-  updatedAt         DateTime                    @updatedAt
-
-  referrer User                          @relation("ReferralClientBenefitReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
-  bookings Booking[]
-  usages   ReferralClientDiscountUsage[]
-
-  @@unique([referrerUserId, cycleNumber])
-  @@index([referrerUserId, status])
-  @@map("referral_client_benefits")
-}
-
-model ReferralClientDiscountUsage {
-  id                String   @id @default(uuid())
-  benefitId         String
-  bookingId         String   @unique
-  bookingPaymentId  String?  @unique
-  currency          String
-  discountPercent   Decimal  @db.Decimal(5, 2)
-  discountAmountBob Decimal? @db.Decimal(10, 2)
-  discountAmountUsd Decimal? @db.Decimal(10, 2)
-  createdAt         DateTime @default(now())
-
-  benefit        ReferralClientBenefit @relation(fields: [benefitId], references: [id], onDelete: Cascade)
-  booking        Booking               @relation("ReferralDiscountUsageBooking", fields: [bookingId], references: [id], onDelete: Cascade)
-  bookingPayment BookingPayment?       @relation("ReferralDiscountUsageBookingPayment", fields: [bookingPaymentId], references: [id], onDelete: SetNull)
-
-  @@index([benefitId, createdAt])
-  @@map("referral_client_discount_usages")
-}
-
-model ReferralProfessionalBenefitCampaign {
-  id                     String                            @id @default(uuid())
-  professionalReferrerId String
-  cycleNumber            Int
-  threshold              Int
-  rewardPercent          Decimal                           @db.Decimal(5, 2)
-  status                 ReferralProfessionalBenefitStatus @default(ACTIVE)
-  activatedAt            DateTime                          @default(now())
-  createdAt              DateTime                          @default(now())
-  updatedAt              DateTime                          @updatedAt
-
-  professionalReferrer User                              @relation("ReferralProfessionalCampaignReferrer", fields: [professionalReferrerId], references: [id], onDelete: Cascade)
-  beneficiaries        ReferralProfessionalBeneficiary[]
-
-  @@unique([professionalReferrerId, cycleNumber])
-  @@index([professionalReferrerId, status])
-  @@map("referral_professional_benefit_campaigns")
-}
-
-model ReferralProfessionalBeneficiary {
-  id                     String   @id @default(uuid())
-  campaignId             String
-  professionalReferrerId String
-  referredUserId         String
-  referralId             String?
-  rewardPercent          Decimal  @db.Decimal(5, 2)
-  isActive               Boolean  @default(true)
-  activatedAt            DateTime @default(now())
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
-
-  campaign             ReferralProfessionalBenefitCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  professionalReferrer User                                @relation("ReferralProfessionalBenefitReferrer", fields: [professionalReferrerId], references: [id], onDelete: Cascade)
-  referredUser         User                                @relation("ReferralProfessionalBenefitReferred", fields: [referredUserId], references: [id], onDelete: Cascade)
-  referral             Referral?                           @relation(fields: [referralId], references: [id], onDelete: SetNull)
-  rewardEvents         ReferralProfessionalRewardEvent[]
-
-  @@unique([professionalReferrerId, referredUserId])
-  @@index([campaignId])
-  @@index([referredUserId, isActive])
-  @@map("referral_professional_beneficiaries")
-}
-
-model ReferralProfessionalRewardEvent {
-  id                    String    @id @default(uuid())
-  beneficiaryId         String
-  bookingEarningId      String    @unique
-  sourceTransactionId   String?   @unique
-  rewardTransactionId   String    @unique
-  reversalTransactionId String?   @unique
-  currency              String
-  sourceAmount          Decimal   @db.Decimal(10, 2)
-  rewardPercent         Decimal   @db.Decimal(5, 2)
-  rewardAmount          Decimal   @db.Decimal(10, 2)
-  reversedAt            DateTime?
-  createdAt             DateTime  @default(now())
-
-  beneficiary         ReferralProfessionalBeneficiary @relation(fields: [beneficiaryId], references: [id], onDelete: Cascade)
-  bookingEarning      BookingEarning                  @relation(fields: [bookingEarningId], references: [id], onDelete: Cascade)
-  sourceTransaction   Transaction?                    @relation("ProfessionalReferralRewardSource", fields: [sourceTransactionId], references: [id], onDelete: SetNull)
-  rewardTransaction   Transaction                     @relation("ProfessionalReferralRewardTarget", fields: [rewardTransactionId], references: [id], onDelete: Cascade)
-  reversalTransaction Transaction?                    @relation("ProfessionalReferralRewardReversal", fields: [reversalTransactionId], references: [id], onDelete: SetNull)
-
-  @@index([beneficiaryId, createdAt])
-  @@map("referral_professional_reward_events")
+  @@index([bookingEarningId])
+  @@index([depositRequestId])
+  @@map("referral_rewards")
 }
 
 model Session {
@@ -657,10 +527,6 @@ model Booking {
   priceUsd                       Decimal               @db.Decimal(10, 2)
   originalPriceBob               Decimal?              @db.Decimal(10, 2)
   originalPriceUsd               Decimal?              @db.Decimal(10, 2)
-  referralDiscountPercent        Decimal               @default(0.00) @db.Decimal(5, 2)
-  referralDiscountAmountBob      Decimal               @default(0.00) @db.Decimal(10, 2)
-  referralDiscountAmountUsd      Decimal               @default(0.00) @db.Decimal(10, 2)
-  referralClientBenefitId        String?
   currency                       String
   paymentMethod                  BookingPaymentMethod?
   paymentStatus                  BookingPaymentStatus  @default(PENDING)
@@ -677,8 +543,6 @@ model Booking {
   sessionOffering       ProfessionalSessionOffering  @relation(fields: [sessionOfferingId], references: [id], onDelete: Restrict)
   payments              BookingPayment[]
   earning               BookingEarning?
-  referralClientBenefit ReferralClientBenefit?       @relation(fields: [referralClientBenefitId], references: [id], onDelete: SetNull)
-  referralDiscountUsage ReferralClientDiscountUsage? @relation("ReferralDiscountUsageBooking")
   review                BookingReview?
 
   @@index([clientId])
@@ -707,7 +571,6 @@ model BookingPayment {
 
   booking               Booking                      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   earning               BookingEarning?
-  referralDiscountUsage ReferralClientDiscountUsage? @relation("ReferralDiscountUsageBookingPayment")
 
   @@index([bookingId])
   @@index([status])
@@ -738,7 +601,6 @@ model BookingEarning {
   client                           User                              @relation("ClientBookingEarnings", fields: [clientId], references: [id], onDelete: Cascade)
   wallet                           Wallet                            @relation(fields: [walletId], references: [id], onDelete: Cascade)
   transaction                      Transaction?                      @relation(fields: [transactionId], references: [id], onDelete: SetNull)
-  professionalReferralRewardEvents ReferralProfessionalRewardEvent[]
 
   @@index([professionalId, createdAt])
   @@index([clientId, createdAt])
@@ -797,8 +659,8 @@ enum TransactionType {
   PROMOTIONAL_GRANT
   REFERRAL_REWARD
   REFERRAL_REWARD_REVERSAL
-  REFERRAL_PROFESSIONAL_REWARD
-  REFERRAL_PROFESSIONAL_REWARD_REVERSAL
+  REFERRAL_PACKAGE_REWARD
+  REFERRAL_PACKAGE_REWARD_REVERSAL
   BOOKING_PAYMENT
 }
 
@@ -899,13 +761,15 @@ enum BookingEarningStatus {
   CREDITED
 }
 
-enum ReferralClientBenefitStatus {
-  ACTIVE
-  CONSUMED
+enum ReferralRewardType {
+  SESSION
+  PACKAGE
 }
 
-enum ReferralProfessionalBenefitStatus {
-  ACTIVE
+enum ReferralCase {
+  PRO_TO_PRO
+  PRO_TO_USER
+  USER_TO_USER
 }
 
 enum WeekDay {

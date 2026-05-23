@@ -52,7 +52,7 @@ export class WalletService {
       this.prisma.transaction.findMany({
         where: {
           walletId: wallet.id,
-          type: { in: [TransactionType.EARNING, TransactionType.REFERRAL_PROFESSIONAL_REWARD] },
+          type: { in: [TransactionType.EARNING, TransactionType.REFERRAL_REWARD] },
           isPromotional: false,
         },
         orderBy: { createdAt: 'desc' },
@@ -61,7 +61,7 @@ export class WalletService {
       this.prisma.transaction.findMany({
         where: {
           walletId: wallet.id,
-          type: { in: [TransactionType.EARNING, TransactionType.REFERRAL_PROFESSIONAL_REWARD] },
+          type: { in: [TransactionType.EARNING, TransactionType.REFERRAL_REWARD] },
           isPromotional: false,
           createdAt: { gte: startOfWeek },
         },
@@ -71,14 +71,14 @@ export class WalletService {
     ]);
 
     const parseTransaction = (tx: (typeof transactions)[number]) => {
-      let service = tx.type === TransactionType.REFERRAL_PROFESSIONAL_REWARD
+      let service = tx.type === TransactionType.REFERRAL_REWARD
         ? 'Recompensa por referido'
         : 'Ganancia por sesion';
       let clientName = '';
       let currency: 'BOB' | 'USD' = 'BOB';
       try {
         const meta = JSON.parse(tx.description ?? '{}');
-        if (tx.type === TransactionType.REFERRAL_PROFESSIONAL_REWARD) {
+        if (tx.type === TransactionType.REFERRAL_REWARD) {
           service = 'Recompensa por referido';
           clientName = meta.referredUserName ?? meta.referredEmail ?? '';
         } else if (meta.event === 'BOOKING_EARNING_CREDITED' || meta.event === 'SESSION_PAYMENT') {

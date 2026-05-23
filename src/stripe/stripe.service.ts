@@ -327,22 +327,6 @@ export class StripeService {
     if (!bookingPayment) return false;
 
     if (bookingPayment.status === BookingPaymentStatus.PAID) {
-      await this.prisma.$transaction(async (tx) => {
-        await this.referralsService.consumeClientDiscountForPaidBooking(tx, {
-          bookingId: bookingPayment.bookingId,
-          bookingPaymentId: bookingPayment.id,
-        });
-      });
-      try {
-        await this.referralsService.refreshReferralQualificationFromPaidBookingDetached({
-          bookingId: bookingPayment.bookingId,
-          bookingPaymentId: bookingPayment.id,
-        });
-      } catch (err: any) {
-        this.logger.error(
-          `[STRIPE-BOOKING] referral qualification failed bookingId=${bookingPayment.bookingId} bookingPaymentId=${bookingPayment.id} err=${err?.message}`,
-        );
-      }
       await this.bookingEarningsService.creditProfessionalEarningForBooking({
         bookingId: bookingPayment.bookingId,
         bookingPaymentId: bookingPayment.id,
@@ -416,11 +400,6 @@ export class StripeService {
         },
       });
 
-      await this.referralsService.consumeClientDiscountForPaidBooking(tx, {
-        bookingId: booking.id,
-        bookingPaymentId: bookingPayment.id,
-      });
-
       const bookingUpdate = await tx.booking.updateMany({
         where: {
           id: booking.id,
@@ -483,17 +462,6 @@ export class StripeService {
     } else if (confirmedBookingForNotification) {
       this.logger.warn(
         `[STRIPE-BOOKING] bookingId=${confirmedBookingForNotification.id} professional notification skipped: no FCM token`,
-      );
-    }
-
-    try {
-      await this.referralsService.refreshReferralQualificationFromPaidBookingDetached({
-        bookingId: bookingPayment.bookingId,
-        bookingPaymentId: bookingPayment.id,
-      });
-    } catch (err: any) {
-      this.logger.error(
-        `[STRIPE-BOOKING] referral qualification failed bookingId=${bookingPayment.bookingId} bookingPaymentId=${bookingPayment.id} err=${err?.message}`,
       );
     }
 
@@ -620,7 +588,14 @@ export class StripeService {
           description: `Recarga Stripe: ${deposit.packageNameAtMoment}`,
         },
       });
-      await this.referralsService.handleApprovedDepositForReferral(tx, deposit.userId);
+      const { referralRewardPercent } = await this.systemConfigService.getRuntimeConfig();
+      await this.referralsService.maybeRewardReferrerFromPackage(tx, {
+        depositRequestId: deposit.id,
+        buyerUserId: deposit.userId,
+        grossAmount: new Prisma.Decimal(amountUsd),
+        currency: 'USD',
+        rewardPercent: referralRewardPercent,
+      });
     });
   }
 

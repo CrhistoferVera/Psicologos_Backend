@@ -325,7 +325,14 @@ export class BanecoQrService {
           description,
         },
       });
-      await this.referralsService.handleApprovedDepositForReferral(tx, deposit.userId);
+      const { referralRewardPercent } = await this.systemConfigService.getRuntimeConfig();
+      await this.referralsService.maybeRewardReferrerFromPackage(tx, {
+        depositRequestId: deposit.id,
+        buyerUserId: deposit.userId,
+        grossAmount: new Prisma.Decimal(deposit.amount),
+        currency: 'BOB',
+        rewardPercent: referralRewardPercent,
+      });
     });
     this.logger.log(`[APPLY][${qrId}] wallet recharged +${deposit.amount} BOB`);
   }
@@ -418,22 +425,6 @@ export class BanecoQrService {
 
     if (!bookingPayment) return false;
     if (bookingPayment.status === BookingPaymentStatus.PAID) {
-      await this.prisma.$transaction(async (tx) => {
-        await this.referralsService.consumeClientDiscountForPaidBooking(tx, {
-          bookingId: bookingPayment.bookingId,
-          bookingPaymentId: bookingPayment.id,
-        });
-      });
-      try {
-        await this.referralsService.refreshReferralQualificationFromPaidBookingDetached({
-          bookingId: bookingPayment.bookingId,
-          bookingPaymentId: bookingPayment.id,
-        });
-      } catch (err: any) {
-        this.logger.error(
-          `[QR-BOOKING] referral qualification failed bookingId=${bookingPayment.bookingId} bookingPaymentId=${bookingPayment.id} err=${err?.message}`,
-        );
-      }
       await this.bookingEarningsService.creditProfessionalEarningForBooking({
         bookingId: bookingPayment.bookingId,
         bookingPaymentId: bookingPayment.id,
@@ -515,11 +506,6 @@ export class BanecoQrService {
         },
       });
 
-      await this.referralsService.consumeClientDiscountForPaidBooking(tx, {
-        bookingId: fresh.id,
-        bookingPaymentId: bookingPayment.id,
-      });
-
       const bookingUpdate = await tx.booking.updateMany({
         where: {
           id: fresh.id,
@@ -582,17 +568,6 @@ export class BanecoQrService {
     } else if (confirmedBookingForNotification) {
       this.logger.warn(
         `[QR-BOOKING] bookingId=${confirmedBookingForNotification.id} professional notification skipped: no FCM token`,
-      );
-    }
-
-    try {
-      await this.referralsService.refreshReferralQualificationFromPaidBookingDetached({
-        bookingId: bookingPayment.bookingId,
-        bookingPaymentId: bookingPayment.id,
-      });
-    } catch (err: any) {
-      this.logger.error(
-        `[QR-BOOKING] referral qualification failed bookingId=${bookingPayment.bookingId} bookingPaymentId=${bookingPayment.id} err=${err?.message}`,
       );
     }
 
@@ -661,7 +636,14 @@ export class BanecoQrService {
           description: `Recarga QR Baneco: ${deposit.packageNameAtMoment}`,
         },
       });
-      await this.referralsService.handleApprovedDepositForReferral(tx, deposit.userId);
+      const { referralRewardPercent } = await this.systemConfigService.getRuntimeConfig();
+      await this.referralsService.maybeRewardReferrerFromPackage(tx, {
+        depositRequestId: deposit.id,
+        buyerUserId: deposit.userId,
+        grossAmount: new Prisma.Decimal(deposit.amount),
+        currency: 'BOB',
+        rewardPercent: referralRewardPercent,
+      });
     });
   }
 

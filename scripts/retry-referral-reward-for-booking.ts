@@ -1,9 +1,9 @@
 import { ConfigService } from '@nestjs/config';
-import { BookingPaymentStatus, BookingStatus } from '@prisma/client';
+import { BookingPaymentStatus, BookingStatus, Prisma } from '@prisma/client';
+import * as dotenv from 'dotenv';
 import { PrismaService } from '../src/prisma.service';
 import { ReferralsService } from '../src/referrals/referrals.service';
 import { SystemConfigService } from '../src/system-config/system-config.service';
-import * as dotenv from 'dotenv';
 
 async function main() {
   dotenv.config({ path: '.env' });
@@ -17,23 +17,26 @@ async function main() {
   }
 
   const prisma = new PrismaService(new ConfigService());
-  const referralsService = new ReferralsService(prisma, new SystemConfigService(prisma));
+  const systemConfigService = new SystemConfigService(prisma);
+  const referralsService = new ReferralsService(prisma, systemConfigService);
 
   await prisma.$connect();
   try {
+    const runtimeConfig = await systemConfigService.getRuntimeConfig();
+
     for (const bookingId of bookingIds) {
       const booking = await prisma.booking.findUnique({
         where: { id: bookingId },
         select: {
           id: true,
+          clientId: true,
+          professionalId: true,
           status: true,
           paymentStatus: true,
           currency: true,
-          earning: {
-            select: {
-              id: true,
-            },
-          },
+          priceBob: true,
+          priceUsd: true,
+          earning: { select: { id: true, grossAmount: true } },
         },
       });
 
@@ -57,32 +60,29 @@ async function main() {
         continue;
       }
 
-      const before = await prisma.referralProfessionalRewardEvent.findUnique({
-        where: { bookingEarningId: booking.earning.id },
-        select: { id: true },
-      });
+      const grossAmount = new Prisma.Decimal(booking.earning.grossAmount ?? 0);
 
-      if (before) {
-        console.log(
-          `[RETRY-REFERRAL] bookingId=${bookingId} bookingEarningId=${booking.earning.id} skipped=ALREADY_REWARDED eventId=${before.id}`,
+      try {
+        const rewards = await prisma.$transaction(
+          async (tx) =>
+            referralsService.maybeRewardReferrerFromSession(tx, {
+              bookingId: booking.id,
+              bookingEarningId: booking.earning!.id,
+              clientId: booking.clientId,
+              professionalId: booking.professionalId,
+              grossAmount,
+              currency: booking.currency,
+              rewardPercent: runtimeConfig.referralRewardPercent,
+            }),
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
         );
-        continue;
-      }
 
-      const event = await referralsService.maybeRewardProfessionalReferralFromBookingEarningDetached({
-        bookingEarningId: booking.earning.id,
-      });
-
-      if (!event) {
         console.log(
-          `[RETRY-REFERRAL] bookingId=${bookingId} bookingEarningId=${booking.earning.id} result=NO_BENEFICIARY_OR_ZERO_REWARD`,
+          `[RETRY-REFERRAL] bookingId=${bookingId} bookingEarningId=${booking.earning.id} rewards=${JSON.stringify(rewards)}`,
         );
-        continue;
+      } catch (err: any) {
+        console.error(`[RETRY-REFERRAL] bookingId=${bookingId} error=${err?.message}`);
       }
-
-      console.log(
-        `[RETRY-REFERRAL] bookingId=${bookingId} bookingEarningId=${booking.earning.id} rewarded eventId=${event.id} rewardTxId=${event.rewardTransactionId} amount=${event.rewardAmount.toString()} currency=${event.currency}`,
-      );
     }
   } finally {
     await prisma.$disconnect();

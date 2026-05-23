@@ -6,6 +6,7 @@ import {
   Prisma,
   TransactionType,
 } from '@prisma/client';
+import { PROFESSIONAL_ROLES } from '../common/professional-role';
 import { PrismaService } from '../prisma.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { ReferralsService } from '../referrals/referrals.service';
@@ -103,11 +104,6 @@ export class BookingEarningsService {
             return { credited: false, reason: 'BOOKING_PAYMENT_NOT_FOUND' as const };
           }
 
-          await this.referralsService.consumeClientDiscountForPaidBooking(tx, {
-            bookingId: booking.id,
-            bookingPaymentId: bookingPayment.id,
-          });
-
           const existing = await tx.bookingEarning.findFirst({
             where: {
               OR: [{ bookingId: booking.id }, { bookingPaymentId: bookingPayment.id }],
@@ -132,13 +128,30 @@ export class BookingEarningsService {
             return { credited: false, reason: 'INVALID_GROSS_AMOUNT' as const };
           }
 
+          // Caso 1 (pro→pro): el 5% del referente sale del monto del profesional
+          const proReferral = await this.referralsService.getReferralForProfessional(tx, booking.professionalId);
+          const isProToPro = proReferral?.referrerRole && proReferral?.referredRole
+            && PROFESSIONAL_ROLES.includes(proReferral.referrerRole)
+            && PROFESSIONAL_ROLES.includes(proReferral.referredRole);
+
+          const rewardPercent = new Prisma.Decimal(runtimeConfig.referralRewardPercent);
           const platformCommissionAmount = grossAmount
             .mul(platformCommissionPercent)
             .div(hundred)
             .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-          const professionalAmount = grossAmount
+
+          let professionalAmount = grossAmount
             .minus(platformCommissionAmount)
             .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+
+          if (isProToPro) {
+            // Descontamos el 5% del monto del profesional para el referente
+            const referrerCut = grossAmount
+              .mul(rewardPercent)
+              .div(hundred)
+              .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+            professionalAmount = professionalAmount.minus(referrerCut).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+          }
 
           if (professionalAmount.lessThan(0)) {
             throw new BadRequestException(
@@ -224,6 +237,8 @@ export class BookingEarningsService {
             bookingId: booking.id,
             bookingPaymentId: bookingPayment.id,
             bookingEarningId: createdEarning.id,
+            clientId: booking.clientId,
+            professionalId: booking.professionalId,
             currency: booking.currency,
             grossAmount: Number(grossAmount),
             professionalAmount: Number(professionalAmount),
@@ -239,22 +254,20 @@ export class BookingEarningsService {
           `[BOOKING-EARNING][${reqId}] credited bookingId=${result.bookingId} bookingPaymentId=${result.bookingPaymentId} gross=${result.grossAmount} net=${result.professionalAmount} currency=${result.currency}`,
         );
 
-        try {
-          await this.referralsService.refreshReferralQualificationFromPaidBookingDetached({
-            bookingId: payload.bookingId,
-            bookingPaymentId: result.bookingPaymentId,
-          });
-        } catch (err: any) {
-          this.logger.error(
-            `[BOOKING-EARNING][${reqId}] referral_qualification_failed bookingId=${payload.bookingId} bookingPaymentId=${result.bookingPaymentId} err=${err?.message}`,
-          );
-        }
-
         if (result.bookingEarningId) {
           try {
-            await this.referralsService.maybeRewardProfessionalReferralFromBookingEarningDetached({
-              bookingEarningId: result.bookingEarningId,
-            });
+            await this.prisma.$transaction(
+              async (tx) => this.referralsService.maybeRewardReferrerFromSession(tx, {
+                bookingId: result.bookingId as string,
+                bookingEarningId: result.bookingEarningId as string,
+                clientId: result.clientId as string,
+                professionalId: result.professionalId as string,
+                grossAmount: new Prisma.Decimal(result.grossAmount as number),
+                currency: result.currency as string,
+                rewardPercent: runtimeConfig.referralRewardPercent,
+              }),
+              { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+            );
           } catch (err: any) {
             this.logger.error(
               `[BOOKING-EARNING][${reqId}] referral_reward_failed bookingId=${result.bookingId} bookingEarningId=${result.bookingEarningId} err=${err?.message}`,
@@ -265,31 +278,6 @@ export class BookingEarningsService {
         this.logger.log(
           `[BOOKING-EARNING][${reqId}] skipped bookingId=${payload.bookingId} reason=${result.reason}`,
         );
-
-        if (result.reason === 'ALREADY_CREDITED') {
-          try {
-            await this.referralsService.refreshReferralQualificationFromPaidBookingDetached({
-              bookingId: payload.bookingId,
-              bookingPaymentId: payload.bookingPaymentId,
-            });
-          } catch (err: any) {
-            this.logger.error(
-              `[BOOKING-EARNING][${reqId}] referral_qualification_retry_failed bookingId=${payload.bookingId} bookingPaymentId=${payload.bookingPaymentId ?? 'n/a'} err=${err?.message}`,
-            );
-          }
-        }
-
-        if (result.reason === 'ALREADY_CREDITED' && result.bookingEarningId) {
-          try {
-            await this.referralsService.maybeRewardProfessionalReferralFromBookingEarningDetached({
-              bookingEarningId: result.bookingEarningId,
-            });
-          } catch (err: any) {
-            this.logger.error(
-              `[BOOKING-EARNING][${reqId}] referral_reward_retry_failed bookingId=${payload.bookingId} bookingEarningId=${result.bookingEarningId} err=${err?.message}`,
-            );
-          }
-        }
       }
 
       return result;

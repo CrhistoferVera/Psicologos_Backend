@@ -182,10 +182,9 @@ export class StatsService {
       this.prisma.referral.count(),
       this.prisma.referral.count({ where: { status: ReferralStatus.PENDING } }),
       this.prisma.referral.count({ where: { status: ReferralStatus.QUALIFIED } }),
-      this.prisma.referral.count({ where: { status: ReferralStatus.REWARDED } }),
-      this.prisma.referral.aggregate({
-        where: { status: ReferralStatus.REWARDED },
-        _sum: { rewardCredits: true },
+      this.prisma.referralReward.count(),
+      this.prisma.referralReward.aggregate({
+        _sum: { rewardAmount: true },
       }),
     ]);
 
@@ -228,14 +227,14 @@ export class StatsService {
         professionalPaid,
         promotionalGranted,
         promotionalConsumed,
-        referralRewards: this.decimal(referralRewardsSum._sum.rewardCredits),
+        referralRewards: this.decimal(referralRewardsSum._sum.rewardAmount),
       },
       referrals: {
         total: referralsTotal,
         pending: referralsPending,
         qualified: referralsQualified,
         rewarded: referralsRewarded,
-        totalRewardCredits: this.decimal(referralRewardsSum._sum.rewardCredits),
+        totalRewardCredits: this.decimal(referralRewardsSum._sum.rewardAmount),
       },
     };
   }

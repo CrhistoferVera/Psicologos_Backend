@@ -168,7 +168,13 @@ export class RechargeRequestService {
           },
         });
 
-        await this.referralsService.handleApprovedDepositForReferral(tx, depositRequest.userId);
+        await this.referralsService.maybeRewardReferrerFromPackage(tx, {
+          depositRequestId: depositRequest.id,
+          buyerUserId: depositRequest.userId,
+          grossAmount: new Prisma.Decimal(walletIncrement),
+          currency: isStripePayment ? 'USD' : 'BOB',
+          rewardPercent: (await this.systemConfig.getRuntimeConfig()).referralRewardPercent,
+        });
 
         return {
           message: 'Deposito aprobado con exito. Saldo actualizado.',
