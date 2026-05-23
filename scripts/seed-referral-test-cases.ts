@@ -25,11 +25,13 @@ const BALANCE = new Prisma.Decimal(500);
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 const PHONE_MAP: Record<string, string> = {
-  'pro.a@test.com':      '71000001',
-  'pro.b@test.com':      '71000002',
-  'cliente.c@test.com':  '71000003',
-  'cliente.d@test.com':  '71000004',
-  'cliente.e@test.com':  '71000005',
+  'pro.a@test.com':           '71000001',
+  'pro.b@test.com':           '71000002',
+  'cliente.c@test.com':       '71000003',
+  'cliente.d@test.com':       '71000004',
+  'cliente.e@test.com':       '71000005',
+  'extranjero.f@test.com':    '71000006',
+  'extranjero.g@test.com':    '71000007',
 };
 
 async function upsertUser(
@@ -39,6 +41,7 @@ async function upsertUser(
     firstName: string;
     lastName: string;
     role: UserRole;
+    foreign?: boolean;
   },
 ) {
   const existing = await prisma.user.findUnique({ where: { email: opts.email } });
@@ -50,6 +53,8 @@ async function upsertUser(
   const hash = await bcrypt.hash(PASSWORD, 10);
   const phone = PHONE_MAP[opts.email] ?? ('799' + Math.floor(Math.random() * 99999).toString().padStart(5, '0'));
 
+  const isForeign = opts.foreign ?? false;
+
   const user = await prisma.user.create({
     data: {
       email: opts.email,
@@ -60,11 +65,11 @@ async function upsertUser(
       isActive: true,
       isProfileComplete: true,
       phoneNumber: phone,
-      phoneDialCode: '+591',
-      phoneCountryIso: 'BO',
-      phoneCountryName: 'Bolivia',
-      billingRegion: 'BOLIVIA',
-      preferredCurrency: 'BOB',
+      phoneDialCode: isForeign ? '+1' : '+591',
+      phoneCountryIso: isForeign ? 'US' : 'BO',
+      phoneCountryName: isForeign ? 'United States' : 'Bolivia',
+      billingRegion: isForeign ? 'INTERNATIONAL' : 'BOLIVIA',
+      preferredCurrency: isForeign ? 'USD' : 'BOB',
       wallet: {
         create: {
           balance: BALANCE,
@@ -164,17 +169,43 @@ async function main() {
     await linkReferral(referrals, clienteD.id, clienteE.id, 'ClienteD→ClienteE');
 
     console.log('\n══════════════════════════════════════');
+    console.log('  CASO 4 — Extranjero F referido por Pro A (USD, caso 2)');
+    console.log('══════════════════════════════════════');
+    const extF = await upsertUser(prisma, {
+      email: 'extranjero.f@test.com',
+      firstName: 'John',
+      lastName: 'F',
+      role: UserRole.USER,
+      foreign: true,
+    });
+    await linkReferral(referrals, proA.id, extF.id, 'ProA→ExtranjerоF');
+
+    console.log('\n══════════════════════════════════════');
+    console.log('  CASO 5 — Extranjero G referido por Cliente D (USD, caso 3)');
+    console.log('══════════════════════════════════════');
+    const extG = await upsertUser(prisma, {
+      email: 'extranjero.g@test.com',
+      firstName: 'Jane',
+      lastName: 'G',
+      role: UserRole.USER,
+      foreign: true,
+    });
+    await linkReferral(referrals, clienteD.id, extG.id, 'ClienteD→ExtranjerоG');
+
+    console.log('\n══════════════════════════════════════');
     console.log('  RESUMEN');
     console.log('══════════════════════════════════════');
-    console.log(`  pro.a@test.com       id=${proA.id}     contraseña=${PASSWORD}`);
-    console.log(`  pro.b@test.com       id=${proB.id}     contraseña=${PASSWORD}`);
-    console.log(`  cliente.c@test.com   id=${clienteC.id}  contraseña=${PASSWORD}`);
-    console.log(`  cliente.d@test.com   id=${clienteD.id}  contraseña=${PASSWORD}`);
-    console.log(`  cliente.e@test.com   id=${clienteE.id}  contraseña=${PASSWORD}`);
+    console.log(`  pro.a@test.com          id=${proA.id}    contraseña=${PASSWORD}  (BOB)`);
+    console.log(`  pro.b@test.com          id=${proB.id}    contraseña=${PASSWORD}  (BOB)`);
+    console.log(`  cliente.c@test.com      id=${clienteC.id} contraseña=${PASSWORD}  (BOB)`);
+    console.log(`  cliente.d@test.com      id=${clienteD.id} contraseña=${PASSWORD}  (BOB)`);
+    console.log(`  cliente.e@test.com      id=${clienteE.id} contraseña=${PASSWORD}  (BOB)`);
+    console.log(`  extranjero.f@test.com   id=${extF.id} contraseña=${PASSWORD}  (USD)`);
+    console.log(`  extranjero.g@test.com   id=${extG.id} contraseña=${PASSWORD}  (USD)`);
 
     const referralsCreated = await prisma.referral.findMany({
       where: {
-        referredUserId: { in: [proB.id, clienteC.id, clienteE.id] },
+        referredUserId: { in: [proB.id, clienteC.id, clienteE.id, extF.id, extG.id] },
       },
       select: {
         id: true,
