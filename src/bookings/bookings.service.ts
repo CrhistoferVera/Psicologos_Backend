@@ -8,6 +8,7 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   Booking,
+  BookingRescheduleRequestStatus,
   BookingPaymentMethod,
   BookingPaymentStatus,
   BookingStatus,
@@ -38,6 +39,9 @@ import { UpdateAvailabilityRuleDto } from './dto/update-availability-rule.dto';
 import { CreateAvailabilityExceptionDto } from './dto/create-availability-exception.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { BookingListQueryDto } from './dto/booking-list-query.dto';
+import { BookingRescheduleListQueryDto } from './dto/booking-reschedule-list-query.dto';
+import { CreateBookingRescheduleRequestDto } from './dto/create-booking-reschedule-request.dto';
+import { RespondBookingRescheduleRequestDto } from './dto/respond-booking-reschedule-request.dto';
 import { buildActiveBookingOverlapWhere } from './helpers/booking-query.helper';
 import { allocateCreditDebit } from '../wallet/utils/credit-allocation.util';
 import { BookingEarningsService } from '../booking-earnings/booking-earnings.service';
@@ -76,6 +80,7 @@ export type CommunicationAccessResult = {
 export class BookingsService {
   private readonly logger = new Logger(BookingsService.name);
   private static readonly HARD_FALLBACK_BOB_TO_USD_RATE = 6.96;
+  private static readonly MIN_RESCHEDULE_NOTICE_HOURS = 24;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -910,6 +915,7 @@ export class BookingsService {
       scheduledEndAt: Date;
       durationMinutes: number;
       timeZone: string;
+      excludeBookingId?: string;
     },
   ) {
     const localDate = getLocalDateKey(payload.scheduledStartAt, payload.timeZone);
@@ -979,6 +985,7 @@ export class BookingsService {
         payload.scheduledStartAt,
         payload.scheduledEndAt,
         now,
+        payload.excludeBookingId,
       ),
       select: { id: true },
     });
@@ -1683,6 +1690,548 @@ export class BookingsService {
     }
 
     throw new BadRequestException('Metodo de pago de booking no soportado.');
+  }
+
+  private normalizeRescheduleActorRole(role: UserRole | string): UserRole {
+    const normalized = String(role) as UserRole;
+    if (normalized === UserRole.USER || this.isProfessionalRole(normalized)) {
+      return normalized;
+    }
+    throw new ForbiddenException('No tienes permisos para gestionar reprogramaciones.');
+  }
+
+  private assertUserIsBookingParticipant(
+    booking: { clientId: string; professionalId: string },
+    userId: string,
+  ) {
+    if (booking.clientId !== userId && booking.professionalId !== userId) {
+      throw new ForbiddenException('No tienes permisos sobre esta reserva.');
+    }
+  }
+
+  private assertBookingIsReschedulable(
+    booking: {
+      status: BookingStatus;
+      paymentStatus: BookingPaymentStatus;
+      scheduledStartAt: Date;
+      scheduledEndAt: Date;
+    },
+    now = new Date(),
+  ) {
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new BadRequestException('Solo se pueden reprogramar reservas confirmadas.');
+    }
+
+    if (booking.paymentStatus !== BookingPaymentStatus.PAID) {
+      throw new BadRequestException('Solo se pueden reprogramar reservas pagadas.');
+    }
+
+    if (booking.scheduledEndAt <= now || booking.scheduledStartAt <= now) {
+      throw new BadRequestException('No se puede reprogramar una reserva que ya inicio o finalizo.');
+    }
+  }
+
+  private assertRescheduleNoticeWindow(startAt: Date, now = new Date()) {
+    const minAllowedAt = new Date(
+      now.getTime() + BookingsService.MIN_RESCHEDULE_NOTICE_HOURS * 60 * 60 * 1000,
+    );
+    if (startAt <= minAllowedAt) {
+      throw new BadRequestException(
+        'La cita solo puede reprogramarse con al menos 24 horas de anticipacion.',
+      );
+    }
+  }
+
+  private getBookingDurationMinutes(booking: { scheduledStartAt: Date; scheduledEndAt: Date }) {
+    const durationMs = booking.scheduledEndAt.getTime() - booking.scheduledStartAt.getTime();
+    if (durationMs <= 0) {
+      throw new BadRequestException('La reserva tiene una duracion invalida.');
+    }
+
+    return Math.round(durationMs / (60 * 1000));
+  }
+
+  private getRescheduleCounterpartUserId(
+    booking: { clientId: string; professionalId: string },
+    requesterUserId: string,
+  ) {
+    return booking.clientId === requesterUserId ? booking.professionalId : booking.clientId;
+  }
+
+  private async expireOverdueRescheduleRequests(tx: PrismaTx, bookingId?: string) {
+    const now = new Date();
+    await tx.bookingRescheduleRequest.updateMany({
+      where: {
+        status: BookingRescheduleRequestStatus.PENDING,
+        requestExpiresAt: { not: null, lt: now },
+        ...(bookingId ? { bookingId } : {}),
+      },
+      data: {
+        status: BookingRescheduleRequestStatus.EXPIRED,
+        respondedAt: now,
+      },
+    });
+  }
+
+  private assertCounterpartCanRespond(
+    booking: { clientId: string; professionalId: string },
+    request: { requestedByUserId: string },
+    responderUserId: string,
+  ) {
+    if (request.requestedByUserId === responderUserId) {
+      throw new ForbiddenException('El solicitante no puede responder su propia solicitud.');
+    }
+
+    const counterpartUserId = this.getRescheduleCounterpartUserId(booking, request.requestedByUserId);
+    if (counterpartUserId !== responderUserId) {
+      throw new ForbiddenException('Solo la contraparte puede responder esta solicitud.');
+    }
+  }
+
+  async createRescheduleRequest(
+    bookingId: string,
+    requestedByUserId: string,
+    requestedByRole: UserRole | string,
+    dto: CreateBookingRescheduleRequestDto,
+  ) {
+    await this.expirePendingBookings();
+    const actorRole = this.normalizeRescheduleActorRole(requestedByRole);
+    const proposedStartAt = new Date(dto.proposedStartAt);
+    if (Number.isNaN(proposedStartAt.getTime())) {
+      throw new BadRequestException('proposedStartAt invalido.');
+    }
+
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+        sessionOfferingId: true,
+        scheduledStartAt: true,
+        scheduledEndAt: true,
+        timezone: true,
+        status: true,
+        paymentStatus: true,
+        rescheduleCount: true,
+      },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Booking no encontrado.');
+    }
+
+    const now = new Date();
+    this.assertUserIsBookingParticipant(booking, requestedByUserId);
+    this.assertBookingIsReschedulable(booking, now);
+    this.assertRescheduleNoticeWindow(booking.scheduledStartAt, now);
+
+    if (actorRole === UserRole.USER && booking.clientId !== requestedByUserId) {
+      throw new ForbiddenException('Solo el cliente de la reserva puede solicitar como usuario.');
+    }
+
+    if (this.isProfessionalRole(actorRole) && booking.professionalId !== requestedByUserId) {
+      throw new ForbiddenException('Solo el profesional de la reserva puede solicitar como profesional.');
+    }
+
+    this.assertRescheduleNoticeWindow(proposedStartAt, now);
+
+    if (proposedStartAt.getTime() === booking.scheduledStartAt.getTime()) {
+      throw new BadRequestException('La fecha propuesta debe ser distinta al horario actual.');
+    }
+
+    const maxReschedules = 2;
+    if (booking.rescheduleCount >= maxReschedules) {
+      throw new BadRequestException(`La reserva alcanzo el maximo de ${maxReschedules} reprogramaciones.`);
+    }
+
+    const proposedTimezone = ensureValidTimeZone(dto.proposedTimezone ?? booking.timezone);
+    const durationMinutes = this.getBookingDurationMinutes(booking);
+    const proposedEndAt = new Date(proposedStartAt.getTime() + durationMinutes * 60 * 1000);
+
+    const created = await this.prisma.$transaction(
+      async (tx) => {
+        await this.expireOverdueRescheduleRequests(tx, booking.id);
+
+        const pendingForBooking = await tx.bookingRescheduleRequest.findFirst({
+          where: {
+            bookingId: booking.id,
+            status: BookingRescheduleRequestStatus.PENDING,
+          },
+          select: { id: true },
+        });
+
+        if (pendingForBooking) {
+          throw new BadRequestException(
+            'Ya existe una solicitud de reprogramacion pendiente para esta reserva.',
+          );
+        }
+
+        await this.assertSlotIsBookable(tx, {
+          professionalId: booking.professionalId,
+          sessionOfferingId: booking.sessionOfferingId,
+          scheduledStartAt: proposedStartAt,
+          scheduledEndAt: proposedEndAt,
+          durationMinutes,
+          timeZone: proposedTimezone,
+          excludeBookingId: booking.id,
+        });
+
+        return tx.bookingRescheduleRequest.create({
+          data: {
+            bookingId: booking.id,
+            requestedByUserId,
+            requestedByRole: actorRole,
+            currentStartAt: booking.scheduledStartAt,
+            currentEndAt: booking.scheduledEndAt,
+            proposedStartAt,
+            proposedEndAt,
+            proposedTimezone,
+            reason: dto.reason?.trim() || null,
+            status: BookingRescheduleRequestStatus.PENDING,
+            requestExpiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+          },
+          include: {
+            requestedByUser: {
+              select: { id: true, firstName: true, lastName: true, role: true },
+            },
+            respondedByUser: {
+              select: { id: true, firstName: true, lastName: true, role: true },
+            },
+          },
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    return created;
+  }
+
+  async acceptRescheduleRequest(
+    requestId: string,
+    respondedByUserId: string,
+    respondedByRole: UserRole | string,
+    dto: RespondBookingRescheduleRequestDto,
+  ) {
+    await this.expirePendingBookings();
+    this.normalizeRescheduleActorRole(respondedByRole);
+
+    const now = new Date();
+    const result = await this.prisma.$transaction(
+      async (tx) => {
+        await this.expireOverdueRescheduleRequests(tx);
+
+        const request = await tx.bookingRescheduleRequest.findUnique({
+          where: { id: requestId },
+          include: {
+            booking: {
+              select: {
+                id: true,
+                clientId: true,
+                professionalId: true,
+                sessionOfferingId: true,
+                status: true,
+                paymentStatus: true,
+                scheduledStartAt: true,
+                scheduledEndAt: true,
+                timezone: true,
+                rescheduleCount: true,
+              },
+            },
+          },
+        });
+
+        if (!request) {
+          throw new NotFoundException('Solicitud de reprogramacion no encontrada.');
+        }
+
+        this.assertUserIsBookingParticipant(request.booking, respondedByUserId);
+        this.assertCounterpartCanRespond(request.booking, request, respondedByUserId);
+
+        if (request.status !== BookingRescheduleRequestStatus.PENDING) {
+          throw new BadRequestException('La solicitud no esta pendiente.');
+        }
+
+        if (request.requestExpiresAt && request.requestExpiresAt <= now) {
+          await tx.bookingRescheduleRequest.update({
+            where: { id: request.id },
+            data: {
+              status: BookingRescheduleRequestStatus.EXPIRED,
+              respondedAt: now,
+            },
+          });
+          throw new BadRequestException('La solicitud ya expiro.');
+        }
+
+        this.assertBookingIsReschedulable(request.booking, now);
+        this.assertRescheduleNoticeWindow(request.booking.scheduledStartAt, now);
+        this.assertRescheduleNoticeWindow(request.proposedStartAt, now);
+
+        const durationMinutes = this.getBookingDurationMinutes({
+          scheduledStartAt: request.currentStartAt,
+          scheduledEndAt: request.currentEndAt,
+        });
+
+        await this.assertSlotIsBookable(tx, {
+          professionalId: request.booking.professionalId,
+          sessionOfferingId: request.booking.sessionOfferingId,
+          scheduledStartAt: request.proposedStartAt,
+          scheduledEndAt: request.proposedEndAt,
+          durationMinutes,
+          timeZone: request.proposedTimezone,
+          excludeBookingId: request.booking.id,
+        });
+
+        await tx.booking.update({
+          where: { id: request.bookingId },
+          data: {
+            scheduledStartAt: request.proposedStartAt,
+            scheduledEndAt: request.proposedEndAt,
+            timezone: request.proposedTimezone,
+            rescheduleCount: { increment: 1 },
+            reminder15SentAt: null,
+            reminder10BeforeStartSentAt: null,
+            reminder15BeforeEndSentAt: null,
+          },
+        });
+
+        const updatedRequest = await tx.bookingRescheduleRequest.update({
+          where: { id: request.id },
+          data: {
+            status: BookingRescheduleRequestStatus.ACCEPTED,
+            respondedByUserId,
+            respondedAt: now,
+            responseNote: dto.responseNote?.trim() || null,
+          },
+          include: {
+            booking: {
+              select: {
+                id: true,
+                clientId: true,
+                professionalId: true,
+                scheduledStartAt: true,
+                scheduledEndAt: true,
+                timezone: true,
+                status: true,
+                paymentStatus: true,
+                rescheduleCount: true,
+              },
+            },
+            requestedByUser: {
+              select: { id: true, firstName: true, lastName: true, role: true },
+            },
+            respondedByUser: {
+              select: { id: true, firstName: true, lastName: true, role: true },
+            },
+          },
+        });
+
+        await tx.bookingRescheduleRequest.updateMany({
+          where: {
+            bookingId: request.bookingId,
+            id: { not: request.id },
+            status: BookingRescheduleRequestStatus.PENDING,
+          },
+          data: {
+            status: BookingRescheduleRequestStatus.EXPIRED,
+            respondedAt: now,
+          },
+        });
+
+        return updatedRequest;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    return result;
+  }
+
+  async rejectRescheduleRequest(
+    requestId: string,
+    respondedByUserId: string,
+    respondedByRole: UserRole | string,
+    dto: RespondBookingRescheduleRequestDto,
+  ) {
+    await this.expirePendingBookings();
+    this.normalizeRescheduleActorRole(respondedByRole);
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        await this.expireOverdueRescheduleRequests(tx);
+
+        const request = await tx.bookingRescheduleRequest.findUnique({
+          where: { id: requestId },
+          include: {
+            booking: {
+              select: {
+                id: true,
+                clientId: true,
+                professionalId: true,
+              },
+            },
+          },
+        });
+
+        if (!request) {
+          throw new NotFoundException('Solicitud de reprogramacion no encontrada.');
+        }
+
+        this.assertUserIsBookingParticipant(request.booking, respondedByUserId);
+        this.assertCounterpartCanRespond(request.booking, request, respondedByUserId);
+
+        if (request.status !== BookingRescheduleRequestStatus.PENDING) {
+          throw new BadRequestException('La solicitud no esta pendiente.');
+        }
+
+        const now = new Date();
+        return tx.bookingRescheduleRequest.update({
+          where: { id: request.id },
+          data: {
+            status: BookingRescheduleRequestStatus.REJECTED,
+            respondedByUserId,
+            respondedAt: now,
+            responseNote: dto.responseNote?.trim() || null,
+          },
+          include: {
+            requestedByUser: {
+              select: { id: true, firstName: true, lastName: true, role: true },
+            },
+            respondedByUser: {
+              select: { id: true, firstName: true, lastName: true, role: true },
+            },
+          },
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  }
+
+  async cancelRescheduleRequest(requestId: string, requestedByUserId: string, requestedByRole: UserRole | string) {
+    await this.expirePendingBookings();
+    this.normalizeRescheduleActorRole(requestedByRole);
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        await this.expireOverdueRescheduleRequests(tx);
+
+        const request = await tx.bookingRescheduleRequest.findUnique({
+          where: { id: requestId },
+          include: {
+            booking: {
+              select: {
+                id: true,
+                clientId: true,
+                professionalId: true,
+              },
+            },
+          },
+        });
+
+        if (!request) {
+          throw new NotFoundException('Solicitud de reprogramacion no encontrada.');
+        }
+
+        this.assertUserIsBookingParticipant(request.booking, requestedByUserId);
+
+        if (request.requestedByUserId !== requestedByUserId) {
+          throw new ForbiddenException('Solo el solicitante puede cancelar la solicitud.');
+        }
+
+        if (request.status !== BookingRescheduleRequestStatus.PENDING) {
+          throw new BadRequestException('La solicitud no esta pendiente.');
+        }
+
+        return tx.bookingRescheduleRequest.update({
+          where: { id: request.id },
+          data: {
+            status: BookingRescheduleRequestStatus.CANCELLED,
+            respondedByUserId: requestedByUserId,
+            respondedAt: new Date(),
+          },
+          include: {
+            requestedByUser: {
+              select: { id: true, firstName: true, lastName: true, role: true },
+            },
+            respondedByUser: {
+              select: { id: true, firstName: true, lastName: true, role: true },
+            },
+          },
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  }
+
+  async listMyRescheduleRequests(userId: string, role: UserRole | string, query: BookingRescheduleListQueryDto) {
+    await this.expirePendingBookings();
+    const normalizedRole = this.normalizeRescheduleActorRole(role);
+    await this.expireOverdueRescheduleRequests(this.prisma);
+
+    const isProfessional = this.isProfessionalRole(normalizedRole);
+    const where: Prisma.BookingRescheduleRequestWhereInput = {
+      ...(query.status ? { status: query.status } : {}),
+      booking: isProfessional ? { is: { professionalId: userId } } : { is: { clientId: userId } },
+    };
+
+    return this.prisma.bookingRescheduleRequest.findMany({
+      where,
+      include: {
+        booking: {
+          select: {
+            id: true,
+            clientId: true,
+            professionalId: true,
+            scheduledStartAt: true,
+            scheduledEndAt: true,
+            timezone: true,
+            status: true,
+            paymentStatus: true,
+            rescheduleCount: true,
+          },
+        },
+        requestedByUser: {
+          select: { id: true, firstName: true, lastName: true, role: true },
+        },
+        respondedByUser: {
+          select: { id: true, firstName: true, lastName: true, role: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async listBookingRescheduleRequests(bookingId: string, userId: string, role: UserRole | string) {
+    await this.expirePendingBookings();
+    this.normalizeRescheduleActorRole(role);
+    await this.expireOverdueRescheduleRequests(this.prisma, bookingId);
+
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+      },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Booking no encontrado.');
+    }
+
+    this.assertUserIsBookingParticipant(booking, userId);
+
+    return this.prisma.bookingRescheduleRequest.findMany({
+      where: { bookingId },
+      include: {
+        requestedByUser: {
+          select: { id: true, firstName: true, lastName: true, role: true },
+        },
+        respondedByUser: {
+          select: { id: true, firstName: true, lastName: true, role: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   async getMyBookingById(clientId: string, bookingId: string) {

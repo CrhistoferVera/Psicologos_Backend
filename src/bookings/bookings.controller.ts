@@ -17,12 +17,15 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { PROFESSIONAL_ROLES } from '../common/professional-role';
 import { AvailableSlotsQueryDto } from './dto/available-slots-query.dto';
+import { BookingRescheduleListQueryDto } from './dto/booking-reschedule-list-query.dto';
 import { BookingListQueryDto } from './dto/booking-list-query.dto';
 import { BookingPaymentInitResponseDto } from './dto/booking-payment-init-response.dto';
 import { CreateAvailabilityExceptionDto } from './dto/create-availability-exception.dto';
 import { CreateAvailabilityRuleDto } from './dto/create-availability-rule.dto';
 import { CreateBatchBookingDto } from './dto/create-batch-booking.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { CreateBookingRescheduleRequestDto } from './dto/create-booking-reschedule-request.dto';
+import { RespondBookingRescheduleRequestDto } from './dto/respond-booking-reschedule-request.dto';
 import { CreateSessionOfferingDto } from './dto/create-session-offering.dto';
 import { UpdateAvailabilityRuleDto } from './dto/update-availability-rule.dto';
 import { UpdateSessionOfferingDto } from './dto/update-session-offering.dto';
@@ -205,6 +208,75 @@ export class BookingsController {
   @ApiOperation({ summary: 'Obtener una reserva del cliente autenticado por ID' })
   getMyBookingById(@CurrentUser() user: JwtUser, @Param('bookingId') bookingId: string) {
     return this.bookingsService.getMyBookingById(user.userId, bookingId);
+  }
+
+  @Post('bookings/:bookingId/reschedule-requests')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER, ...PROFESSIONAL_ROLES)
+  @ApiOperation({ summary: 'Crear solicitud de reprogramacion para una reserva' })
+  createRescheduleRequest(
+    @CurrentUser() user: JwtUser,
+    @Param('bookingId') bookingId: string,
+    @Body() dto: CreateBookingRescheduleRequestDto,
+  ) {
+    return this.bookingsService.createRescheduleRequest(bookingId, user.userId, user.role, dto);
+  }
+
+  @Get('bookings/:bookingId/reschedule-requests')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER, ...PROFESSIONAL_ROLES)
+  @ApiOperation({ summary: 'Listar historial de solicitudes de reprogramacion de una reserva' })
+  listBookingRescheduleRequests(
+    @CurrentUser() user: JwtUser,
+    @Param('bookingId') bookingId: string,
+  ) {
+    return this.bookingsService.listBookingRescheduleRequests(bookingId, user.userId, user.role);
+  }
+
+  @Get('bookings/reschedule-requests/me')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER, ...PROFESSIONAL_ROLES)
+  @ApiOperation({ summary: 'Listar solicitudes de reprogramacion del usuario autenticado' })
+  listMyRescheduleRequests(
+    @CurrentUser() user: JwtUser,
+    @Query() query: BookingRescheduleListQueryDto,
+  ) {
+    return this.bookingsService.listMyRescheduleRequests(user.userId, user.role, query);
+  }
+
+  @Patch('bookings/reschedule-requests/:requestId/accept')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER, ...PROFESSIONAL_ROLES)
+  @ApiOperation({ summary: 'Aceptar solicitud de reprogramacion' })
+  acceptRescheduleRequest(
+    @CurrentUser() user: JwtUser,
+    @Param('requestId') requestId: string,
+    @Body() dto: RespondBookingRescheduleRequestDto,
+  ) {
+    return this.bookingsService.acceptRescheduleRequest(requestId, user.userId, user.role, dto);
+  }
+
+  @Patch('bookings/reschedule-requests/:requestId/reject')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER, ...PROFESSIONAL_ROLES)
+  @ApiOperation({ summary: 'Rechazar solicitud de reprogramacion' })
+  rejectRescheduleRequest(
+    @CurrentUser() user: JwtUser,
+    @Param('requestId') requestId: string,
+    @Body() dto: RespondBookingRescheduleRequestDto,
+  ) {
+    return this.bookingsService.rejectRescheduleRequest(requestId, user.userId, user.role, dto);
+  }
+
+  @Patch('bookings/reschedule-requests/:requestId/cancel')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER, ...PROFESSIONAL_ROLES)
+  @ApiOperation({ summary: 'Cancelar solicitud de reprogramacion' })
+  cancelRescheduleRequest(
+    @CurrentUser() user: JwtUser,
+    @Param('requestId') requestId: string,
+  ) {
+    return this.bookingsService.cancelRescheduleRequest(requestId, user.userId, user.role);
   }
 
   @Get('professional/bookings')
