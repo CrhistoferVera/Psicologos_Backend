@@ -120,6 +120,7 @@ model ProfessionalProfile {
   avatarUrl      String?
   avatarPublicId String?
   bio            String?
+  education      Json?
   rateCredits    Int?
   isOnline       Boolean                  @default(false)
   reviewStatus   ProfessionalReviewStatus @default(PENDING)

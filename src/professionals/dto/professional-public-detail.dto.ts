@@ -59,4 +59,13 @@ export class ProfessionalPublicDetailDto {
 
   @ApiProperty({ example: 12, description: 'Cantidad de reseñas' })
   reviewCount: number;
+
+  @ApiProperty({
+    example: [{ id: '1', degree: 'Licenciatura en Psicología', institution: 'UMSA', year: 2018 }],
+    description: 'Formación académica del profesional',
+  })
+  education: Record<string, unknown>[];
+
+  @ApiProperty({ example: true, description: 'El admin aprobó las credenciales del profesional' })
+  isVerified: boolean;
 }

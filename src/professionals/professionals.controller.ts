@@ -114,6 +114,17 @@ export class ProfessionalsController {
     return this.specialtyService.assignToProfessional(userId, dto);
   }
 
+  @Post('me/education-photo')
+  @Roles(...PROFESSIONAL_ROLES)
+  @UseInterceptors(FileInterceptor('photo', { storage: memoryStorage() }))
+  uploadEducationPhoto(
+    @Request() req,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.service.uploadEducationPhoto(userId, file);
+  }
+
   @Get(':id')
   @Roles(UserRole.ADMIN)
   findOne(@Param('id') id: string) {

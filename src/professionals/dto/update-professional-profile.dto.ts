@@ -1,6 +1,41 @@
-import { IsBoolean, IsObject, IsOptional, IsString } from 'class-validator';
-import { Transform } from 'class-transformer';
+import {
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+
+export class EducationEntryDto {
+  @IsString()
+  id: string;
+
+  @IsString()
+  degree: string;
+
+  @IsString()
+  institution: string;
+
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  @Min(1900)
+  @Max(2100)
+  year: number;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  photoUrl?: string;
+}
 
 export class UpdateProfessionalProfileDto {
   @ApiPropertyOptional({ example: 'Maria' })
@@ -50,5 +85,27 @@ export class UpdateProfessionalProfileDto {
   @IsOptional()
   @IsObject()
   availability?: Record<string, unknown>;
-}
 
+  @ApiPropertyOptional({ description: 'Formación académica del profesional' })
+  @Transform(({ value }) => {
+    let arr: unknown = value;
+    if (typeof value === 'string') {
+      try {
+        arr = JSON.parse(value);
+      } catch {
+        return value;
+      }
+    }
+    if (!Array.isArray(arr)) return arr;
+    return (arr as Record<string, unknown>[]).map((item) => {
+      const entry = new EducationEntryDto();
+      Object.assign(entry, item);
+      return entry;
+    });
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EducationEntryDto)
+  education?: EducationEntryDto[];
+}

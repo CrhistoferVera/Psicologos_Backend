@@ -269,6 +269,8 @@ export class ProfessionalsService {
             coverUrl: true,
             bio: true,
             isOnline: true,
+            education: true,
+            reviewStatus: true,
           },
         },
         professionalSpecialties: {
@@ -311,6 +313,8 @@ export class ProfessionalsService {
       specialties: user.professionalSpecialties.map((ps) => ps.specialty),
       rating: reviewStats._avg.rating ?? null,
       reviewCount: reviewStats._count.rating,
+      education: (profile?.education ?? []) as Record<string, unknown>[],
+      isVerified: profile?.reviewStatus === 'APPROVED',
     };
   }
 
@@ -326,6 +330,7 @@ export class ProfessionalsService {
           select: {
             username: true,
             bio: true,
+            education: true,
             isOnline: true,
             avatarUrl: true,
             coverUrl: true,
@@ -352,6 +357,7 @@ export class ProfessionalsService {
       reviewNotes: user.professionalProfile?.reviewNotes ?? null,
       availability:
         (user.professionalProfile?.availability as Record<string, unknown> | null) ?? null,
+      education: (user.professionalProfile?.education ?? []) as Record<string, unknown>[],
       isActive: user.isActive,
     };
   }
@@ -426,6 +432,9 @@ export class ProfessionalsService {
       ...(profileFields.availability !== undefined && {
         availability: profileFields.availability as Prisma.InputJsonValue,
       }),
+      ...(profileFields.education !== undefined && {
+        education: profileFields.education as unknown as Prisma.InputJsonValue,
+      }),
       ...(avatarUpdate && {
         avatarUrl: avatarUpdate.avatarUrl,
         avatarPublicId: avatarUpdate.avatarPublicId,
@@ -468,6 +477,11 @@ export class ProfessionalsService {
     }
 
     return this.getMyProfile(userId);
+  }
+
+  async uploadEducationPhoto(userId: string, file: Express.Multer.File): Promise<{ url: string }> {
+    const { secureUrl } = await this.cloudinary.uploadEducationPhoto({ file, userId });
+    return { url: secureUrl };
   }
 
   private calculateAge(dateOfBirth: Date): number {

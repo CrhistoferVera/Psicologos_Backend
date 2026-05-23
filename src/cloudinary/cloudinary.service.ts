@@ -528,6 +528,33 @@ export class CloudinaryService {
 
   // --- Galeria permanente de profesional ------------------------------------
 
+  async uploadEducationPhoto(params: {
+    file: Express.Multer.File;
+    userId: string;
+  }): Promise<{ secureUrl: string; publicId: string }> {
+    const { file, userId } = params;
+
+    if (!file.mimetype.startsWith('image/')) {
+      throw new BadRequestException('Solo se permiten imágenes para la formación académica.');
+    }
+
+    const folder = `psicologos/professionals/${userId}/education`;
+    const publicId = `edu_${Date.now()}`;
+
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder, public_id: publicId, resource_type: 'image' },
+        (error, result) => {
+          if (error || !result?.secure_url) {
+            return reject(new InternalServerErrorException('Error al subir la foto de formación a Cloudinary.'));
+          }
+          resolve({ secureUrl: result.secure_url, publicId: result.public_id });
+        },
+      );
+      uploadStream.end(file.buffer);
+    });
+  }
+
   async uploadGalleryImage(params: {
     file: Express.Multer.File;
     userId: string;
