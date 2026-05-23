@@ -156,9 +156,10 @@ export class ReferralsService {
       grossAmount: Prisma.Decimal;
       currency: string;
       rewardPercent: number;
+      usdExchangeRate: number;
     },
   ) {
-    const { bookingId, bookingEarningId, clientId, professionalId, grossAmount, currency, rewardPercent } = params;
+    const { bookingId, bookingEarningId, clientId, professionalId, grossAmount, currency, rewardPercent, usdExchangeRate } = params;
 
     // Caso 2 & 3: el cliente referido paga por primera vez (una sola vez)
     const clientReferral = await tx.referral.findUnique({
@@ -177,6 +178,7 @@ export class ReferralsService {
           currency,
           grossAmount,
           rewardPercent,
+          usdExchangeRate,
           bookingId,
           bookingEarningId,
           transactionType: TransactionType.REFERRAL_REWARD,
@@ -206,6 +208,7 @@ export class ReferralsService {
           currency,
           grossAmount,
           rewardPercent,
+          usdExchangeRate,
           bookingId,
           bookingEarningId,
           transactionType: TransactionType.REFERRAL_REWARD,
@@ -223,9 +226,10 @@ export class ReferralsService {
       grossAmount: Prisma.Decimal;
       currency: string;
       rewardPercent: number;
+      usdExchangeRate: number;
     },
   ) {
-    const { depositRequestId, buyerUserId, grossAmount, currency, rewardPercent } = params;
+    const { depositRequestId, buyerUserId, grossAmount, currency, rewardPercent, usdExchangeRate } = params;
 
     const referral = await tx.referral.findUnique({
       where: { referredUserId: buyerUserId },
@@ -245,6 +249,7 @@ export class ReferralsService {
       currency,
       grossAmount,
       rewardPercent,
+      usdExchangeRate,
       depositRequestId,
       transactionType: TransactionType.REFERRAL_PACKAGE_REWARD,
     });
@@ -266,20 +271,46 @@ export class ReferralsService {
       currency: string;
       grossAmount: Prisma.Decimal;
       rewardPercent: number;
+      usdExchangeRate: number;
       bookingId?: string;
       bookingEarningId?: string;
       depositRequestId?: string;
       transactionType: TransactionType;
     },
   ) {
-    const { referralId, referrerUserId, type, referralCase, currency, grossAmount, rewardPercent, transactionType } = params;
+    const { referralId, referrerUserId, type, referralCase, currency, grossAmount, rewardPercent, usdExchangeRate, transactionType } = params;
 
-    const rewardAmount = grossAmount
+    const rewardAmountInSessionCurrency = grossAmount
       .mul(this.money(rewardPercent))
       .div(this.money(100))
       .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 
-    if (rewardAmount.lessThanOrEqualTo(0)) return null;
+    if (rewardAmountInSessionCurrency.lessThanOrEqualTo(0)) return null;
+
+    // Solo en caso 3 (cliente→cliente) el referente tiene una sola billetera
+    // según su preferredCurrency — hay que convertir si hay mismatch de moneda
+    let rewardAmount = rewardAmountInSessionCurrency;
+    let creditedCurrency = currency;
+
+    if (referralCase === ReferralCase.USER_TO_USER) {
+      const referrerUser = await tx.user.findUnique({
+        where: { id: referrerUserId },
+        select: { preferredCurrency: true },
+      });
+      const referrerCurrency = referrerUser?.preferredCurrency ?? 'BOB';
+
+      if (currency === 'USD' && referrerCurrency === 'BOB') {
+        rewardAmount = rewardAmountInSessionCurrency
+          .mul(this.money(usdExchangeRate))
+          .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+        creditedCurrency = 'BOB';
+      } else if (currency === 'BOB' && referrerCurrency === 'USD') {
+        rewardAmount = rewardAmountInSessionCurrency
+          .div(this.money(usdExchangeRate))
+          .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+        creditedCurrency = 'USD';
+      }
+    }
 
     const referrerWallet = await tx.wallet.upsert({
       where: { userId: referrerUserId },
@@ -287,7 +318,7 @@ export class ReferralsService {
       update: {},
     });
 
-    if (currency === 'USD') {
+    if (creditedCurrency === 'USD') {
       await tx.wallet.update({ where: { id: referrerWallet.id }, data: { balanceUsd: { increment: rewardAmount } } });
     } else {
       await tx.wallet.update({ where: { id: referrerWallet.id }, data: { balance: { increment: rewardAmount } } });
@@ -308,10 +339,12 @@ export class ReferralsService {
           bookingId: params.bookingId ?? null,
           bookingEarningId: params.bookingEarningId ?? null,
           depositRequestId: params.depositRequestId ?? null,
-          currency,
+          sessionCurrency: currency,
+          creditedCurrency,
           sourceAmount: Number(grossAmount),
           rewardPercent,
           rewardAmount: Number(rewardAmount),
+          ...(currency !== creditedCurrency ? { usdExchangeRate } : {}),
         }),
       },
     });
@@ -321,7 +354,7 @@ export class ReferralsService {
         referralId,
         type,
         case: referralCase,
-        currency,
+        currency: creditedCurrency,
         sourceAmount: grossAmount,
         rewardPercent: this.money(rewardPercent),
         rewardAmount,

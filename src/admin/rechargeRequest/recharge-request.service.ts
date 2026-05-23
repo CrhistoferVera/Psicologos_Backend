@@ -168,12 +168,14 @@ export class RechargeRequestService {
           },
         });
 
+        const { referralRewardPercent, usdExchangeRate } = await this.systemConfig.getRuntimeConfig();
         await this.referralsService.maybeRewardReferrerFromPackage(tx, {
           depositRequestId: depositRequest.id,
           buyerUserId: depositRequest.userId,
           grossAmount: new Prisma.Decimal(walletIncrement),
           currency: isStripePayment ? 'USD' : 'BOB',
-          rewardPercent: (await this.systemConfig.getRuntimeConfig()).referralRewardPercent,
+          rewardPercent: referralRewardPercent,
+          usdExchangeRate,
         });
 
         return {

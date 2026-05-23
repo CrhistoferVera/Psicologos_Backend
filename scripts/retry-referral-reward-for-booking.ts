@@ -73,6 +73,7 @@ async function main() {
               grossAmount,
               currency: booking.currency,
               rewardPercent: runtimeConfig.referralRewardPercent,
+              usdExchangeRate: runtimeConfig.usdExchangeRate,
             }),
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
         );

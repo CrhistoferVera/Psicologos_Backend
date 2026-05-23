@@ -265,6 +265,7 @@ export class BookingEarningsService {
                 grossAmount: new Prisma.Decimal(result.grossAmount as number),
                 currency: result.currency as string,
                 rewardPercent: runtimeConfig.referralRewardPercent,
+                usdExchangeRate: runtimeConfig.usdExchangeRate,
               }),
               { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
             );

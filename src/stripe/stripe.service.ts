@@ -588,13 +588,14 @@ export class StripeService {
           description: `Recarga Stripe: ${deposit.packageNameAtMoment}`,
         },
       });
-      const { referralRewardPercent } = await this.systemConfigService.getRuntimeConfig();
+      const { referralRewardPercent, usdExchangeRate } = await this.systemConfigService.getRuntimeConfig();
       await this.referralsService.maybeRewardReferrerFromPackage(tx, {
         depositRequestId: deposit.id,
         buyerUserId: deposit.userId,
         grossAmount: new Prisma.Decimal(amountUsd),
         currency: 'USD',
         rewardPercent: referralRewardPercent,
+        usdExchangeRate,
       });
     });
   }

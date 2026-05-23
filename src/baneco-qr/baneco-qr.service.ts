@@ -325,13 +325,14 @@ export class BanecoQrService {
           description,
         },
       });
-      const { referralRewardPercent } = await this.systemConfigService.getRuntimeConfig();
+      const { referralRewardPercent, usdExchangeRate } = await this.systemConfigService.getRuntimeConfig();
       await this.referralsService.maybeRewardReferrerFromPackage(tx, {
         depositRequestId: deposit.id,
         buyerUserId: deposit.userId,
         grossAmount: new Prisma.Decimal(deposit.amount),
         currency: 'BOB',
         rewardPercent: referralRewardPercent,
+        usdExchangeRate,
       });
     });
     this.logger.log(`[APPLY][${qrId}] wallet recharged +${deposit.amount} BOB`);
@@ -636,13 +637,14 @@ export class BanecoQrService {
           description: `Recarga QR Baneco: ${deposit.packageNameAtMoment}`,
         },
       });
-      const { referralRewardPercent } = await this.systemConfigService.getRuntimeConfig();
+      const { referralRewardPercent, usdExchangeRate } = await this.systemConfigService.getRuntimeConfig();
       await this.referralsService.maybeRewardReferrerFromPackage(tx, {
         depositRequestId: deposit.id,
         buyerUserId: deposit.userId,
         grossAmount: new Prisma.Decimal(deposit.amount),
         currency: 'BOB',
         rewardPercent: referralRewardPercent,
+        usdExchangeRate,
       });
     });
   }
