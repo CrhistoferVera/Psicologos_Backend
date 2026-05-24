@@ -26,8 +26,8 @@ export class ChatIaService {
   private readonly webhookAnfitriona: string;
 
   constructor(private configService: ConfigService) {
-    this.webhookUsuario = this.configService.getOrThrow<string>('N8N_WEBHOOK_USUARIO');
-    this.webhookAnfitriona = this.configService.getOrThrow<string>('N8N_WEBHOOK_ANFITRIONA');
+    this.webhookUsuario = this.configService.getOrThrow<string>('N8N_WEBHOOK_PACIENTE');
+    this.webhookAnfitriona = this.configService.getOrThrow<string>('N8N_WEBHOOK_PSICOLOGO');
   }
 
   private readonly TIMEOUT_MS = 30000;
