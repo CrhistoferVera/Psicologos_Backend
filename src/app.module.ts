@@ -29,6 +29,7 @@ import { BanecoQrModule } from './baneco-qr/baneco-qr.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { ReviewsModule } from './reviews/reviews.module';
+import { ChatIaModule } from './chat-ia/chat-ia.module';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { ReviewsModule } from './reviews/reviews.module';
     SessionsModule,
     BookingsModule,
     ReviewsModule,
+    ChatIaModule,
   ],
   controllers: [],
   providers: [],
