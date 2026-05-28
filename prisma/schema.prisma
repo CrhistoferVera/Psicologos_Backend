@@ -126,6 +126,7 @@ model ProfessionalProfile {
   availability   Json?
   coverPublicId  String?
   coverUrl       String?
+  languages      String[] @default([])
 
   // KYC
   kycVideoUrl               String?

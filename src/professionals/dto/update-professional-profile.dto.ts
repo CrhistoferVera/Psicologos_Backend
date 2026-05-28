@@ -14,19 +14,19 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class EducationEntryDto {
   @IsString()
-  id: string;
+  id!: string;
 
   @IsString()
-  degree: string;
+  degree!: string;
 
   @IsString()
-  institution: string;
+  institution!: string;
 
   @Transform(({ value }) => Number(value))
   @IsInt()
   @Min(1900)
   @Max(2100)
-  year: number;
+  year!: number;
 
   @IsOptional()
   @IsString()
@@ -85,6 +85,18 @@ export class UpdateProfessionalProfileDto {
   @IsOptional()
   @IsObject()
   availability?: Record<string, unknown>;
+
+  @ApiPropertyOptional({ example: ['Español', 'Inglés'], description: 'Idiomas que habla el profesional' })
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      try { return JSON.parse(value); } catch { return value; }
+    }
+    return value;
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  languages?: string[];
 
   @ApiPropertyOptional({ description: 'Formación académica del profesional' })
   @Transform(({ value }) => {

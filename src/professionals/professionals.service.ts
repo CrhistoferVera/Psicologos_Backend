@@ -194,6 +194,7 @@ export class ProfessionalsService {
               bio: true,
               isOnline: true,
               coverUrl: true,
+              languages: true,
               servicePrices: {
                 select: {
                   serviceType: true,
@@ -233,6 +234,7 @@ export class ProfessionalsService {
         images: mainImage ? [mainImage] : [],
         isOnline: profile?.isOnline ?? false,
         specialties: u.professionalSpecialties.map((ps) => ps.specialty),
+        languages: profile?.languages ?? [],
         servicePrices: (profile?.servicePrices ?? []).map((sp) => ({
           serviceType: String(sp.serviceType),
           price: Number(sp.price),
@@ -270,6 +272,7 @@ export class ProfessionalsService {
             bio: true,
             isOnline: true,
             education: true,
+            languages: true,
             reviewStatus: true,
           },
         },
@@ -314,6 +317,7 @@ export class ProfessionalsService {
       rating: reviewStats._avg.rating ?? null,
       reviewCount: reviewStats._count.rating,
       education: (profile?.education ?? []) as Record<string, unknown>[],
+      languages: profile?.languages ?? [],
       isVerified: profile?.reviewStatus === 'APPROVED',
     };
   }
@@ -337,6 +341,7 @@ export class ProfessionalsService {
             reviewStatus: true,
             reviewNotes: true,
             availability: true,
+            languages: true,
           },
         },
       },
@@ -358,6 +363,7 @@ export class ProfessionalsService {
       availability:
         (user.professionalProfile?.availability as Record<string, unknown> | null) ?? null,
       education: (user.professionalProfile?.education ?? []) as Record<string, unknown>[],
+      languages: user.professionalProfile?.languages ?? [],
       isActive: user.isActive,
     };
   }
@@ -435,6 +441,7 @@ export class ProfessionalsService {
       ...(profileFields.education !== undefined && {
         education: profileFields.education as unknown as Prisma.InputJsonValue,
       }),
+      ...(profileFields.languages !== undefined && { languages: profileFields.languages }),
       ...(avatarUpdate && {
         avatarUrl: avatarUpdate.avatarUrl,
         avatarPublicId: avatarUpdate.avatarPublicId,
