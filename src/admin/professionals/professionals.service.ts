@@ -75,11 +75,13 @@ export class AdminProfessionalsService {
         where: { userId: id },
         update: {
           ...(dto.username !== undefined && { username: dto.username }),
+          ...(dto.title !== undefined && { title: dto.title === '' ? null : dto.title }),
           ...(dto.bio !== undefined && { bio: dto.bio }),
         },
         create: {
           userId: id,
           username: dto.username || `prof_${id.slice(0, 8)}`,
+          ...(dto.title !== undefined && dto.title !== '' && { title: dto.title }),
           ...(dto.bio !== undefined && { bio: dto.bio }),
         },
       }),

@@ -29,6 +29,9 @@ export class ProfessionalPublicListItemDto {
   @ApiProperty({ example: 'maria_lopez', nullable: true })
   username: string | null;
 
+  @ApiProperty({ example: 'Lic.', nullable: true, description: 'Título profesional (Dr., Dra., Lic., Mg., MsC., PhD)' })
+  title: string | null;
+
   @ApiProperty({
     example: 'https://res.cloudinary.com/demo/image/upload/v1/avatar.jpg',
     nullable: true,

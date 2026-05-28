@@ -11,6 +11,9 @@ export class ProfessionalPublicDetailDto {
   @ApiProperty({ example: 'maria_lopez' })
   username: string;
 
+  @ApiProperty({ example: 'Lic.', nullable: true, description: 'Título profesional (Dr., Dra., Lic., Mg., MsC., PhD)' })
+  title: string | null;
+
   @ApiProperty({
     example: 28,
     nullable: true,
@@ -65,6 +68,9 @@ export class ProfessionalPublicDetailDto {
     description: 'Formación académica del profesional',
   })
   education: Record<string, unknown>[];
+
+  @ApiProperty({ type: [String], example: ['Español', 'Inglés'], description: 'Idiomas que habla el profesional' })
+  languages: string[];
 
   @ApiProperty({ example: true, description: 'El admin aprobó las credenciales del profesional' })
   isVerified: boolean;

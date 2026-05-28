@@ -190,6 +190,7 @@ export class ProfessionalsService {
           professionalProfile: {
             select: {
               username: true,
+              title: true,
               avatarUrl: true,
               bio: true,
               isOnline: true,
@@ -228,6 +229,7 @@ export class ProfessionalsService {
         id: u.id,
         name: [u.firstName, u.lastName].filter(Boolean).join(' '),
         username: profile?.username ?? null,
+        title: profile?.title ?? null,
         avatar: profile?.avatarUrl ?? null,
         shortDescription: profile?.bio ?? u.userProfile?.bio ?? null,
         mainImage,
@@ -266,6 +268,7 @@ export class ProfessionalsService {
         professionalProfile: {
           select: {
             username: true,
+            title: true,
             dateOfBirth: true,
             avatarUrl: true,
             coverUrl: true,
@@ -307,6 +310,7 @@ export class ProfessionalsService {
       id: user.id,
       name: [user.firstName, user.lastName].filter(Boolean).join(' '),
       username: profile?.username ?? '',
+      title: profile?.title ?? null,
       age,
       bio: profile?.bio ?? user.userProfile?.bio ?? null,
       avatar: profile?.avatarUrl ?? null,
@@ -333,6 +337,7 @@ export class ProfessionalsService {
         professionalProfile: {
           select: {
             username: true,
+            title: true,
             bio: true,
             education: true,
             isOnline: true,
@@ -354,6 +359,7 @@ export class ProfessionalsService {
       firstName: user.firstName,
       lastName: user.lastName,
       username: user.professionalProfile?.username ?? '',
+      title: user.professionalProfile?.title ?? null,
       bio: user.professionalProfile?.bio ?? '',
       isOnline: user.professionalProfile?.isOnline ?? false,
       avatarUrl: user.professionalProfile?.avatarUrl ?? null,
@@ -433,6 +439,9 @@ export class ProfessionalsService {
 
     const profileData: Prisma.ProfessionalProfileUpdateInput = {
       ...(profileFields.username !== undefined && { username: profileFields.username }),
+      ...(profileFields.title !== undefined && {
+        title: profileFields.title === '' ? null : profileFields.title,
+      }),
       ...(profileFields.bio !== undefined && { bio: profileFields.bio }),
       ...(profileFields.isOnline !== undefined && { isOnline: profileFields.isOnline }),
       ...(profileFields.availability !== undefined && {
@@ -462,6 +471,9 @@ export class ProfessionalsService {
         dateOfBirth: null,
         cedula: null,
       };
+      if (profileFields.title !== undefined && profileFields.title !== '') {
+        createData.title = profileFields.title;
+      }
       if (profileFields.bio !== undefined) createData.bio = profileFields.bio;
       if (profileFields.isOnline !== undefined) createData.isOnline = profileFields.isOnline;
       if (profileFields.availability !== undefined) {
