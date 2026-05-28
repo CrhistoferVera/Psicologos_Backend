@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsObject,
   IsOptional,
@@ -11,6 +12,7 @@ import {
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { PROFESSIONAL_TITLES } from '../constants/professional-titles';
 
 export class EducationEntryDto {
   @IsString()
@@ -52,6 +54,16 @@ export class UpdateProfessionalProfileDto {
   @IsString()
   @IsOptional()
   username?: string;
+
+  @ApiPropertyOptional({
+    example: 'Lic.',
+    enum: PROFESSIONAL_TITLES,
+    description: 'Título profesional (Dr., Dra., Lic., Lic.ª, Mg., MsC., PhD). Cadena vacía limpia el campo.',
+  })
+  @IsString()
+  @IsOptional()
+  @IsIn([...PROFESSIONAL_TITLES, ''])
+  title?: string;
 
   @ApiPropertyOptional({ example: 'Conversaciones profesionales.' })
   @IsString()

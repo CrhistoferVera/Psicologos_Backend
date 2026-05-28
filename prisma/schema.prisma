@@ -117,6 +117,7 @@ model ProfessionalProfile {
   idDocPublicId  String?
   avatarUrl      String?
   avatarPublicId String?
+  title          String?
   bio            String?
   education      Json?
   rateCredits    Int?
