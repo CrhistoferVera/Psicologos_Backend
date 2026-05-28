@@ -26,9 +26,9 @@ export class AdminProfessionalsService {
       throw new NotFoundException(`No se encontro un profesional con ID: ${id}`);
     }
 
-    const reviewStatus = updateStatusDto.reviewStatus
-      ? (updateStatusDto.isActive ? ProfessionalReviewStatus.APPROVED : ProfessionalReviewStatus.REJECTED)
-      : undefined;
+    const reviewStatus = updateStatusDto.isActive
+      ? ProfessionalReviewStatus.APPROVED
+      : ProfessionalReviewStatus.REJECTED;
 
     await this.prisma.$transaction([
       this.prisma.user.update({
