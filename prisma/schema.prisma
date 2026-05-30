@@ -344,6 +344,7 @@ model ProfessionalSpecialty {
   id             String   @id @default(uuid())
   professionalId String
   specialtyId    String
+  sortOrder      Int      @default(0)
   createdAt      DateTime @default(now())
 
   professional User      @relation(fields: [professionalId], references: [id], onDelete: Cascade)

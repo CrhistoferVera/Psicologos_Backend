@@ -206,6 +206,7 @@ export class ProfessionalsService {
           },
           professionalSpecialties: {
             where: { specialty: { isActive: true } },
+            orderBy: { sortOrder: 'asc' },
             select: {
               specialty: {
                 select: {
@@ -281,6 +282,7 @@ export class ProfessionalsService {
         },
         professionalSpecialties: {
           where: { specialty: { isActive: true } },
+          orderBy: { sortOrder: 'asc' },
           select: {
             specialty: {
               select: {

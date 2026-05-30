@@ -150,12 +150,12 @@ export class SpecialtyService {
 
     await this.prisma.$transaction(async (tx) => {
       await tx.professionalSpecialty.deleteMany({ where: { professionalId: userId } });
-
       if (specialtyIds.length > 0) {
         await tx.professionalSpecialty.createMany({
-          data: specialtyIds.map((specialtyId) => ({
+          data: specialtyIds.map((specialtyId, index) => ({
             professionalId: userId,
             specialtyId,
+            sortOrder: index,
           })),
           skipDuplicates: true,
         });
@@ -173,7 +173,7 @@ export class SpecialtyService {
           select: { id: true, name: true, slug: true, description: true, isActive: true },
         },
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { sortOrder: 'asc' },
     });
   }
 }
