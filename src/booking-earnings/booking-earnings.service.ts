@@ -119,10 +119,14 @@ export class BookingEarningsService {
             };
           }
 
+          // grossAmount = precio COMPLETO de la sesión, siempre.
+          // bookingPayment.amountBob/Usd puede ser solo el monto externo (QR/Stripe)
+          // cuando el cliente pagó parcialmente con wallet. Las comisiones y referidos
+          // se calculan sobre el precio total de la sesión.
           const grossAmount =
             booking.currency === 'USD'
-              ? this.money(bookingPayment.amountUsd ?? booking.priceUsd)
-              : this.money(bookingPayment.amountBob ?? booking.priceBob);
+              ? this.money(booking.priceUsd)
+              : this.money(booking.priceBob);
 
           if (grossAmount.lessThanOrEqualTo(0)) {
             return { credited: false, reason: 'INVALID_GROSS_AMOUNT' as const };

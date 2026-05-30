@@ -188,10 +188,14 @@ export class BookingsController {
   @Post('bookings/:bookingId/payment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.USER)
-  @ApiOperation({ summary: 'Iniciar pago para una reserva PENDING_PAYMENT' })
+  @ApiOperation({ summary: 'Iniciar pago para una reserva o lote de reservas PENDING_PAYMENT' })
   @ApiResponse({ status: 201, type: BookingPaymentInitResponseDto })
-  initBookingPayment(@CurrentUser() user: JwtUser, @Param('bookingId') bookingId: string) {
-    return this.bookingsService.initBookingPayment(user.userId, bookingId);
+  initBookingPayment(
+    @CurrentUser() user: JwtUser,
+    @Param('bookingId') bookingId: string,
+    @Body() body?: { batchBookingIds?: string[] },
+  ) {
+    return this.bookingsService.initBookingPayment(user.userId, bookingId, body?.batchBookingIds);
   }
 
   @Get('bookings/me')

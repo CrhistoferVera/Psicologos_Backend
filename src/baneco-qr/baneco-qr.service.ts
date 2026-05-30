@@ -368,6 +368,8 @@ export class BanecoQrService {
     amountBob: number;
     currency: 'BOB';
     bookingExpiresAt: Date | null;
+    coveredBookingIds?: string[];
+    coveredBookingPaymentIds?: string[];
     requestId?: string;
   }) {
     const traceId = payload.requestId ?? this.newReqId();
@@ -395,6 +397,8 @@ export class BanecoQrService {
           qrId: qr.qrId,
           responseCode: qr.responseCode,
           dueDate: this.buildDueDate(),
+          coveredBookingIds: payload.coveredBookingIds ?? [],
+          coveredBookingPaymentIds: payload.coveredBookingPaymentIds ?? [],
         }) as Prisma.InputJsonValue,
       },
     });
@@ -439,9 +443,13 @@ export class BanecoQrService {
         where: { id: bookingPayment.bookingId },
         select: {
           id: true,
+          clientId: true,
           status: true,
           paymentStatus: true,
           expiresAt: true,
+          currency: true,
+          priceBob: true,
+          priceUsd: true,
         },
       });
 
@@ -491,6 +499,11 @@ export class BanecoQrService {
 
       if (fresh.status !== BookingStatus.PENDING_PAYMENT) return null;
 
+      // Leer coveredBookingIds del providerPayload antes de sobreescribirlo
+      const existingPayload = (bookingPayment.providerPayload ?? {}) as Record<string, unknown>;
+      const coveredBookingIds = (existingPayload.coveredBookingIds ?? []) as string[];
+      const coveredBookingPaymentIds = (existingPayload.coveredBookingPaymentIds ?? []) as string[];
+
       await tx.bookingPayment.updateMany({
         where: {
           id: bookingPayment.id,
@@ -503,9 +516,46 @@ export class BanecoQrService {
             qrId,
             paidAt: new Date().toISOString(),
             bankTransactionId: payment?.transactionId ?? null,
+            coveredBookingIds,
+            coveredBookingPaymentIds,
           }) as Prisma.InputJsonValue,
         },
       });
+
+      // Confirmar bookings cubiertos por este QR (batch payment)
+      if (coveredBookingIds.length > 0) {
+        for (const coveredPaymentId of coveredBookingPaymentIds) {
+          await tx.bookingPayment.updateMany({
+            where: { id: coveredPaymentId, status: BookingPaymentStatus.PENDING },
+            data: { status: BookingPaymentStatus.PAID,
+              providerPayload: this.sanitizeProviderPayload({
+                provider: 'BANECO_QR',
+                qrId,
+                paidAt: new Date().toISOString(),
+                coveredByPrimaryPaymentId: bookingPayment.id,
+              }) as Prisma.InputJsonValue,
+            },
+          });
+        }
+        await tx.booking.updateMany({
+          where: { id: { in: coveredBookingIds }, status: BookingStatus.PENDING_PAYMENT },
+          data: { status: BookingStatus.CONFIRMED, paymentStatus: BookingPaymentStatus.PAID, professionalPurchaseNotifiedAt: new Date() },
+        });
+        // Descontar wallet de cada booking cubierto
+        for (const coveredId of coveredBookingIds) {
+          const coveredBooking = await tx.booking.findUnique({
+            where: { id: coveredId },
+            select: { id: true, clientId: true, currency: true, priceBob: true, priceUsd: true },
+          });
+          const coveredPayment = await tx.bookingPayment.findFirst({
+            where: { bookingId: coveredId },
+            orderBy: { createdAt: 'desc' },
+          });
+          if (coveredBooking && coveredPayment) {
+            await this.deductWalletContribution(tx, coveredBooking, coveredPayment);
+          }
+        }
+      }
 
       const bookingUpdate = await tx.booking.updateMany({
         where: {
@@ -521,6 +571,9 @@ export class BanecoQrService {
       });
 
       if (bookingUpdate.count > 0) {
+        // Descontar la contribución del wallet del cliente (precio total - monto QR pagado)
+        await this.deductWalletContribution(tx, fresh, bookingPayment);
+
         return tx.booking.findUnique({
           where: { id: fresh.id },
           select: {
@@ -572,11 +625,24 @@ export class BanecoQrService {
       );
     }
 
+    // Acreditar ganancias del psicólogo para el booking principal
     await this.bookingEarningsService.creditProfessionalEarningForBooking({
       bookingId: bookingPayment.bookingId,
       bookingPaymentId: bookingPayment.id,
       source: 'BANECO_QR_NOTIFY',
     });
+
+    // Acreditar ganancias para los bookings cubiertos del batch
+    const batchPayload = (bookingPayment.providerPayload ?? {}) as Record<string, unknown>;
+    const coveredBookingIds = (batchPayload.coveredBookingIds ?? []) as string[];
+    const coveredBookingPaymentIds = (batchPayload.coveredBookingPaymentIds ?? []) as string[];
+    for (let i = 0; i < coveredBookingIds.length; i++) {
+      await this.bookingEarningsService.creditProfessionalEarningForBooking({
+        bookingId: coveredBookingIds[i],
+        bookingPaymentId: coveredBookingPaymentIds[i],
+        source: 'BANECO_QR_NOTIFY',
+      });
+    }
 
     return true;
   }
@@ -767,5 +833,79 @@ export class BanecoQrService {
         },
       });
     });
+  }
+
+  /**
+   * Descuenta del wallet del cliente la diferencia entre el precio total y el monto pagado por QR.
+   * Ejemplo: sesión 100 BOB, QR 80 BOB → descuenta 20 BOB del wallet.
+   */
+  private async deductWalletContribution(
+    tx: Prisma.TransactionClient,
+    booking: { id: string; clientId: string; currency: string; priceBob: any; priceUsd: any },
+    bookingPayment: { amountBob: any; amountUsd: any },
+  ) {
+    const isUsd = booking.currency === 'USD';
+    const fullPrice = isUsd ? Number(booking.priceUsd ?? 0) : Number(booking.priceBob ?? 0);
+    const externalPaid = isUsd ? Number(bookingPayment.amountUsd ?? 0) : Number(bookingPayment.amountBob ?? 0);
+    const walletContrib = Math.round((fullPrice - externalPaid) * 100) / 100;
+
+    if (walletContrib <= 0.001) return;
+
+    const clientWallet = await tx.wallet.findUnique({ where: { userId: booking.clientId } });
+    if (!clientWallet) return;
+
+    if (isUsd) {
+      const available = Number(clientWallet.balanceUsd ?? 0);
+      const toDeduct = Math.min(walletContrib, available);
+      if (toDeduct <= 0.001) return;
+      await tx.wallet.update({
+        where: { id: clientWallet.id },
+        data: { balanceUsd: { decrement: new Prisma.Decimal(toDeduct) } },
+      });
+      await tx.transaction.create({
+        data: {
+          walletId: clientWallet.id,
+          type: 'BOOKING_PAYMENT' as any,
+          amount: new Prisma.Decimal(toDeduct),
+          promotionalAmount: new Prisma.Decimal(0),
+          realAmount: new Prisma.Decimal(toDeduct),
+          isPromotional: false,
+          description: JSON.stringify({
+            event: 'BOOKING_WALLET_CONTRIBUTION_ON_QR_PAYMENT',
+            bookingId: booking.id,
+            currency: booking.currency,
+          }),
+        },
+      });
+    } else {
+      const available = Number(clientWallet.balance ?? 0);
+      const toDeduct = Math.min(walletContrib, available);
+      if (toDeduct <= 0.001) return;
+      const promoAvailable = Number(clientWallet.promotionalBalance ?? 0);
+      const promoDebited = Math.min(promoAvailable, toDeduct);
+      const realDebited = toDeduct - promoDebited;
+      await tx.wallet.update({
+        where: { id: clientWallet.id },
+        data: {
+          balance: { decrement: new Prisma.Decimal(realDebited) },
+          promotionalBalance: { decrement: new Prisma.Decimal(promoDebited) },
+        },
+      });
+      await tx.transaction.create({
+        data: {
+          walletId: clientWallet.id,
+          type: 'BOOKING_PAYMENT' as any,
+          amount: new Prisma.Decimal(toDeduct),
+          promotionalAmount: new Prisma.Decimal(promoDebited),
+          realAmount: new Prisma.Decimal(realDebited),
+          isPromotional: false,
+          description: JSON.stringify({
+            event: 'BOOKING_WALLET_CONTRIBUTION_ON_QR_PAYMENT',
+            bookingId: booking.id,
+            currency: booking.currency,
+          }),
+        },
+      });
+    }
   }
 }

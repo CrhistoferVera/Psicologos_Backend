@@ -195,6 +195,8 @@ export class StripeService {
     amountUsd: number;
     amountBob: number;
     existingPaymentIntentId?: string | null;
+    coveredBookingIds?: string[];
+    coveredBookingPaymentIds?: string[];
     requestId?: string;
   }) {
     const reqId = payload.requestId ?? this.newReqId();
@@ -275,6 +277,8 @@ export class StripeService {
           amountUsd: payload.amountUsd,
           amountBob: payload.amountBob,
           customerId,
+          coveredBookingIds: payload.coveredBookingIds ?? [],
+          coveredBookingPaymentIds: payload.coveredBookingPaymentIds ?? [],
         }) as Prisma.InputJsonValue,
       },
     });
@@ -338,7 +342,7 @@ export class StripeService {
     const confirmedBookingForNotification = await this.prisma.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
         where: { id: bookingPayment.bookingId },
-        select: { id: true, status: true, paymentStatus: true, expiresAt: true },
+        select: { id: true, clientId: true, status: true, paymentStatus: true, expiresAt: true, currency: true, priceBob: true, priceUsd: true },
       });
       if (!booking) return;
 
@@ -385,6 +389,11 @@ export class StripeService {
 
       if (booking.status !== BookingStatus.PENDING_PAYMENT) return null;
 
+      // Leer bookings cubiertos antes de sobreescribir el providerPayload
+      const existingPayload = (bookingPayment.providerPayload ?? {}) as Record<string, unknown>;
+      const coveredBookingIds = (existingPayload.coveredBookingIds ?? []) as string[];
+      const coveredBookingPaymentIds = (existingPayload.coveredBookingPaymentIds ?? []) as string[];
+
       await tx.bookingPayment.updateMany({
         where: {
           id: bookingPayment.id,
@@ -396,6 +405,8 @@ export class StripeService {
             provider: 'STRIPE',
             paymentIntentId,
             paidAt: new Date().toISOString(),
+            coveredBookingIds,
+            coveredBookingPaymentIds,
           }) as Prisma.InputJsonValue,
         },
       });
@@ -414,6 +425,44 @@ export class StripeService {
       });
 
       if (bookingUpdate.count > 0) {
+        // Descontar wallet del booking principal
+        await this.deductWalletContribution(tx, booking, bookingPayment);
+
+        // Confirmar bookings cubiertos por este pago Stripe (batch)
+        if (coveredBookingIds.length > 0) {
+          for (const coveredPaymentId of coveredBookingPaymentIds) {
+            await tx.bookingPayment.updateMany({
+              where: { id: coveredPaymentId, status: BookingPaymentStatus.PENDING },
+              data: {
+                status: BookingPaymentStatus.PAID,
+                providerPayload: this.sanitizeProviderPayload({
+                  provider: 'STRIPE',
+                  paymentIntentId,
+                  paidAt: new Date().toISOString(),
+                  coveredByPrimaryPaymentId: bookingPayment.id,
+                }) as Prisma.InputJsonValue,
+              },
+            });
+          }
+          await tx.booking.updateMany({
+            where: { id: { in: coveredBookingIds }, status: BookingStatus.PENDING_PAYMENT },
+            data: { status: BookingStatus.CONFIRMED, paymentStatus: BookingPaymentStatus.PAID, professionalPurchaseNotifiedAt: new Date() },
+          });
+          for (const coveredId of coveredBookingIds) {
+            const coveredBooking = await tx.booking.findUnique({
+              where: { id: coveredId },
+              select: { id: true, clientId: true, currency: true, priceBob: true, priceUsd: true },
+            });
+            const coveredPayment = await tx.bookingPayment.findFirst({
+              where: { bookingId: coveredId },
+              orderBy: { createdAt: 'desc' },
+            });
+            if (coveredBooking && coveredPayment) {
+              await this.deductWalletContribution(tx, coveredBooking, coveredPayment);
+            }
+          }
+        }
+
         return tx.booking.findUnique({
           where: { id: booking.id },
           select: {
@@ -465,11 +514,24 @@ export class StripeService {
       );
     }
 
+    // Acreditar ganancias del psicólogo para el booking principal
     await this.bookingEarningsService.creditProfessionalEarningForBooking({
       bookingId: bookingPayment.bookingId,
       bookingPaymentId: bookingPayment.id,
       source: 'STRIPE_WEBHOOK',
     });
+
+    // Acreditar ganancias para los bookings cubiertos del batch
+    const batchPayload = (bookingPayment.providerPayload ?? {}) as Record<string, unknown>;
+    const coveredBookingIds = (batchPayload.coveredBookingIds ?? []) as string[];
+    const coveredBookingPaymentIds = (batchPayload.coveredBookingPaymentIds ?? []) as string[];
+    for (let i = 0; i < coveredBookingIds.length; i++) {
+      await this.bookingEarningsService.creditProfessionalEarningForBooking({
+        bookingId: coveredBookingIds[i],
+        bookingPaymentId: coveredBookingPaymentIds[i],
+        source: 'STRIPE_WEBHOOK',
+      });
+    }
 
     return true;
   }
@@ -692,5 +754,72 @@ export class StripeService {
         rejectionReason: 'Pago rechazado por Stripe',
       },
     });
+  }
+
+  private async deductWalletContribution(
+    tx: Prisma.TransactionClient,
+    booking: { id: string; clientId: string; currency: string; priceBob: any; priceUsd: any },
+    bookingPayment: { amountBob: any; amountUsd: any },
+  ) {
+    const isUsd = booking.currency === 'USD';
+    const fullPrice = isUsd ? Number(booking.priceUsd ?? 0) : Number(booking.priceBob ?? 0);
+    const externalPaid = isUsd ? Number(bookingPayment.amountUsd ?? 0) : Number(bookingPayment.amountBob ?? 0);
+    const walletContrib = Math.round((fullPrice - externalPaid) * 100) / 100;
+
+    if (walletContrib <= 0.001) return;
+
+    const clientWallet = await tx.wallet.findUnique({ where: { userId: booking.clientId } });
+    if (!clientWallet) return;
+
+    if (isUsd) {
+      const toDeduct = Math.min(walletContrib, Number(clientWallet.balanceUsd ?? 0));
+      if (toDeduct <= 0.001) return;
+      await tx.wallet.update({
+        where: { id: clientWallet.id },
+        data: { balanceUsd: { decrement: new Prisma.Decimal(toDeduct) } },
+      });
+      await tx.transaction.create({
+        data: {
+          walletId: clientWallet.id,
+          type: 'BOOKING_PAYMENT' as any,
+          amount: new Prisma.Decimal(toDeduct),
+          promotionalAmount: new Prisma.Decimal(0),
+          realAmount: new Prisma.Decimal(toDeduct),
+          isPromotional: false,
+          description: JSON.stringify({
+            event: 'BOOKING_WALLET_CONTRIBUTION_ON_STRIPE_PAYMENT',
+            bookingId: booking.id,
+            currency: booking.currency,
+          }),
+        },
+      });
+    } else {
+      const toDeduct = Math.min(walletContrib, Number(clientWallet.balance ?? 0));
+      if (toDeduct <= 0.001) return;
+      const promoDebited = Math.min(Number(clientWallet.promotionalBalance ?? 0), toDeduct);
+      const realDebited = toDeduct - promoDebited;
+      await tx.wallet.update({
+        where: { id: clientWallet.id },
+        data: {
+          balance: { decrement: new Prisma.Decimal(realDebited) },
+          promotionalBalance: { decrement: new Prisma.Decimal(promoDebited) },
+        },
+      });
+      await tx.transaction.create({
+        data: {
+          walletId: clientWallet.id,
+          type: 'BOOKING_PAYMENT' as any,
+          amount: new Prisma.Decimal(toDeduct),
+          promotionalAmount: new Prisma.Decimal(promoDebited),
+          realAmount: new Prisma.Decimal(realDebited),
+          isPromotional: false,
+          description: JSON.stringify({
+            event: 'BOOKING_WALLET_CONTRIBUTION_ON_STRIPE_PAYMENT',
+            bookingId: booking.id,
+            currency: booking.currency,
+          }),
+        },
+      });
+    }
   }
 }

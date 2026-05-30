@@ -841,6 +841,85 @@ export class BookingsService {
     }
   }
 
+  /**
+   * Descuenta la contribución del wallet del cliente al confirmar un pago externo (QR/Stripe).
+   * walletContrib = booking.priceBob - bookingPayment.amountBob (la diferencia ya pagada externamente).
+   * Se llama dentro de la transacción del webhook, después de marcar el booking como CONFIRMED.
+   */
+  async deductWalletContributionOnExternalPayment(
+    tx: PrismaTx,
+    booking: { id: string; clientId: string; currency: string; priceBob: any; priceUsd: any },
+    bookingPayment: { amountBob: any; amountUsd: any },
+  ) {
+    const isUsd = booking.currency === CURRENCY_USD;
+    const fullPrice = isUsd ? Number(booking.priceUsd) : Number(booking.priceBob);
+    const externalAmount = isUsd ? Number(bookingPayment.amountUsd ?? 0) : Number(bookingPayment.amountBob ?? 0);
+    const walletContrib = Math.round((fullPrice - externalAmount) * 100) / 100;
+
+    if (walletContrib <= 0.001) return; // sin contribución del wallet
+
+    const clientWallet = await tx.wallet.findUnique({ where: { userId: booking.clientId } });
+    if (!clientWallet) return;
+
+    if (isUsd) {
+      const available = Number(clientWallet.balanceUsd ?? 0);
+      const toDeduct = Math.min(walletContrib, available);
+      if (toDeduct <= 0.001) return;
+      await tx.wallet.update({
+        where: { id: clientWallet.id },
+        data: { balanceUsd: { decrement: new Prisma.Decimal(toDeduct) } },
+      });
+      await tx.transaction.create({
+        data: {
+          walletId: clientWallet.id,
+          type: TransactionType.BOOKING_PAYMENT,
+          amount: new Prisma.Decimal(toDeduct),
+          promotionalAmount: new Prisma.Decimal(0),
+          realAmount: new Prisma.Decimal(toDeduct),
+          isPromotional: false,
+          description: JSON.stringify({
+            event: 'BOOKING_WALLET_CONTRIBUTION_ON_EXTERNAL_PAYMENT',
+            bookingId: booking.id,
+            currency: booking.currency,
+          }),
+        },
+      });
+    } else {
+      const available = Number(clientWallet.balance ?? 0);
+      const toDeduct = Math.min(walletContrib, available);
+      if (toDeduct <= 0.001) return;
+      let promoDebited = 0;
+      let realDebited = toDeduct;
+      try {
+        const bd = allocateCreditDebit(available, Number(clientWallet.promotionalBalance ?? 0), toDeduct);
+        promoDebited = bd.promotionalDebited;
+        realDebited = bd.realDebited;
+      } catch { /* usa toDeduct completo como real */ }
+      await tx.wallet.update({
+        where: { id: clientWallet.id },
+        data: {
+          balance: { decrement: new Prisma.Decimal(realDebited) },
+          promotionalBalance: { decrement: new Prisma.Decimal(promoDebited) },
+        },
+      });
+      await tx.transaction.create({
+        data: {
+          walletId: clientWallet.id,
+          type: TransactionType.BOOKING_PAYMENT,
+          amount: new Prisma.Decimal(toDeduct),
+          promotionalAmount: new Prisma.Decimal(promoDebited),
+          realAmount: new Prisma.Decimal(realDebited),
+          isPromotional: false,
+          description: JSON.stringify({
+            event: 'BOOKING_WALLET_CONTRIBUTION_ON_EXTERNAL_PAYMENT',
+            bookingId: booking.id,
+            currency: booking.currency,
+          }),
+        },
+      });
+    }
+  }
+
   private async markBookingAsExpired(tx: PrismaTx, bookingId: string) {
     await tx.booking.updateMany({
       where: {
@@ -883,17 +962,13 @@ export class BookingsService {
       orderBy: { createdAt: 'desc' },
     });
 
+    // Si ya existe un registro PENDING (creado en createBatchBookings con el monto externo correcto),
+    // NO sobreescribir los amounts — preservar el monto externo (ej. 90 BOB).
     if (pending) {
-      return tx.bookingPayment.update({
-        where: { id: pending.id },
-        data: {
-          amountBob: booking.priceBob,
-          amountUsd: booking.priceUsd,
-          currency: booking.currency,
-        },
-      });
+      return pending;
     }
 
+    // Solo crear si no existe (booking creado por flujo antiguo sin monto externo previo)
     return tx.bookingPayment.create({
       data: {
         bookingId: booking.id,
@@ -1569,7 +1644,7 @@ export class BookingsService {
     };
   }
 
-  async initBookingPayment(clientId: string, bookingId: string) {
+  async initBookingPayment(clientId: string, bookingId: string, batchBookingIds?: string[]) {
     const reqId = this.newReqId();
     this.logger.log(`[BOOKING-PAY][${reqId}] init bookingId=${bookingId} clientId=${clientId}`);
 
@@ -1636,16 +1711,55 @@ export class BookingsService {
           priceUsd: booking.priceUsd,
         });
 
+        // Calcular monto total del batch si se pasaron más bookingIds
+        // Ejemplo: 2 sesiones de 100 BOB, wallet 10 BOB → totalExternal = 90 + 100 = 190 BOB
+        let totalAmountBob = Number(bookingPayment.amountBob ?? booking.priceBob);
+        let totalAmountUsd = Number(bookingPayment.amountUsd ?? booking.priceUsd);
+        const coveredBookingIds: string[] = [];
+        const coveredBookingPaymentIds: string[] = [];
+
+        if (batchBookingIds && batchBookingIds.length > 0) {
+          const otherIds = batchBookingIds.filter((id) => id !== bookingId);
+          for (const otherId of otherIds) {
+            const otherBooking = await tx.booking.findUnique({
+              where: { id: otherId },
+              select: { id: true, clientId: true, status: true, paymentStatus: true, currency: true, priceBob: true, priceUsd: true },
+            });
+            if (!otherBooking || otherBooking.clientId !== clientId) continue;
+            if (otherBooking.status !== BookingStatus.PENDING_PAYMENT) continue;
+
+            const otherPayment = await tx.bookingPayment.findFirst({
+              where: { bookingId: otherId, status: BookingPaymentStatus.PENDING },
+              orderBy: { createdAt: 'desc' },
+            });
+            if (!otherPayment) continue;
+
+            if (booking.currency === CURRENCY_BOB) {
+              totalAmountBob += Number(otherPayment.amountBob ?? otherBooking.priceBob);
+            } else {
+              totalAmountUsd += Number(otherPayment.amountUsd ?? otherBooking.priceUsd);
+            }
+            coveredBookingIds.push(otherId);
+            coveredBookingPaymentIds.push(otherPayment.id);
+          }
+        }
+
+        // NO actualizamos bookingPayment.amountBob/Usd con el total del batch.
+        // Cada booking ya tiene su monto externo individual correcto desde createBatchBookings.
+        // Sobreescribir acumularía el total en cada llamada a initBookingPayment (bug).
+
         return {
           bookingId: booking.id,
           professionalId: booking.professionalId,
           paymentMethod: booking.paymentMethod as BookingPaymentMethod,
           currency: booking.currency,
-          amountBob: Number(booking.priceBob),
-          amountUsd: Number(booking.priceUsd),
+          amountBob: totalAmountBob,
+          amountUsd: totalAmountUsd,
           expiresAt: booking.expiresAt,
           bookingPaymentId: bookingPayment.id,
           existingProviderReference: bookingPayment.providerReference,
+          coveredBookingIds,
+          coveredBookingPaymentIds,
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -1662,6 +1776,8 @@ export class BookingsService {
         amountBob: initPayload.amountBob,
         currency: CURRENCY_BOB,
         bookingExpiresAt: initPayload.expiresAt,
+        coveredBookingIds: initPayload.coveredBookingIds,
+        coveredBookingPaymentIds: initPayload.coveredBookingPaymentIds,
         requestId: reqId,
       });
 
@@ -1680,6 +1796,8 @@ export class BookingsService {
         amountUsd: initPayload.amountUsd,
         amountBob: initPayload.amountBob,
         existingPaymentIntentId: initPayload.existingProviderReference,
+        coveredBookingIds: initPayload.coveredBookingIds,
+        coveredBookingPaymentIds: initPayload.coveredBookingPaymentIds,
         requestId: reqId,
       });
 
@@ -2430,37 +2548,114 @@ export class BookingsService {
           update: {},
         });
 
-        let runningBalance = Number(clientWallet.balance);
-        let runningPromo = Number(clientWallet.promotionalBalance);
-        const breakdowns: Array<ReturnType<typeof allocateCreditDebit> | null> = [];
+        // ── Calcular contribución del wallet y monto externo por sesión ─────────────
+        // walletContrib = lo que cubre el wallet (puede ser parcial o total)
+        // externalAmount = lo que falta pagar por QR (BOB) o Stripe (USD)
+        // El wallet se descuenta inmediatamente; el externo espera al webhook.
+        type ItemBreakdown = {
+          walletContrib: Prisma.Decimal;
+          externalAmount: Prisma.Decimal;
+          promoDebited: number;
+          realDebited: number;
+          needsExternalPayment: boolean;
+        };
+
+        const PENDING_PAYMENT_TTL_MS = 15 * 60 * 1000; // 15 minutos
+
+        // Mínimos de pago externo por proveedor
+        // Stripe rechaza cobros < $0.50 USD; Baneco QR rechaza < 1 BOB
+        const MIN_STRIPE_USD = 0.50;
+        const MIN_BANECO_BOB = 1.00;
+
+        const itemBreakdowns: ItemBreakdown[] = [];
 
         if (isUsd) {
-          const totalUsd = batchItems.reduce((sum, item) => sum + Number(item.chargeAmount), 0);
-          if (Number(clientWallet.balanceUsd ?? 0) < totalUsd) {
-            throw new BadRequestException(
-              `Saldo insuficiente para reservar ${dtos.length} sesion${dtos.length > 1 ? 'es' : ''}.`,
-            );
-          }
-          batchItems.forEach(() => breakdowns.push(null));
-        } else {
+          let runningUsd = Number(clientWallet.balanceUsd ?? 0);
           for (const item of batchItems) {
-            let bd: ReturnType<typeof allocateCreditDebit>;
-            try {
-              bd = allocateCreditDebit(runningBalance, runningPromo, Number(item.chargeAmount));
-            } catch {
-              throw new BadRequestException(
-                `Saldo insuficiente para reservar ${dtos.length} sesion${dtos.length > 1 ? 'es' : ''}.`,
-              );
+            const price = Number(item.chargeAmount);
+            let walletContrib = Math.min(runningUsd, price);
+            let external = Math.round((price - walletContrib) * 100) / 100;
+
+            // Si el monto externo es menor al mínimo de Stripe pero mayor que cero,
+            // intentar absorberlo con el wallet. Si no alcanza, elevar al mínimo.
+            if (external > 0 && external < MIN_STRIPE_USD) {
+              const canAbsorb = runningUsd >= price;
+              if (canAbsorb) {
+                // Wallet cubre el todo — pago full wallet
+                walletContrib = price;
+                external = 0;
+              } else {
+                // Elevar monto externo al mínimo de Stripe, reducir walletContrib
+                external = MIN_STRIPE_USD;
+                walletContrib = Math.round((price - external) * 100) / 100;
+              }
             }
-            runningBalance -= Number(item.chargeAmount);
-            runningPromo -= bd.promotionalDebited;
-            breakdowns.push(bd);
+
+            runningUsd -= walletContrib;
+            itemBreakdowns.push({
+              walletContrib: new Prisma.Decimal(walletContrib),
+              externalAmount: new Prisma.Decimal(external),
+              promoDebited: 0,
+              realDebited: walletContrib,
+              needsExternalPayment: external >= MIN_STRIPE_USD,
+            });
+          }
+        } else {
+          let runningBalance = Number(clientWallet.balance);
+          let runningPromo = Number(clientWallet.promotionalBalance);
+          for (const item of batchItems) {
+            const price = Number(item.chargeAmount);
+            let walletContrib = Math.min(runningBalance, price);
+            let external = Math.round((price - walletContrib) * 100) / 100;
+
+            // Si el monto externo es menor al mínimo de Baneco QR pero mayor que cero,
+            // intentar absorberlo con el wallet. Si no alcanza, elevar al mínimo.
+            if (external > 0 && external < MIN_BANECO_BOB) {
+              const canAbsorb = runningBalance >= price;
+              if (canAbsorb) {
+                walletContrib = price;
+                external = 0;
+              } else {
+                external = MIN_BANECO_BOB;
+                walletContrib = Math.round((price - external) * 100) / 100;
+              }
+            }
+
+            let promoDebited = 0;
+            let realDebited = walletContrib;
+            if (walletContrib > 0) {
+              try {
+                const bd = allocateCreditDebit(runningBalance, runningPromo, walletContrib);
+                promoDebited = bd.promotionalDebited;
+                realDebited = bd.realDebited;
+              } catch { /* walletContrib ajustado puede ser 0 */ }
+            }
+            runningBalance -= realDebited;
+            runningPromo = Math.max(0, runningPromo - promoDebited);
+            itemBreakdowns.push({
+              walletContrib: new Prisma.Decimal(walletContrib),
+              externalAmount: new Prisma.Decimal(external),
+              promoDebited,
+              realDebited,
+              needsExternalPayment: external >= MIN_BANECO_BOB,
+            });
           }
         }
 
+        // ── Crear bookings y BookingPayments ────────────────────────────────────────
         const bookings: Booking[] = [];
+        const expiresAt = new Date(Date.now() + PENDING_PAYMENT_TTL_MS);
+
         for (let i = 0; i < batchItems.length; i++) {
           const item = batchItems[i];
+          const bd = itemBreakdowns[i];
+          const needsExternal = bd.needsExternalPayment;
+
+          // Si falta pago externo: QR para Bolivia, Stripe para internacional
+          const paymentMethod = needsExternal
+            ? (isUsd ? BookingPaymentMethod.STRIPE : BookingPaymentMethod.BANECO_QR)
+            : BookingPaymentMethod.WALLET;
+
           const booking = await tx.booking.create({
             data: {
               clientId,
@@ -2469,23 +2664,25 @@ export class BookingsService {
               scheduledStartAt: item.scheduledStartAt,
               scheduledEndAt: item.scheduledEndAt,
               timezone: item.timezone,
-              status: BookingStatus.CONFIRMED,
-              paymentStatus: BookingPaymentStatus.PAID,
-              paymentMethod: BookingPaymentMethod.WALLET,
+              status: needsExternal ? BookingStatus.PENDING_PAYMENT : BookingStatus.CONFIRMED,
+              paymentStatus: needsExternal ? BookingPaymentStatus.PENDING : BookingPaymentStatus.PAID,
+              paymentMethod,
               currency: region.currency,
               priceBob: item.offering.priceBob,
               priceUsd: new Prisma.Decimal(item.priceUsd),
-              expiresAt: null,
+              expiresAt: needsExternal ? expiresAt : null,
             },
           });
 
+          // amountBob/Usd = monto externo (lo que pagará QR o Stripe)
+          // Si es pago full wallet: amountBob/Usd = precio completo
           await tx.bookingPayment.create({
             data: {
               bookingId: booking.id,
-              method: BookingPaymentMethod.WALLET,
-              status: BookingPaymentStatus.PAID,
-              amountBob: isUsd ? null : item.offering.priceBob,
-              amountUsd: isUsd ? new Prisma.Decimal(item.priceUsd) : null,
+              method: paymentMethod,
+              status: needsExternal ? BookingPaymentStatus.PENDING : BookingPaymentStatus.PAID,
+              amountBob: isUsd ? null : (needsExternal ? bd.externalAmount : item.offering.priceBob),
+              amountUsd: isUsd ? (needsExternal ? bd.externalAmount : new Prisma.Decimal(item.priceUsd)) : null,
               currency: region.currency,
             },
           });
@@ -2493,42 +2690,52 @@ export class BookingsService {
           bookings.push(booking);
         }
 
-        const totalBobCharge = batchItems.reduce(
-          (acc, item) => acc.add(item.chargeAmount),
+        // ── Descontar wallet SOLO para los bookings ya CONFIRMED (pago full wallet) ──
+        // Los PENDING_PAYMENT NO tocan el wallet ahora.
+        // El webhook de QR/Stripe descuenta la contribución del wallet al confirmar.
+        const confirmedBreakdowns = itemBreakdowns.filter((_, i) => !itemBreakdowns[i].needsExternalPayment);
+        const totalWalletContrib = confirmedBreakdowns.reduce(
+          (acc, bd) => acc.add(bd.walletContrib),
           new Prisma.Decimal(0),
         );
-        const totalPromoDebited = breakdowns.reduce((sum, bd) => sum + (bd?.promotionalDebited ?? 0), 0);
-        const totalRealDebited = breakdowns.reduce((sum, bd) => sum + (bd?.realDebited ?? 0), 0);
+        const totalPromoDebited = confirmedBreakdowns.reduce((sum, bd) => sum + bd.promoDebited, 0);
+        const totalRealDebited = confirmedBreakdowns.reduce((sum, bd) => sum + bd.realDebited, 0);
 
-        await tx.transaction.create({
-          data: {
-            walletId: clientWallet.id,
-            type: TransactionType.BOOKING_PAYMENT,
-            amount: totalBobCharge,
-            promotionalAmount: isUsd ? new Prisma.Decimal(0) : new Prisma.Decimal(totalPromoDebited),
-            realAmount: isUsd ? totalBobCharge : new Prisma.Decimal(totalRealDebited),
-            isPromotional: false,
-            description: JSON.stringify({
-              event: 'BATCH_BOOKING_PAYMENT',
-              bookingIds: bookings.map((b) => b.id),
-              currency: region.currency,
-            }),
-          },
-        });
+        if (totalWalletContrib.greaterThan(0)) {
+          const confirmedBookingIds = bookings
+            .filter((b) => b.status === BookingStatus.CONFIRMED)
+            .map((b) => b.id);
 
-        if (isUsd) {
-          await tx.wallet.update({
-            where: { id: clientWallet.id },
-            data: { balanceUsd: { decrement: totalBobCharge } },
-          });
-        } else {
-          await tx.wallet.update({
-            where: { id: clientWallet.id },
+          await tx.transaction.create({
             data: {
-              balance: { decrement: totalBobCharge },
-              promotionalBalance: { decrement: new Prisma.Decimal(totalPromoDebited) },
+              walletId: clientWallet.id,
+              type: TransactionType.BOOKING_PAYMENT,
+              amount: totalWalletContrib,
+              promotionalAmount: isUsd ? new Prisma.Decimal(0) : new Prisma.Decimal(totalPromoDebited),
+              realAmount: isUsd ? totalWalletContrib : new Prisma.Decimal(totalRealDebited),
+              isPromotional: false,
+              description: JSON.stringify({
+                event: 'BATCH_BOOKING_PAYMENT',
+                bookingIds: confirmedBookingIds,
+                currency: region.currency,
+              }),
             },
           });
+
+          if (isUsd) {
+            await tx.wallet.update({
+              where: { id: clientWallet.id },
+              data: { balanceUsd: { decrement: totalWalletContrib } },
+            });
+          } else {
+            await tx.wallet.update({
+              where: { id: clientWallet.id },
+              data: {
+                balance: { decrement: new Prisma.Decimal(totalRealDebited) },
+                promotionalBalance: { decrement: new Prisma.Decimal(totalPromoDebited) },
+              },
+            });
+          }
         }
 
         return bookings;
@@ -2536,8 +2743,19 @@ export class BookingsService {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15000 },
     );
 
+    // Solo acreditar y notificar los bookings que ya están CONFIRMED (pago full wallet)
+    // Los PENDING_PAYMENT se acreditan cuando el webhook de QR o Stripe confirme
+    const confirmedResults = results.filter((b) => b.status === BookingStatus.CONFIRMED);
+    const pendingResults = results.filter((b) => b.status === BookingStatus.PENDING_PAYMENT);
+
+    if (pendingResults.length > 0) {
+      this.logger.log(
+        `[BATCH-BOOKING] ${pendingResults.length} booking(s) pendiente(s) de pago externo: ${pendingResults.map((b) => b.id).join(', ')}`,
+      );
+    }
+
     // Sequential to avoid deadlock when crediting the same professional wallet multiple times
-    void results.reduce(
+    void confirmedResults.reduce(
       (chain, booking) =>
         chain
           .then(() =>
@@ -2552,8 +2770,10 @@ export class BookingsService {
       Promise.resolve() as Promise<unknown>,
     );
 
+    // Notificar al psicólogo solo por bookings ya confirmados
     const notifMap = new Map<string, string[]>();
     for (let i = 0; i < results.length; i++) {
+      if (results[i].status !== BookingStatus.CONFIRMED) continue;
       const profId = batchItems[i].dto.professionalId;
       if (!notifMap.has(profId)) notifMap.set(profId, []);
       notifMap.get(profId)!.push(results[i].id);
