@@ -160,7 +160,7 @@ export class AuthService {
         billingRegion: normalized.billingRegion,
         preferredCurrency: normalized.preferredCurrency,
       } as PhoneVerifiedTokenPayload,
-      { expiresIn: '10m' },
+      { expiresIn: '60m' },
     );
 
     return { needsProfile: true, tempToken };
