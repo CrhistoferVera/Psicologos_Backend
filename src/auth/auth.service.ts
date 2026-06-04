@@ -113,14 +113,14 @@ export class AuthService {
       throw new BadRequestException('El numero de telefono no coincide con el pais seleccionado');
     }
     const code = randomInt(0, 1000000).toString().padStart(6, '0');
-    await this.cacheManager.set(`otp_${phoneNumber}`, code, 300000);
+    await this.cacheManager.set(`otp_${phoneNumber}`, code, 900000);
 
     await this.whatsappService.sendText(
       phoneNumber,
-      `Tu codigo de verificacion es: *${code}*\nExpira en 5 minutos.`,
+      `Tu codigo de verificacion es: *${code}*\nExpira en 15 minutos.`,
     );
 
-    return { message: 'Codigo OTP enviado por WhatsApp. Expira en 5 minutos.' };
+    return { message: 'Codigo OTP enviado por WhatsApp. Expira en 15 minutos.' };
   }
 
   async verifyOtp(dto: VerifyOtpDto) {
