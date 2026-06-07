@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { Prisma, WithdrawalStatus, ProfessionalReviewStatus } from '@prisma/client';
+import { Prisma, WithdrawalStatus, ProfessionalReviewStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { UpdateProfessionalDto, EditProfessionalDto } from './dto/update-professional.dto';
 import { AdminUpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
@@ -316,6 +316,18 @@ export class AdminProfessionalsService {
     }
 
     return this.findOne(id);
+  }
+
+  async deleteProfessional(id: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id, role: UserRole.PROFESSIONAL },
+    });
+
+    if (!user) throw new NotFoundException(`No se encontró un profesional con ID: ${id}`);
+
+    await this.prisma.user.delete({ where: { id } });
+
+    return { message: 'Profesional eliminado correctamente' };
   }
 
   async countPendingRequests() {

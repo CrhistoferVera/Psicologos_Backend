@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { UpdateProfessionalDto, EditProfessionalDto } from './dto/update-professional.dto';
 import { AdminUpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
@@ -92,6 +92,12 @@ export class AdminProfessionalsController {
   @ApiOperation({ summary: 'Editar datos de perfil de un profesional' })
   updateProfile(@Param('id') id: string, @Body() dto: AdminUpdateProfessionalProfileDto) {
     return this.professionalsService.updateProfile(id, dto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Eliminar un profesional' })
+  deleteProfessional(@Param('id') id: string) {
+    return this.professionalsService.deleteProfessional(id);
   }
 }
 
