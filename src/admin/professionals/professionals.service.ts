@@ -321,11 +321,18 @@ export class AdminProfessionalsService {
   async deleteProfessional(id: string) {
     const user = await this.prisma.user.findFirst({
       where: { id, role: UserRole.PROFESSIONAL },
+      include: { wallet: { select: { id: true } } },
     });
 
     if (!user) throw new NotFoundException(`No se encontró un profesional con ID: ${id}`);
 
-    await this.prisma.user.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      if (user.wallet) {
+        await tx.withdrawalRequest.deleteMany({ where: { walletId: user.wallet.id } });
+        await tx.wallet.delete({ where: { id: user.wallet.id } });
+      }
+      await tx.user.delete({ where: { id } });
+    });
 
     return { message: 'Profesional eliminado correctamente' };
   }
