@@ -1,4 +1,4 @@
-import { IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsIn, IsNotEmpty, IsOptional, IsString, IsUrl } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ProfessionalReviewStatus } from '@prisma/client';
 
@@ -21,6 +21,18 @@ export class UpdateProfessionalDto {
     @IsOptional()
     @IsString()
     reviewNotes?: string;
+}
+
+export class UpdateKycDocDto {
+  @ApiProperty({ example: 'idDocUrl', description: 'Campo a actualizar', enum: ['idDocUrl', 'kycVideoUrl', 'matriculaUrl', 'tituloProfesionalUrl'] })
+  @IsString()
+  @IsIn(['idDocUrl', 'kycVideoUrl', 'matriculaUrl', 'tituloProfesionalUrl'])
+  field!: 'idDocUrl' | 'kycVideoUrl' | 'matriculaUrl' | 'tituloProfesionalUrl';
+
+  @ApiProperty({ example: 'https://res.cloudinary.com/...', description: 'URL del documento' })
+  @IsString()
+  @IsUrl()
+  url!: string;
 }
 
 export class EditProfessionalDto {

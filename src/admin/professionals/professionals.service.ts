@@ -4,10 +4,14 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { UpdateProfessionalDto, EditProfessionalDto } from './dto/update-professional.dto';
 import { AdminUpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
 import { PROFESSIONAL_ROLES } from '../../common/professional-role';
+import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
 
 @Injectable()
 export class AdminProfessionalsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cloudinary: CloudinaryService,
+  ) {}
 
   async updateStatus(id: string, updateStatusDto: UpdateProfessionalDto) {
     const user = await this.prisma.user.findFirst({
@@ -335,6 +339,45 @@ export class AdminProfessionalsService {
     });
 
     return { message: 'Profesional eliminado correctamente' };
+  }
+
+  async updateKycDoc(
+    id: string,
+    field: 'idDocUrl' | 'kycVideoUrl' | 'matriculaUrl' | 'tituloProfesionalUrl',
+    file: Express.Multer.File,
+  ) {
+    const user = await this.prisma.user.findFirst({
+      where: { id, role: UserRole.PROFESSIONAL },
+    });
+
+    if (!user) throw new NotFoundException(`No se encontró un profesional con ID: ${id}`);
+
+    const folderMap = {
+      idDocUrl: 'id-doc',
+      kycVideoUrl: 'kyc-video',
+      matriculaUrl: 'matricula',
+      tituloProfesionalUrl: 'titulo',
+    };
+
+    const { secureUrl, publicId } = await this.cloudinary.uploadKycFile({
+      file,
+      userId: id,
+      folder: folderMap[field],
+      publicIdPrefix: field,
+    });
+
+    const publicIdField = field.replace('Url', 'PublicId') as
+      | 'idDocPublicId'
+      | 'kycVideoPublicId'
+      | 'matriculaPublicId'
+      | 'tituloProfesionalPublicId';
+
+    await this.prisma.professionalProfile.update({
+      where: { userId: id },
+      data: { [field]: secureUrl, [publicIdField]: publicId },
+    });
+
+    return this.findOne(id);
   }
 
   async countPendingRequests() {

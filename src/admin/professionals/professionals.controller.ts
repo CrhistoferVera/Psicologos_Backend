@@ -1,5 +1,6 @@
-import { Controller, Get, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { Controller, Get, Patch, Delete, Param, Body, Query, UseGuards, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiQuery, ApiConsumes } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { UpdateProfessionalDto, EditProfessionalDto } from './dto/update-professional.dto';
 import { AdminUpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
 import { Roles } from 'src/auth/decorators/roles.decorator';
@@ -92,6 +93,18 @@ export class AdminProfessionalsController {
   @ApiOperation({ summary: 'Editar datos de perfil de un profesional' })
   updateProfile(@Param('id') id: string, @Body() dto: AdminUpdateProfessionalProfileDto) {
     return this.professionalsService.updateProfile(id, dto);
+  }
+
+  @Post(':id/kyc-docs')
+  @ApiOperation({ summary: 'Agregar o reemplazar un documento KYC del profesional' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file'))
+  updateKycDoc(
+    @Param('id') id: string,
+    @Body('field') field: 'idDocUrl' | 'kycVideoUrl' | 'matriculaUrl' | 'tituloProfesionalUrl',
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.professionalsService.updateKycDoc(id, field, file);
   }
 
   @Delete(':id')
