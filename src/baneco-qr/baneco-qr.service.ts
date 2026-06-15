@@ -604,17 +604,21 @@ export class BanecoQrService {
 
     if (confirmedBookingForNotification?.professional?.fcmToken) {
       const clientName = this.fullName(confirmedBookingForNotification.client);
-      const scheduled = this.formatBookingDateTime(
-        confirmedBookingForNotification.scheduledStartAt,
-        confirmedBookingForNotification.timezone,
-      );
+      const isImmediate = confirmedBookingForNotification.sessionOffering.title === 'Atención Inmediata';
+
+      const notifTitle = isImmediate
+        ? '⚡ ¡Sesión inmediata!'
+        : 'Nueva sesion reservada';
+      const notifBody = isImmediate
+        ? `${clientName} está esperándote ahora. Tienes una sesión inmediata activa.`
+        : `${clientName} reservo ${confirmedBookingForNotification.sessionOffering.title} para ${this.formatBookingDateTime(confirmedBookingForNotification.scheduledStartAt, confirmedBookingForNotification.timezone)}.`;
 
       await this.notificationsService.sendPushNotification(
         confirmedBookingForNotification.professional.fcmToken,
-        'Nueva sesion reservada',
-        `${clientName} reservo ${confirmedBookingForNotification.sessionOffering.title} para ${scheduled}.`,
+        notifTitle,
+        notifBody,
         {
-          type: 'BOOKING_PURCHASE_CONFIRMED',
+          type: isImmediate ? 'IMMEDIATE_BOOKING_CONFIRMED' : 'BOOKING_PURCHASE_CONFIRMED',
           bookingId: confirmedBookingForNotification.id,
           startsAt: confirmedBookingForNotification.scheduledStartAt.toISOString(),
         },

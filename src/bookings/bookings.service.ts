@@ -38,6 +38,8 @@ import { CreateAvailabilityRuleDto } from './dto/create-availability-rule.dto';
 import { UpdateAvailabilityRuleDto } from './dto/update-availability-rule.dto';
 import { CreateAvailabilityExceptionDto } from './dto/create-availability-exception.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { SetImmediateAvailabilityDto } from './dto/set-immediate-availability.dto';
+import { CreateImmediateBookingDto } from './dto/create-immediate-booking.dto';
 import { BookingListQueryDto } from './dto/booking-list-query.dto';
 import { BookingRescheduleListQueryDto } from './dto/booking-reschedule-list-query.dto';
 import { CreateBookingRescheduleRequestDto } from './dto/create-booking-reschedule-request.dto';
@@ -2427,13 +2429,13 @@ export class BookingsService {
     }));
   }
 
-  async getProfessionalBookings(professionalId: string, query: BookingListQueryDto) {
+  async getProfessionalBookings(professionalId: string, _query: BookingListQueryDto) {
     await this.expirePendingBookings();
 
     const rows = await this.prisma.booking.findMany({
       where: {
         professionalId,
-        ...this.getDateRangeFilter(query),
+        status: { not: BookingStatus.PENDING_PAYMENT },
       },
       include: {
         client: {
@@ -2804,6 +2806,314 @@ export class BookingsService {
         priceUsd: Number(b.priceUsd),
       })),
     };
+  }
+
+  // ─── ATENCIÓN INMEDIATA ───────────────────────────────────────────────────
+
+  // METODO PARA ACTIVAR O RECONFIGURAR LA ATENCIÓN INMEDIATA DE UN PROFESIONAL
+  async activateImmediateAvailability(professionalId: string, dto: SetImmediateAvailabilityDto) {
+    await this.ensureProfessionalExists(professionalId);
+
+    const expiresAt = new Date(Date.now() + dto.activeForMinutes * 60 * 1000);
+    const bobToUsdRate = await this.getBobToUsdRate();
+    const priceUsd = Math.round((dto.priceBob / bobToUsdRate) * 100) / 100;
+
+    // Upsert del registro de disponibilidad inmediata
+    const availability = await this.prisma.professionalImmediateAvailability.upsert({
+      where: { professionalId },
+      create: {
+        professionalId,
+        isActive: true,
+        expiresAt,
+        durationMinutes: dto.durationMinutes,
+        priceBob: dto.priceBob,
+        description: dto.description,
+      },
+      update: {
+        isActive: true,
+        expiresAt,
+        durationMinutes: dto.durationMinutes,
+        priceBob: dto.priceBob,
+        description: dto.description,
+      },
+    });
+
+    // Upsert del SessionOffering de atención inmediata
+    const existingOffering = await this.prisma.professionalSessionOffering.findFirst({
+      where: { professionalId, title: 'Atención Inmediata' },
+    });
+
+    if (existingOffering) {
+      await this.prisma.professionalSessionOffering.update({
+        where: { id: existingOffering.id },
+        data: {
+          durationMinutes: dto.durationMinutes,
+          priceBob: dto.priceBob,
+          priceUsd,
+          isActive: true,
+        },
+      });
+    } else {
+      await this.prisma.professionalSessionOffering.create({
+        data: {
+          professionalId,
+          title: 'Atención Inmediata',
+          description: dto.description,
+          durationMinutes: dto.durationMinutes,
+          priceBob: dto.priceBob,
+          priceUsd,
+        },
+      });
+    }
+
+    return {
+      ...availability,
+      priceBob: Number(availability.priceBob),
+      expiresAt: availability.expiresAt?.toISOString(),
+    };
+  }
+
+  // METODO PARA DESACTIVAR LA ATENCIÓN INMEDIATA DE UN PROFESIONAL
+  async deactivateImmediateAvailability(professionalId: string) {
+    await this.ensureProfessionalExists(professionalId);
+
+    const existing = await this.prisma.professionalImmediateAvailability.findUnique({
+      where: { professionalId },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('No tienes una configuración de atención inmediata.');
+    }
+
+    await this.prisma.professionalImmediateAvailability.update({
+      where: { professionalId },
+      data: { isActive: false, expiresAt: null },
+    });
+
+    // Desactiva también el SessionOffering
+    await this.prisma.professionalSessionOffering.updateMany({
+      where: { professionalId, title: 'Atención Inmediata' },
+      data: { isActive: false },
+    });
+
+    return { success: true };
+  }
+
+  // METODO PARA CONSULTAR EL ESTADO DE LA ATENCIÓN INMEDIATA PROPIA
+  async getMyImmediateAvailability(professionalId: string) {
+    const record = await this.prisma.professionalImmediateAvailability.findUnique({
+      where: { professionalId },
+    });
+
+    if (!record) return { isActive: false };
+
+    // Auto-desactivar si expiró
+    if (record.isActive && record.expiresAt && record.expiresAt <= new Date()) {
+      await this.prisma.professionalImmediateAvailability.update({
+        where: { professionalId },
+        data: { isActive: false },
+      });
+      return { isActive: false };
+    }
+
+    return {
+      ...record,
+      priceBob: Number(record.priceBob),
+      expiresAt: record.expiresAt?.toISOString(),
+    };
+  }
+
+  // METODO PARA LISTAR PROFESIONALES CON ATENCIÓN INMEDIATA ACTIVA
+  async getImmediateProfessionals() {
+    const bobToUsdRate = await this.getBobToUsdRate();
+
+    const records = await this.prisma.professionalImmediateAvailability.findMany({
+      where: {
+        isActive: true,
+        expiresAt: { gt: new Date() },
+      },
+      include: {
+        professional: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            professionalProfile: {
+              select: {
+                avatarUrl: true,
+                bio: true,
+              },
+            },
+            professionalSpecialties: {
+              select: { specialty: { select: { name: true } } },
+            },
+          },
+        },
+      },
+    });
+
+    return records.map((r) => {
+      const priceBob = Number(r.priceBob);
+      const priceUsd = Math.round((priceBob / bobToUsdRate) * 100) / 100;
+      return {
+        professionalId: r.professionalId,
+        durationMinutes: r.durationMinutes,
+        priceBob,
+        priceUsd,
+        description: r.description,
+        expiresAt: r.expiresAt?.toISOString(),
+        professional: {
+          id: r.professional.id,
+          firstName: r.professional.firstName,
+          lastName: r.professional.lastName,
+          avatarUrl: r.professional.professionalProfile?.avatarUrl ?? null,
+          bio: r.professional.professionalProfile?.bio ?? null,
+          specialties: r.professional.professionalSpecialties.map((s) => s.specialty.name),
+        },
+      };
+    });
+  }
+
+  // METODO PARA CONSULTAR DETALLE DE ATENCIÓN INMEDIATA DE UN PROFESIONAL
+  async getProfessionalImmediateDetail(professionalId: string) {
+    const record = await this.prisma.professionalImmediateAvailability.findUnique({
+      where: { professionalId },
+      include: {
+        professional: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            professionalProfile: {
+              select: { avatarUrl: true, bio: true },
+            },
+            professionalSpecialties: {
+              select: { specialty: { select: { name: true } } },
+            },
+          },
+        },
+      },
+    });
+
+    if (!record || !record.isActive || (record.expiresAt && record.expiresAt <= new Date())) {
+      throw new NotFoundException('Este profesional no tiene atención inmediata disponible.');
+    }
+
+    const bobToUsdRate = await this.getBobToUsdRate();
+    const priceBob = Number(record.priceBob);
+    const priceUsd = Math.round((priceBob / bobToUsdRate) * 100) / 100;
+
+    return {
+      professionalId: record.professionalId,
+      durationMinutes: record.durationMinutes,
+      priceBob,
+      priceUsd,
+      description: record.description,
+      expiresAt: record.expiresAt?.toISOString(),
+      professional: {
+        id: record.professional.id,
+        firstName: record.professional.firstName,
+        lastName: record.professional.lastName,
+        avatarUrl: record.professional.professionalProfile?.avatarUrl ?? null,
+        bio: record.professional.professionalProfile?.bio ?? null,
+        specialties: record.professional.professionalSpecialties.map((s) => s.specialty.name),
+      },
+    };
+  }
+
+  // METODO PARA CREAR UN BOOKING DE ATENCIÓN INMEDIATA (RESERVA INSTANTÁNEA)
+  // No valida availability rules — el psicólogo activó disponibilidad manualmente.
+  async createImmediateBooking(clientId: string, dto: CreateImmediateBookingDto) {
+    if (dto.professionalId === clientId) {
+      throw new BadRequestException('No puedes reservar una sesión contigo mismo.');
+    }
+
+    const availability = await this.prisma.professionalImmediateAvailability.findUnique({
+      where: { professionalId: dto.professionalId },
+    });
+    if (!availability || !availability.isActive || !availability.expiresAt || availability.expiresAt <= new Date()) {
+      throw new BadRequestException('Este profesional no tiene atención inmediata disponible en este momento.');
+    }
+
+    const offering = await this.prisma.professionalSessionOffering.findFirst({
+      where: { professionalId: dto.professionalId, title: 'Atención Inmediata', isActive: true },
+    });
+    if (!offering) {
+      throw new BadRequestException('No se encontró la oferta de atención inmediata del profesional.');
+    }
+
+    const client = await this.prisma.user.findUnique({
+      where: { id: clientId },
+      select: { id: true, role: true, billingRegion: true, phoneCountryIso: true },
+    });
+    if (!client) throw new NotFoundException('Cliente no encontrado.');
+    if (client.role !== UserRole.USER) throw new ForbiddenException('Solo clientes pueden crear reservas.');
+
+    const bobToUsdRate = await this.getBobToUsdRate();
+    const priceUsd = Math.round((Number(offering.priceBob) / bobToUsdRate) * 100) / 100;
+    const region = this.normalizeBookingRegion(client);
+    const isUsd = region.currency === CURRENCY_USD;
+    const paymentMethod = isUsd ? BookingPaymentMethod.STRIPE : BookingPaymentMethod.BANECO_QR;
+
+    const now = new Date();
+    const scheduledEndAt = new Date(now.getTime() + offering.durationMinutes * 60 * 1000);
+    const PENDING_TTL_MS = 15 * 60 * 1000;
+
+    // Expirar bookings pendientes antes de la transacción para no bloquear el pool
+    await this.expirePendingBookings();
+
+    const booking = await this.prisma.$transaction(async (tx) => {
+      const record = await tx.booking.create({
+        data: {
+          clientId,
+          professionalId: dto.professionalId,
+          sessionOfferingId: offering.id,
+          scheduledStartAt: now,
+          scheduledEndAt,
+          timezone: DEFAULT_BOOKING_TIMEZONE,
+          status: BookingStatus.PENDING_PAYMENT,
+          paymentStatus: BookingPaymentStatus.PENDING,
+          paymentMethod,
+          currency: region.currency,
+          priceBob: offering.priceBob,
+          priceUsd: new Prisma.Decimal(priceUsd),
+          originalPriceBob: offering.priceBob,
+          originalPriceUsd: new Prisma.Decimal(priceUsd),
+          expiresAt: new Date(Date.now() + PENDING_TTL_MS),
+        },
+      });
+
+      await tx.bookingPayment.create({
+        data: {
+          bookingId: record.id,
+          method: paymentMethod,
+          status: BookingPaymentStatus.PENDING,
+          amountBob: isUsd ? null : offering.priceBob,
+          amountUsd: isUsd ? new Prisma.Decimal(priceUsd) : null,
+          originalAmountBob: isUsd ? null : offering.priceBob,
+          originalAmountUsd: isUsd ? new Prisma.Decimal(priceUsd) : null,
+          currency: region.currency,
+        },
+      });
+
+      return record;
+    });
+
+    const paymentInit = await this.initBookingPayment(clientId, booking.id);
+
+    return {
+      booking: { ...booking, priceBob: Number(booking.priceBob), priceUsd: Number(booking.priceUsd) },
+      paymentInit,
+    };
+  }
+
+  // CRON PARA EXPIRAR AUTOMÁTICAMENTE LAS DISPONIBILIDADES INMEDIATAS VENCIDAS (POR SI FALLA EL AUTO-DESACTIVO EN CONSULTAS)
+  @Cron(CronExpression.EVERY_MINUTE)
+  async expireImmediateAvailabilities() {
+    await this.prisma.professionalImmediateAvailability.updateMany({
+      where: { isActive: true, expiresAt: { lte: new Date() } },
+      data: { isActive: false },
+    });
   }
 }
 

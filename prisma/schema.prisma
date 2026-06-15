@@ -56,6 +56,7 @@ model User {
   reviewsAsProfessional              BookingReview[]                     @relation("ProfessionalReviews")
   bookingRescheduleRequestsRequested BookingRescheduleRequest[]          @relation("BookingRescheduleRequestedBy")
   bookingRescheduleRequestsResponded BookingRescheduleRequest[]          @relation("BookingRescheduleRespondedBy")
+  immediateAvailability              ProfessionalImmediateAvailability?  @relation("ProfessionalImmediateAvailability")
 
   @@index([billingRegion])
   @@index([phoneCountryIso])
@@ -684,6 +685,22 @@ model BookingReview {
   @@index([professionalId])
   @@index([clientId])
   @@map("booking_reviews")
+}
+
+model ProfessionalImmediateAvailability {
+  id              String    @id @default(uuid())
+  professionalId  String    @unique
+  isActive        Boolean   @default(false)
+  expiresAt       DateTime?
+  durationMinutes Int
+  priceBob        Decimal   @db.Decimal(10, 2)
+  description     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  professional User @relation("ProfessionalImmediateAvailability", fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@map("professional_immediate_availability")
 }
 
 enum TransactionType {

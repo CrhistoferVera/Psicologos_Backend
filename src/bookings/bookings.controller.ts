@@ -30,6 +30,8 @@ import { CreateSessionOfferingDto } from './dto/create-session-offering.dto';
 import { UpdateAvailabilityRuleDto } from './dto/update-availability-rule.dto';
 import { UpdateSessionOfferingDto } from './dto/update-session-offering.dto';
 import { UpdateSessionOfferingStatusDto } from './dto/update-session-offering-status.dto';
+import { SetImmediateAvailabilityDto } from './dto/set-immediate-availability.dto';
+import { CreateImmediateBookingDto } from './dto/create-immediate-booking.dto';
 import { BookingsService } from './bookings.service';
 
 interface JwtUser {
@@ -300,5 +302,63 @@ export class BookingsController {
   })
   getCommunicationAccess(@CurrentUser() user: JwtUser, @Param('otherUserId') otherUserId: string) {
     return this.bookingsService.getCommunicationAccess(user.userId, otherUserId);
+  }
+
+  // ─── ATENCIÓN INMEDIATA ───────────────────────────────────────────────────
+
+  // API PARA PROFESIONALES: ACTIVAR, DESACTIVAR Y CONSULTAR ATENCIÓN INMEDIATA PROPIA
+  @Post('professional/immediate-availability')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...PROFESSIONAL_ROLES)
+  @ApiOperation({ summary: 'Activar modo de atención inmediata' })
+  activateImmediateAvailability(
+    @CurrentUser() user: JwtUser,
+    @Body() dto: SetImmediateAvailabilityDto,
+  ) {
+    return this.bookingsService.activateImmediateAvailability(user.userId, dto);
+  }
+
+  // API PARA PROFESIONALES: DESACTIVAR ATENCIÓN INMEDIATA PROPIA MANUALMENTE (SI NO QUIEREN ESPERAR EL AUTO-DESACTIVO POR TIEMPO)
+  @Delete('professional/immediate-availability')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...PROFESSIONAL_ROLES)
+  @ApiOperation({ summary: 'Desactivar modo de atención inmediata manualmente' })
+  deactivateImmediateAvailability(@CurrentUser() user: JwtUser) {
+    return this.bookingsService.deactivateImmediateAvailability(user.userId);
+  }
+
+  // API PARA PROFESIONALES: CONSULTAR EL ESTADO DE SU ATENCIÓN INMEDIATA (SI ESTA ACTIVA, CUANTO TIEMPO FALTA, ETC)
+  @Get('professional/immediate-availability')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...PROFESSIONAL_ROLES)
+  @ApiOperation({ summary: 'Ver estado actual de atención inmediata del profesional' })
+  getMyImmediateAvailability(@CurrentUser() user: JwtUser) {
+    return this.bookingsService.getMyImmediateAvailability(user.userId);
+  }
+
+  // API PARA USUARIOS: LISTAR PSICÓLOGOS CON ATENCIÓN INMEDIATA ACTIVA Y RESERVAR
+  @Get('immediate-professionals')
+  @ApiOperation({ summary: 'Listar psicólogos con atención inmediata activa ahora' })
+  getImmediateProfessionals() {
+    return this.bookingsService.getImmediateProfessionals();
+  }
+
+  // API PARA USUARIOS: CONSULTAR DETALLE DE ATENCIÓN INMEDIATA DE UN PSICÓLOGO (SI ESTA ACTIVA, DURACIÓN, PRECIO, DESCRIPCIÓN, ETC) Y RESERVAR
+  @Get('professionals/:professionalId/immediate')
+  @ApiOperation({ summary: 'Ver detalle de atención inmediata de un profesional' })
+  getProfessionalImmediateDetail(@Param('professionalId') professionalId: string) {
+    return this.bookingsService.getProfessionalImmediateDetail(professionalId);
+  }
+
+  // API PARA USUARIOS: CREAR UN BOOKING DE ATENCIÓN INMEDIATA (RESERVA INSTANTÁNEA) Y PASAR DIRECTAMENTE A PAGAR
+  @Post('bookings/immediate')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER)
+  @ApiOperation({ summary: 'Crear reserva de atención inmediata e iniciar pago' })
+  createImmediateBooking(
+    @CurrentUser() user: JwtUser,
+    @Body() dto: CreateImmediateBookingDto,
+  ) {
+    return this.bookingsService.createImmediateBooking(user.userId, dto);
   }
 }
