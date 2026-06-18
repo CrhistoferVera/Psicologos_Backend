@@ -302,6 +302,7 @@ export class MessagesGateway implements OnGatewayDisconnect {
 
       if (receiver.fcmToken) {
         const label = data.callType === 'VIDEO_CALL' ? 'Video llamada' : 'Llamada de voz';
+        // notificar por push al profesional (en caso de que no tenga la app abierta o no vea la notificacion en tiempo real)
         this.notificationsService.sendPushNotification(
           receiver.fcmToken,
           `${label} entrante`,
@@ -385,6 +386,7 @@ export class MessagesGateway implements OnGatewayDisconnect {
         `${professional?.firstName ?? ''} ${professional?.lastName ?? ''}`.trim() ||
         professional?.email ||
         'El profesional';
+        // notificar por push al cliente (en caso de que no tenga la app abierta o no vea la notificacion en tiempo real)
       this.notificationsService.sendPushNotification(
         caller.fcmToken,
         'Llamada aceptada',
@@ -434,6 +436,7 @@ export class MessagesGateway implements OnGatewayDisconnect {
         `${professional?.firstName ?? ''} ${professional?.lastName ?? ''}`.trim() ||
         professional?.email ||
         'El profesional';
+        // notificar por push al cliente (en caso de que no tenga la app abierta o no vea la notificacion en tiempo real)
       this.notificationsService.sendPushNotification(
         caller.fcmToken,
         'Llamada rechazada',
@@ -481,8 +484,10 @@ export class MessagesGateway implements OnGatewayDisconnect {
         this.prisma.user.findUnique({ where: { id: session.professionalId }, select: { fcmToken: true } }),
       ]);
 
+      // Aquí se podría llamar a un método para facturar la llamada según su duración, por ejemplo:
       const minutes = Math.ceil(durationSeconds / 60);
       if (caller?.fcmToken) {
+        // notificar por push al cliente (en caso de que no tenga la app abierta o no vea la notificacion en tiempo real)
         this.notificationsService.sendPushNotification(
           caller.fcmToken,
           'Llamada finalizada',
@@ -491,6 +496,7 @@ export class MessagesGateway implements OnGatewayDisconnect {
         );
       }
       if (professional?.fcmToken) {
+        // notificar por push al profesional (en caso de que no tenga la app abierta o no vea la notificacion en tiempo real)
         this.notificationsService.sendPushNotification(
           professional.fcmToken,
           'Llamada finalizada',
