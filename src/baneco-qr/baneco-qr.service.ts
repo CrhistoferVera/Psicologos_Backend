@@ -418,6 +418,37 @@ export class BanecoQrService {
     };
   }
 
+  async getBookingStatus(userId: string, qrId: string, reqId?: string) {
+    const traceId = reqId ?? this.newReqId();
+
+    const bookingPayment = await this.prisma.bookingPayment.findFirst({
+      where: { method: BookingPaymentMethod.BANECO_QR, providerReference: qrId },
+      include: { booking: { select: { clientId: true, id: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!bookingPayment || bookingPayment.booking.clientId !== userId) {
+      throw new NotFoundException('QR no encontrado.');
+    }
+
+    if (bookingPayment.status === BookingPaymentStatus.PAID) {
+      return { status: 'PAID' as const, bookingId: bookingPayment.bookingId };
+    }
+
+    const remote = await this.banecoApi.statusQR(qrId, traceId);
+    const paymentObj = remote.payment && !Array.isArray(remote.payment) ? remote.payment : null;
+
+    if (remote.statusQrCode === 1) {
+      await this.applyBookingPaymentByQrId(qrId, paymentObj);
+      return { status: 'PAID' as const, bookingId: bookingPayment.bookingId };
+    }
+    if (remote.statusQrCode === 9) {
+      return { status: 'CANCELED' as const, bookingId: bookingPayment.bookingId };
+    }
+
+    return { status: 'PENDING' as const, bookingId: bookingPayment.bookingId };
+  }
+
   async applyBookingPaymentByQrId(qrId: string, payment: PaymentQR | null) {
     const bookingPayment = await this.prisma.bookingPayment.findFirst({
       where: {

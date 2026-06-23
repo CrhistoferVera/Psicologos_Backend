@@ -73,6 +73,14 @@ export class BanecoQrController {
     return this.service.reconcile(user.userId, qrId, reqId);
   }
 
+  @Get('booking-status/:qrId')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Consultar estado del QR de un booking' })
+  bookingStatus(@CurrentUser() user: JwtUser, @Param('qrId') qrId: string) {
+    const reqId = this.newReqId();
+    return this.service.getBookingStatus(user.userId, qrId, reqId);
+  }
+
   // Webhook publico llamado por el banco al confirmar un pago.
   // No requiere JWT — la seguridad la da que el qrId solo lo conoce el banco.
   @Post('notify')
