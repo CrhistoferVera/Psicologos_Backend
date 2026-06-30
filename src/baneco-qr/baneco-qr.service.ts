@@ -204,6 +204,60 @@ export class BanecoQrService {
     }
   }
 
+  async createQrForDebt(userId: string) {
+    const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
+    if (!wallet) throw new NotFoundException('Wallet no encontrada');
+
+    const debtBob = Number(wallet.debtBob ?? 0);
+    if (debtBob <= 0) throw new BadRequestException('No tienes deuda pendiente en BOB');
+
+    const pm = await this.getOrCreateQrPaymentMethod();
+
+    const deposit = await this.prisma.depositRequest.create({
+      data: {
+        userId,
+        paymentMethodId: pm.id,
+        amount: new Prisma.Decimal(debtBob),
+        creditsToDeliver: 0,
+        packageNameAtMoment: '__DEBT_BOB__',
+        status: DepositStatus.PENDING,
+      },
+    });
+
+    try {
+      const qr = await this.banecoApi.generateQR({
+        transactionId: deposit.id,
+        amount: debtBob,
+        currency: 'BOB',
+        description: `SanaMente - Deuda Bs ${debtBob.toFixed(2)}`,
+        dueDate: this.buildDueDate(),
+        singleUse: true,
+        modifyAmount: false,
+      });
+
+      await this.prisma.depositRequest.update({
+        where: { id: deposit.id },
+        data: { bancoQrId: qr.qrId },
+      });
+
+      this.logger.log(`[QR-DEBT] userId=${userId} depositId=${deposit.id} qrId=${qr.qrId} amountBob=${debtBob}`);
+
+      return {
+        depositId: deposit.id,
+        qrId: qr.qrId,
+        qrImage: qr.qrImage,
+        amountBob: debtBob,
+        dueDate: this.buildDueDate(),
+      };
+    } catch (err: any) {
+      await this.prisma.depositRequest.update({
+        where: { id: deposit.id },
+        data: { status: DepositStatus.REJECTED, rejectionReason: 'Fallo al generar QR' },
+      });
+      throw err;
+    }
+  }
+
   async getStatus(userId: string, qrId: string, reqId?: string) {
     const traceId = reqId ?? this.newReqId();
     const deposit = await this.prisma.depositRequest.findUnique({
@@ -303,6 +357,40 @@ export class BanecoQrService {
     this.logger.log(`[APPLY][${qrId}] claimed.count=${claimed.count}`);
     if (claimed.count === 0) {
       this.logger.warn(`[APPLY][${qrId}] already claimed by another call, skipping`);
+      return;
+    }
+
+    if (deposit.packageNameAtMoment === '__DEBT_BOB__') {
+      const newDebtBob = Math.max(0, Number(wallet.debtBob ?? 0) - Number(deposit.amount));
+      const shouldUnblock = newDebtBob <= 0 && Number(wallet.debtUsd ?? 0) <= 0;
+
+      await this.prisma.$transaction(async (tx) => {
+        await tx.wallet.update({
+          where: { id: wallet.id },
+          data: {
+            debtBob: new Prisma.Decimal(newDebtBob),
+            ...(shouldUnblock && { isBlocked: false }),
+          },
+        });
+        await tx.transaction.create({
+          data: {
+            walletId: wallet.id,
+            depositRequestId: deposit.id,
+            type: 'DEPOSIT',
+            amount: deposit.amount,
+            realAmount: deposit.amount,
+            description: JSON.stringify({
+              event: 'DEBT_PAYMENT_QR',
+              qrId,
+              amountBob: Number(deposit.amount),
+              unblocked: shouldUnblock,
+            }),
+          },
+        });
+      });
+      this.logger.log(
+        `[APPLY-DEBT][${qrId}] debtBob cleared amount=${deposit.amount} newDebtBob=${newDebtBob} unblocked=${shouldUnblock}`,
+      );
       return;
     }
 

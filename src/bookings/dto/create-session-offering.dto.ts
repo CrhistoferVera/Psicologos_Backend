@@ -19,8 +19,15 @@ export class CreateSessionOfferingDto {
   @Min(1)
   durationMinutes: number;
 
-  @ApiProperty({ example: 200 })
+  @ApiPropertyOptional({ example: 200 })
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
-  priceBob: number;
+  priceBob?: number;
+
+  @ApiPropertyOptional({ example: 28.5 })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  priceUsd?: number;
 }

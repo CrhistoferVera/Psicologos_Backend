@@ -33,6 +33,11 @@ export class WalletController {
     return this.walletService.getMyEarnings(user.userId);
   }
 
+  @Get('me/penalty-transactions')
+  getPenaltyTransactions(@CurrentUser() user: JwtUser) {
+    return this.walletService.getPenaltyTransactions(user.userId);
+  }
+
   @Get('banks')
   getBanks() {
     return this.walletService.getBanks();

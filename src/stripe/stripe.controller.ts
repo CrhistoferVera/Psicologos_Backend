@@ -26,6 +26,13 @@ export class StripeController {
 
   // El cliente llama este endpoint para iniciar el pago
   // Devuelve el clientSecret que el frontend usa para mostrar el formulario de Stripe
+  @Post('pay-debt')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Crear PaymentIntent para pagar deuda de no-show en USD' })
+  createDebtPaymentIntent(@CurrentUser() user: JwtUser) {
+    return this.stripeService.createDebtPaymentIntent(user.userId);
+  }
+
   @Post('create-payment-intent')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Crear PaymentIntent para comprar un paquete de créditos' })

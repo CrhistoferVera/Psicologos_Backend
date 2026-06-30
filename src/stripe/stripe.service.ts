@@ -570,12 +570,98 @@ export class StripeService {
     return true;
   }
 
+  async createDebtPaymentIntent(userId: string) {
+    const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
+    if (!wallet) throw new NotFoundException('Wallet no encontrada');
+
+    const debtUsd = Number(wallet.debtUsd ?? 0);
+    if (debtUsd <= 0) throw new BadRequestException('No tienes deuda pendiente en USD');
+
+    const customerId = await this.getOrCreateCustomer(userId);
+    const ephemeralKey = await this.createEphemeralKey(userId);
+    const publishableKey = this.config.get<string>('STRIPE_PUBLISHABLE_KEY') ?? null;
+
+    const paymentIntent = await this.stripe.paymentIntents.create({
+      amount: Math.round(debtUsd * 100),
+      currency: 'usd',
+      customer: customerId,
+      automatic_payment_methods: { enabled: true },
+      metadata: {
+        purpose: 'DEBT_PAYMENT',
+        professionalUserId: userId,
+      },
+    });
+
+    return {
+      clientSecret: paymentIntent.client_secret,
+      ephemeralKey: ephemeralKey.secret,
+      publishableKey,
+      amountUsd: debtUsd,
+    };
+  }
+
+  private async clearDebtPaymentStripe(paymentIntentId: string, metadata?: Record<string, string>) {
+    const professionalUserId = metadata?.professionalUserId;
+    if (!professionalUserId) {
+      this.logger.warn(`[DEBT-STRIPE] missing professionalUserId paymentIntentId=${paymentIntentId}`);
+      return;
+    }
+
+    const wallet = await this.prisma.wallet.findUnique({ where: { userId: professionalUserId } });
+    if (!wallet) {
+      this.logger.warn(`[DEBT-STRIPE] wallet not found userId=${professionalUserId}`);
+      return;
+    }
+
+    const intent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
+    const amountUsd = intent.amount / 100;
+
+    const newDebtUsd = Math.max(0, Number(wallet.debtUsd ?? 0) - amountUsd);
+    const shouldUnblock = newDebtUsd <= 0 && Number(wallet.debtBob ?? 0) <= 0;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.wallet.update({
+        where: { id: wallet.id },
+        data: {
+          debtUsd: new Prisma.Decimal(newDebtUsd),
+          ...(shouldUnblock && { isBlocked: false }),
+        },
+      });
+      await tx.transaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'DEPOSIT',
+          amount: new Prisma.Decimal(amountUsd),
+          realAmount: new Prisma.Decimal(amountUsd),
+          promotionalAmount: new Prisma.Decimal(0),
+          isPromotional: false,
+          description: JSON.stringify({
+            event: 'DEBT_PAYMENT_STRIPE',
+            paymentIntentId,
+            amountUsd,
+            currency: 'USD',
+            unblocked: shouldUnblock,
+          }),
+        },
+      });
+    });
+
+    this.logger.log(
+      `[DEBT-STRIPE] userId=${professionalUserId} amountUsd=${amountUsd} newDebtUsd=${newDebtUsd} unblocked=${shouldUnblock}`,
+    );
+  }
+
   async handlePaymentSuccess(paymentIntentId: string, metadata?: Record<string, string>) {
     const isBookingPayment = (metadata?.purpose ?? '').toUpperCase() === 'BOOKING';
 
     const handledBookingPayment = await this.handleBookingPaymentSuccess(paymentIntentId);
     if (handledBookingPayment) return;
     if (isBookingPayment) return;
+
+    if ((metadata?.purpose ?? '').toUpperCase() === 'DEBT_PAYMENT') {
+      await this.clearDebtPaymentStripe(paymentIntentId, metadata);
+      return;
+    }
 
     // Verificar si es pago de sesion
     const sessionPayment = await this.prisma.sessionPayment.findUnique({

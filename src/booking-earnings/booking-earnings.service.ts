@@ -66,6 +66,7 @@ export class BookingEarningsService {
               priceBob: true,
               priceUsd: true,
               scheduledStartAt: true,
+              scheduledEndAt: true,
               sessionOffering: {
                 select: {
                   title: true,
@@ -174,6 +175,9 @@ export class BookingEarningsService {
             update: {},
           });
 
+          const lockMs = runtimeConfig.earningLockMinutes * 60 * 1000;
+          const availableForWithdrawalAt = new Date(booking.scheduledEndAt.getTime() + lockMs);
+
           const createdEarning = await tx.bookingEarning.create({
             data: {
               bookingId: booking.id,
@@ -188,6 +192,7 @@ export class BookingEarningsService {
               professionalAmount,
               paymentMethod: bookingPayment.method as BookingPaymentMethod,
               status: 'CREDITED',
+              availableForWithdrawalAt,
             },
           });
 
@@ -201,6 +206,67 @@ export class BookingEarningsService {
               where: { id: professionalWallet.id },
               data: { balance: { increment: professionalAmount } },
             });
+          }
+
+          // Descontar deuda pendiente del saldo recién acreditado
+          const walletAfterCredit = await tx.wallet.findUnique({
+            where: { id: professionalWallet.id },
+            select: { balance: true, balanceUsd: true, debtBob: true, debtUsd: true },
+          });
+
+          if (walletAfterCredit) {
+            const isUsd = booking.currency === 'USD';
+            const currentBalance = isUsd
+              ? new Prisma.Decimal(walletAfterCredit.balanceUsd)
+              : new Prisma.Decimal(walletAfterCredit.balance);
+            const currentDebt = isUsd
+              ? new Prisma.Decimal(walletAfterCredit.debtUsd)
+              : new Prisma.Decimal(walletAfterCredit.debtBob);
+
+            if (currentDebt.greaterThan(0)) {
+              if (currentBalance.greaterThanOrEqualTo(currentDebt)) {
+                // Saldo suficiente para cubrir toda la deuda
+                const otherDebt = isUsd
+                  ? Number(walletAfterCredit.debtBob ?? 0)
+                  : Number(walletAfterCredit.debtUsd ?? 0);
+                const shouldUnblock = otherDebt <= 0;
+                await tx.wallet.update({
+                  where: { id: professionalWallet.id },
+                  data: isUsd
+                    ? { balanceUsd: { decrement: currentDebt }, debtUsd: new Prisma.Decimal(0), ...(shouldUnblock && { isBlocked: false }) }
+                    : { balance: { decrement: currentDebt }, debtBob: new Prisma.Decimal(0), ...(shouldUnblock && { isBlocked: false }) },
+                });
+                await tx.transaction.create({
+                  data: {
+                    walletId: professionalWallet.id,
+                    type: TransactionType.PENALTY,
+                    amount: currentDebt.negated(),
+                    promotionalAmount: new Prisma.Decimal(0),
+                    realAmount: currentDebt.negated(),
+                    description: JSON.stringify({ event: 'DEBT_AUTO_DEDUCTED', currency: booking.currency }),
+                  },
+                });
+              } else {
+                // Saldo parcial — cubre lo que puede, reduce deuda
+                const remainingDebt = currentDebt.minus(currentBalance).toDecimalPlaces(2);
+                await tx.wallet.update({
+                  where: { id: professionalWallet.id },
+                  data: isUsd
+                    ? { balanceUsd: new Prisma.Decimal(0), debtUsd: remainingDebt }
+                    : { balance: new Prisma.Decimal(0), debtBob: remainingDebt },
+                });
+                await tx.transaction.create({
+                  data: {
+                    walletId: professionalWallet.id,
+                    type: TransactionType.PENALTY,
+                    amount: currentBalance.negated(),
+                    promotionalAmount: new Prisma.Decimal(0),
+                    realAmount: currentBalance.negated(),
+                    description: JSON.stringify({ event: 'DEBT_PARTIAL_DEDUCTED', currency: booking.currency }),
+                  },
+                });
+              }
+            }
           }
 
           const earningTransaction = await tx.transaction.create({

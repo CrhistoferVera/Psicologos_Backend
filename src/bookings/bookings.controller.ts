@@ -32,6 +32,8 @@ import { UpdateSessionOfferingDto } from './dto/update-session-offering.dto';
 import { UpdateSessionOfferingStatusDto } from './dto/update-session-offering-status.dto';
 import { SetImmediateAvailabilityDto } from './dto/set-immediate-availability.dto';
 import { CreateImmediateBookingDto } from './dto/create-immediate-booking.dto';
+import { ReportNoShowDto } from './dto/report-no-show.dto';
+import { RequestRefundDto } from './dto/request-refund.dto';
 import { BookingsService } from './bookings.service';
 
 interface JwtUser {
@@ -360,5 +362,40 @@ export class BookingsController {
     @Body() dto: CreateImmediateBookingDto,
   ) {
     return this.bookingsService.createImmediateBooking(user.userId, dto);
+  }
+
+  @Post('bookings/:bookingId/join')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER, ...PROFESSIONAL_ROLES)
+  @ApiOperation({ summary: 'Registrar que el usuario entró a la sesión activa' })
+  markJoined(
+    @CurrentUser() user: JwtUser,
+    @Param('bookingId') bookingId: string,
+  ) {
+    return this.bookingsService.markJoined(bookingId, user.userId, user.role);
+  }
+
+  @Post('bookings/:bookingId/report-no-show')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER, ...PROFESSIONAL_ROLES)
+  @ApiOperation({ summary: 'Reportar ausencia en una sesión (cliente o psicólogo)' })
+  reportNoShow(
+    @CurrentUser() user: JwtUser,
+    @Param('bookingId') bookingId: string,
+    @Body() _dto: ReportNoShowDto,
+  ) {
+    return this.bookingsService.reportNoShow(bookingId, user.userId, user.role);
+  }
+
+  @Post('bookings/:bookingId/request-refund')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER)
+  @ApiOperation({ summary: 'Solicitar reembolso tras no-show del psicólogo' })
+  requestRefund(
+    @CurrentUser() user: JwtUser,
+    @Param('bookingId') bookingId: string,
+    @Body() dto: RequestRefundDto,
+  ) {
+    return this.bookingsService.requestRefund(bookingId, user.userId, dto.clientPayoutAccountId);
   }
 }

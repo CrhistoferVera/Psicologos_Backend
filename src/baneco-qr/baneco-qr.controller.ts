@@ -29,6 +29,13 @@ export class BanecoQrController {
     return Math.random().toString(36).slice(2, 9);
   }
 
+  @Post('pay-debt')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Generar QR para pagar deuda de no-show en BOB' })
+  createQrForDebt(@CurrentUser() user: JwtUser) {
+    return this.service.createQrForDebt(user.userId);
+  }
+
   @Post('create')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Generar QR de Banco Economico para un paquete' })

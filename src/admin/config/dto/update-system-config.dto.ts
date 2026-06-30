@@ -97,4 +97,49 @@ export class UpdateSystemConfigDto {
   @IsOptional()
   @IsBoolean()
   withdrawalsEnabled?: boolean;
+
+  @ApiPropertyOptional({ example: 15, description: 'Minutos de gracia antes de poder reportar no-show.' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  noShowGraceMinutes?: number;
+
+  @ApiPropertyOptional({ example: 30, description: 'Porcentaje del precio de la sesión que se aplica como multa al psicólogo por no-show (0-100).' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  noShowPenaltyPercent?: number;
+
+  @ApiPropertyOptional({ example: 1440, description: 'Minutos desde el no-show dentro de los cuales aplica el % de reembolso temprano. (1440 = 24h, 2 = pruebas).' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  refundEarlyWindowMinutes?: number;
+
+  @ApiPropertyOptional({ example: 50, description: 'Porcentaje de reembolso si el cliente reclama dentro de la ventana temprana (0-100).' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  refundEarlyPercent?: number;
+
+  @ApiPropertyOptional({ example: 2880, description: 'Minutos desde el no-show dentro de los cuales aplica el % de reembolso tardío. (2880 = 48h, 4 = pruebas).' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  refundLateWindowMinutes?: number;
+
+  @ApiPropertyOptional({ example: 80, description: 'Porcentaje de reembolso si el cliente reclama dentro de la ventana tardía (0-100).' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  refundLatePercent?: number;
+
+  @ApiPropertyOptional({ example: 1440, description: 'Minutos después del fin de sesión antes de que la ganancia esté disponible para retiro. (1440 = 24h, 2 = pruebas).' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  earningLockMinutes?: number;
 }

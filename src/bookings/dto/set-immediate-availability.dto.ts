@@ -7,10 +7,17 @@ export class SetImmediateAvailabilityDto {
   @Min(1)
   durationMinutes: number;
 
-  @ApiProperty({ example: 150, description: 'Precio en bolivianos' })
+  @ApiPropertyOptional({ example: 150, description: 'Precio en bolivianos' })
+  @IsOptional()
   @IsNumber()
   @Min(0.01)
-  priceBob: number;
+  priceBob?: number;
+
+  @ApiPropertyOptional({ example: 21.5, description: 'Precio en USD (para psicólogos extranjeros)' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  priceUsd?: number;
 
   @ApiProperty({ example: 60, description: 'Cuántos minutos estará activo el modo inmediato' })
   @IsInt()

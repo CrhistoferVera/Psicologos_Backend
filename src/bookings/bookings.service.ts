@@ -12,6 +12,7 @@ import {
   BookingPaymentMethod,
   BookingPaymentStatus,
   BookingStatus,
+  NoShowType,
   Prisma,
   ProfessionalAvailabilityException,
   TransactionType,
@@ -76,6 +77,8 @@ export type CommunicationAccessResult = {
   reason: CommunicationAccessReason | null;
   sessionStartsAt: Date | null;
   sessionEndsAt: Date | null;
+  clientJoinedAt: Date | null;
+  professionalJoinedAt: Date | null;
 };
 
 @Injectable()
@@ -167,6 +170,8 @@ export class BookingsService {
       sessionEndsAt: result.sessionEndsAt ? result.sessionEndsAt.toISOString() : null,
       reason: result.reason,
       message: result.reason ? reasonMessageMap[result.reason] : null,
+      clientJoinedAt: result.clientJoinedAt ? result.clientJoinedAt.toISOString() : null,
+      professionalJoinedAt: result.professionalJoinedAt ? result.professionalJoinedAt.toISOString() : null,
     };
   }
 
@@ -178,6 +183,8 @@ export class BookingsService {
         reason: 'UNKNOWN',
         sessionStartsAt: null,
         sessionEndsAt: null,
+        clientJoinedAt: null,
+        professionalJoinedAt: null,
       };
     }
 
@@ -199,6 +206,8 @@ export class BookingsService {
         reason: 'UNKNOWN',
         sessionStartsAt: null,
         sessionEndsAt: null,
+        clientJoinedAt: null,
+        professionalJoinedAt: null,
       };
     }
 
@@ -210,6 +219,8 @@ export class BookingsService {
         reason: 'UNKNOWN',
         sessionStartsAt: null,
         sessionEndsAt: null,
+        clientJoinedAt: null,
+        professionalJoinedAt: null,
       };
     }
 
@@ -229,6 +240,8 @@ export class BookingsService {
         id: true,
         scheduledStartAt: true,
         scheduledEndAt: true,
+        clientJoinedAt: true,
+        professionalJoinedAt: true,
       },
     });
 
@@ -239,6 +252,8 @@ export class BookingsService {
         reason: null,
         sessionStartsAt: activePaidBooking.scheduledStartAt,
         sessionEndsAt: activePaidBooking.scheduledEndAt,
+        clientJoinedAt: activePaidBooking.clientJoinedAt,
+        professionalJoinedAt: activePaidBooking.professionalJoinedAt,
       };
     }
 
@@ -273,6 +288,8 @@ export class BookingsService {
         reason: 'PAYMENT_PENDING',
         sessionStartsAt: activeButUnpaidBooking.scheduledStartAt,
         sessionEndsAt: activeButUnpaidBooking.scheduledEndAt,
+        clientJoinedAt: null,
+        professionalJoinedAt: null,
       };
     }
 
@@ -299,6 +316,8 @@ export class BookingsService {
         reason: 'SESSION_NOT_STARTED',
         sessionStartsAt: nextConfirmedPaidBooking.scheduledStartAt,
         sessionEndsAt: nextConfirmedPaidBooking.scheduledEndAt,
+        clientJoinedAt: null,
+        professionalJoinedAt: null,
       };
     }
 
@@ -325,6 +344,8 @@ export class BookingsService {
         reason: 'PAYMENT_PENDING',
         sessionStartsAt: nextPendingPaymentBooking.scheduledStartAt,
         sessionEndsAt: nextPendingPaymentBooking.scheduledEndAt,
+        clientJoinedAt: null,
+        professionalJoinedAt: null,
       };
     }
 
@@ -351,6 +372,8 @@ export class BookingsService {
         reason: 'SESSION_ENDED',
         sessionStartsAt: lastConfirmedPaidBooking.scheduledStartAt,
         sessionEndsAt: lastConfirmedPaidBooking.scheduledEndAt,
+        clientJoinedAt: null,
+        professionalJoinedAt: null,
       };
     }
 
@@ -360,6 +383,8 @@ export class BookingsService {
       reason: 'NO_CONFIRMED_BOOKING',
       sessionStartsAt: null,
       sessionEndsAt: null,
+      clientJoinedAt: null,
+      professionalJoinedAt: null,
     };
   }
 
@@ -380,15 +405,53 @@ export class BookingsService {
     const base = this.mapAccessResultForResponse(result);
 
     let hasReview = false;
+    let noShowType: string | null = null;
+    let refundWindowExpiresAt: string | null = null;
+
     if (result.bookingId && result.reason === 'SESSION_ENDED') {
-      const existing = await this.prisma.bookingReview.findUnique({
-        where: { bookingId: result.bookingId },
-        select: { id: true },
-      });
-      hasReview = !!existing;
+      const [review, noShowBooking] = await Promise.all([
+        this.prisma.bookingReview.findUnique({
+          where: { bookingId: result.bookingId },
+          select: { id: true },
+        }),
+        this.prisma.booking.findUnique({
+          where: { id: result.bookingId },
+          select: { noShowType: true, refundWindowExpiresAt: true },
+        }),
+      ]);
+      hasReview = !!review;
+      if (noShowBooking?.noShowType) noShowType = noShowBooking.noShowType;
+      if (noShowBooking?.refundWindowExpiresAt) {
+        refundWindowExpiresAt = noShowBooking.refundWindowExpiresAt.toISOString();
+      }
     }
 
-    return { ...base, hasReview };
+    // También buscar bookings NO_SHOW recientes entre este par (el cron los marca como NO_SHOW)
+    if (!noShowType) {
+      const pair = this.resolveCommunicationPair(
+        { id: currentUserId, role: (await this.prisma.user.findUnique({ where: { id: currentUserId }, select: { role: true } }))?.role ?? 'USER' as any },
+        { id: otherUserId, role: (await this.prisma.user.findUnique({ where: { id: otherUserId }, select: { role: true } }))?.role ?? 'USER' as any },
+      );
+      if (pair) {
+        const recentNoShow = await this.prisma.booking.findFirst({
+          where: {
+            clientId: pair.clientId,
+            professionalId: pair.professionalId,
+            status: BookingStatus.NO_SHOW,
+            noShowType: 'PROFESSIONAL',
+            refundWindowExpiresAt: { gt: new Date() },
+          },
+          orderBy: { scheduledStartAt: 'desc' },
+          select: { id: true, noShowType: true, refundWindowExpiresAt: true },
+        });
+        if (recentNoShow) {
+          noShowType = recentNoShow.noShowType;
+          refundWindowExpiresAt = recentNoShow.refundWindowExpiresAt?.toISOString() ?? null;
+        }
+      }
+    }
+
+    return { ...base, hasReview, noShowType, refundWindowExpiresAt };
   }
 
   @Cron(CronExpression.EVERY_5_MINUTES)
@@ -1091,12 +1154,22 @@ export class BookingsService {
       throw new BadRequestException('durationMinutes debe ser mayor que 0.');
     }
 
-    if (dto.priceBob <= 0) {
-      throw new BadRequestException('priceBob debe ser mayor que 0.');
+    if (!dto.priceBob && !dto.priceUsd) {
+      throw new BadRequestException('Debes indicar priceBob o priceUsd.');
     }
 
     const rate = await this.getBobToUsdRate();
-    const priceUsd = Math.round((dto.priceBob / rate) * 100) / 100;
+
+    let finalPriceBob: number;
+    let finalPriceUsd: number;
+
+    if (dto.priceUsd) {
+      finalPriceUsd = dto.priceUsd;
+      finalPriceBob = Math.round(dto.priceUsd * rate * 100) / 100;
+    } else {
+      finalPriceBob = dto.priceBob!;
+      finalPriceUsd = Math.round((dto.priceBob! / rate) * 100) / 100;
+    }
 
     const created = await this.prisma.professionalSessionOffering.create({
       data: {
@@ -1104,8 +1177,8 @@ export class BookingsService {
         title: dto.title.trim(),
         description: dto.description?.trim() || null,
         durationMinutes: dto.durationMinutes,
-        priceBob: new Prisma.Decimal(dto.priceBob),
-        priceUsd: new Prisma.Decimal(priceUsd),
+        priceBob: new Prisma.Decimal(finalPriceBob),
+        priceUsd: new Prisma.Decimal(finalPriceUsd),
       },
     });
 
@@ -1142,11 +1215,14 @@ export class BookingsService {
 
     const bobToUsdRate = await this.getBobToUsdRate();
 
-    if (dto.priceBob !== undefined) {
+    if (dto.priceUsd !== undefined) {
+      if (dto.priceUsd <= 0) throw new BadRequestException('priceUsd debe ser mayor que 0.');
+      payload.priceUsd = new Prisma.Decimal(dto.priceUsd);
+      payload.priceBob = new Prisma.Decimal(Math.round(dto.priceUsd * bobToUsdRate * 100) / 100);
+    } else if (dto.priceBob !== undefined) {
       if (dto.priceBob <= 0) throw new BadRequestException('priceBob debe ser mayor que 0.');
-      const priceUsd = Math.round((dto.priceBob / bobToUsdRate) * 100) / 100;
       payload.priceBob = new Prisma.Decimal(dto.priceBob);
-      payload.priceUsd = new Prisma.Decimal(priceUsd);
+      payload.priceUsd = new Prisma.Decimal(Math.round((dto.priceBob / bobToUsdRate) * 100) / 100);
     }
 
     const updated = await this.prisma.professionalSessionOffering.update({
@@ -2814,9 +2890,14 @@ export class BookingsService {
   async activateImmediateAvailability(professionalId: string, dto: SetImmediateAvailabilityDto) {
     await this.ensureProfessionalExists(professionalId);
 
+    if (!dto.priceBob && !dto.priceUsd) {
+      throw new BadRequestException('Debes proporcionar priceBob o priceUsd.');
+    }
+
     const expiresAt = new Date(Date.now() + dto.activeForMinutes * 60 * 1000);
     const bobToUsdRate = await this.getBobToUsdRate();
-    const priceUsd = Math.round((dto.priceBob / bobToUsdRate) * 100) / 100;
+    const priceBob = dto.priceBob ?? Math.round(dto.priceUsd! * bobToUsdRate * 100) / 100;
+    const priceUsd = dto.priceUsd ?? Math.round((dto.priceBob! / bobToUsdRate) * 100) / 100;
 
     // Upsert del registro de disponibilidad inmediata
     const availability = await this.prisma.professionalImmediateAvailability.upsert({
@@ -2826,14 +2907,14 @@ export class BookingsService {
         isActive: true,
         expiresAt,
         durationMinutes: dto.durationMinutes,
-        priceBob: dto.priceBob,
+        priceBob,
         description: dto.description,
       },
       update: {
         isActive: true,
         expiresAt,
         durationMinutes: dto.durationMinutes,
-        priceBob: dto.priceBob,
+        priceBob,
         description: dto.description,
       },
     });
@@ -2848,7 +2929,7 @@ export class BookingsService {
         where: { id: existingOffering.id },
         data: {
           durationMinutes: dto.durationMinutes,
-          priceBob: dto.priceBob,
+          priceBob,
           priceUsd,
           isActive: true,
         },
@@ -2860,7 +2941,7 @@ export class BookingsService {
           title: 'Atención Inmediata',
           description: dto.description,
           durationMinutes: dto.durationMinutes,
-          priceBob: dto.priceBob,
+          priceBob,
           priceUsd,
         },
       });
@@ -2916,9 +2997,14 @@ export class BookingsService {
       return { isActive: false };
     }
 
+    const priceBob = Number(record.priceBob);
+    const bobToUsdRate = await this.getBobToUsdRate();
+    const priceUsd = Math.round((priceBob / bobToUsdRate) * 100) / 100;
+
     return {
       ...record,
-      priceBob: Number(record.priceBob),
+      priceBob,
+      priceUsd,
       expiresAt: record.expiresAt?.toISOString(),
     };
   }
@@ -2931,6 +3017,10 @@ export class BookingsService {
       where: {
         isActive: true,
         expiresAt: { gt: new Date() },
+        professional: {
+          isActive: true,
+          wallet: { is: { isBlocked: false } },
+        },
       },
       include: {
         professional: {
@@ -3105,6 +3195,625 @@ export class BookingsService {
       booking: { ...booking, priceBob: Number(booking.priceBob), priceUsd: Number(booking.priceUsd) },
       paymentInit,
     };
+  }
+
+  async markJoined(bookingId: string, userId: string, role: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+        status: true,
+        paymentStatus: true,
+        scheduledStartAt: true,
+        scheduledEndAt: true,
+      },
+    });
+
+    if (!booking) throw new NotFoundException('Reserva no encontrada.');
+    if (booking.status !== BookingStatus.CONFIRMED) throw new BadRequestException('La reserva no está activa.');
+    if (booking.paymentStatus !== BookingPaymentStatus.PAID) throw new BadRequestException('La reserva no está pagada.');
+
+    const now = new Date();
+    if (now < booking.scheduledStartAt || now > booking.scheduledEndAt) {
+      throw new BadRequestException('No estás dentro del horario de la sesión.');
+    }
+
+    const isClient = booking.clientId === userId;
+    const isProfessional = booking.professionalId === userId;
+    if (!isClient && !isProfessional) throw new ForbiddenException('No tienes acceso a esta reserva.');
+
+    if (isClient) {
+      await this.prisma.booking.updateMany({
+        where: { id: bookingId, clientJoinedAt: null },
+        data: { clientJoinedAt: now },
+      });
+    } else {
+      await this.prisma.booking.updateMany({
+        where: { id: bookingId, professionalJoinedAt: null },
+        data: { professionalJoinedAt: now },
+      });
+    }
+
+    return { ok: true };
+  }
+
+  async reportNoShow(bookingId: string, reporterUserId: string, reporterRole: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+        status: true,
+        paymentStatus: true,
+        scheduledStartAt: true,
+        noShowType: true,
+        currency: true,
+        priceBob: true,
+        priceUsd: true,
+        client: { select: { fcmToken: true, firstName: true } },
+        professional: { select: { fcmToken: true, firstName: true } },
+        earning: { select: { professionalAmount: true } },
+      },
+    });
+
+    if (!booking) throw new NotFoundException('Reserva no encontrada.');
+
+    const isClient = booking.clientId === reporterUserId;
+    const isProfessional = booking.professionalId === reporterUserId;
+
+    if (!isClient && !isProfessional) {
+      throw new ForbiddenException('No tienes acceso a esta reserva.');
+    }
+
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new BadRequestException('Solo se puede reportar ausencia en reservas confirmadas.');
+    }
+
+    if (booking.paymentStatus !== BookingPaymentStatus.PAID) {
+      throw new BadRequestException('La reserva no ha sido pagada.');
+    }
+
+    if (booking.noShowType !== null) {
+      throw new BadRequestException('Ya se reportó una ausencia para esta reserva.');
+    }
+
+    const config = await this.systemConfigService.getRuntimeConfig();
+
+    const graceMs = config.noShowGraceMinutes * 60 * 1000;
+    const now = new Date();
+    if (now.getTime() < booking.scheduledStartAt.getTime() + graceMs) {
+      const minutosRestantes = Math.ceil(
+        (booking.scheduledStartAt.getTime() + graceMs - now.getTime()) / 60000,
+      );
+      throw new BadRequestException(
+        `Debes esperar ${minutosRestantes} minuto(s) más antes de reportar ausencia.`,
+      );
+    }
+
+    if (isClient) {
+      // Cliente reporta → el psicólogo no se presentó
+      // El timer corre desde el momento del reporte, no desde el fin de la sesión
+      const refundWindowMs = Number(config.refundLateWindowMinutes) * 60 * 1000;
+      const refundWindowExpiresAt = new Date(now.getTime() + refundWindowMs);
+
+      const isUsd = booking.currency === 'USD';
+      const sessionPrice = isUsd
+        ? new Prisma.Decimal(booking.priceUsd)
+        : new Prisma.Decimal(booking.priceBob);
+
+      // Lo que el psicólogo ya recibió por esta sesión (se revierte, no es multa)
+      const earningReversal = booking.earning
+        ? new Prisma.Decimal(booking.earning.professionalAmount).toDecimalPlaces(2)
+        : new Prisma.Decimal(0);
+
+      // La multa es solo el % del precio bruto de la sesión
+      const penaltyPercent = new Prisma.Decimal(config.noShowPenaltyPercent).div(100);
+      const penaltyAmount = sessionPrice.mul(penaltyPercent).toDecimalPlaces(2);
+
+      await this.prisma.$transaction(async (tx) => {
+        await tx.booking.update({
+          where: { id: bookingId },
+          data: {
+            status: BookingStatus.NO_SHOW,
+            noShowType: 'PROFESSIONAL',
+            refundWindowExpiresAt,
+          },
+        });
+
+        const wallet = await tx.wallet.upsert({
+          where: { userId: booking.professionalId },
+          create: { userId: booking.professionalId },
+          update: {},
+        });
+
+        const currentBalance = isUsd
+          ? new Prisma.Decimal(wallet.balanceUsd)
+          : new Prisma.Decimal(wallet.balance);
+
+        // Paso 1: revertir el earning sin generar deuda (se descuenta del saldo disponible)
+        const balanceAfterReversal = currentBalance.greaterThanOrEqualTo(earningReversal)
+          ? currentBalance.minus(earningReversal)
+          : new Prisma.Decimal(0);
+
+        // Paso 2: aplicar la multa sobre el saldo restante — esta sí puede generar deuda
+        if (balanceAfterReversal.greaterThanOrEqualTo(penaltyAmount)) {
+          await tx.wallet.update({
+            where: { id: wallet.id },
+            data: isUsd
+              ? { balanceUsd: balanceAfterReversal.minus(penaltyAmount) }
+              : { balance: balanceAfterReversal.minus(penaltyAmount) },
+          });
+        } else {
+          const debtAmount = penaltyAmount.minus(balanceAfterReversal).toDecimalPlaces(2);
+          await tx.wallet.update({
+            where: { id: wallet.id },
+            data: isUsd
+              ? { balanceUsd: new Prisma.Decimal(0), debtUsd: { increment: debtAmount }, isBlocked: true }
+              : { balance: new Prisma.Decimal(0), debtBob: { increment: debtAmount }, isBlocked: true },
+          });
+        }
+
+        // Liberar el lock del BookingEarning — el earning fue revertido, no debe contar como bloqueado
+        await tx.bookingEarning.updateMany({
+          where: { bookingId },
+          data: { availableForWithdrawalAt: new Date(0) },
+        });
+
+        await tx.transaction.create({
+          data: {
+            walletId: wallet.id,
+            type: TransactionType.PENALTY,
+            amount: penaltyAmount,
+            promotionalAmount: new Prisma.Decimal(0),
+            realAmount: penaltyAmount,
+            description: JSON.stringify({
+              event: 'NO_SHOW_PENALTY',
+              bookingId,
+              currency: booking.currency,
+              earningReversal: Number(earningReversal),
+              penaltyPercent: Number(config.noShowPenaltyPercent),
+              penaltyAmount: Number(penaltyAmount),
+              totalDeduction: Number(earningReversal.plus(penaltyAmount)),
+            }),
+          },
+        });
+      });
+
+      // Notificar al cliente que puede pedir reembolso
+      if (booking.client.fcmToken) {
+        this.notificationsService.sendPushNotification(
+          booking.client.fcmToken,
+          'Reembolso disponible',
+          `Tu psicólogo no se presentó. Puedes solicitar tu reembolso hasta las ${refundWindowExpiresAt.toLocaleTimeString()}.`,
+          { type: 'NO_SHOW_REFUND_AVAILABLE', bookingId },
+        );
+      }
+
+      // Notificar al psicólogo de la deducción total
+      if (booking.professional.fcmToken) {
+        this.notificationsService.sendPushNotification(
+          booking.professional.fcmToken,
+          'No asististe a una sesión',
+          `Se dedujo ${Number(totalDeduction).toFixed(2)} ${booking.currency} de tu cuenta (ganancia devuelta + multa por no presentarte).`,
+          { type: 'NO_SHOW_PENALTY', bookingId },
+        );
+      }
+
+      return { noShowType: 'PROFESSIONAL', refundWindowExpiresAt };
+    }
+
+    if (isProfessional) {
+      // Psicólogo reporta → el cliente no se presentó → acreditar al psicólogo
+      await this.bookingEarningsService.creditProfessionalEarningForBooking({
+        bookingId,
+        source: 'NO_SHOW_CLIENT',
+      });
+
+      await this.prisma.booking.update({
+        where: { id: bookingId },
+        data: {
+          status: BookingStatus.NO_SHOW,
+          noShowType: 'CLIENT',
+        },
+      });
+
+      // Notificar al psicólogo que recibirá su pago
+      if (booking.professional.fcmToken) {
+        this.notificationsService.sendPushNotification(
+          booking.professional.fcmToken,
+          'Cliente no asistió',
+          'El cliente no se presentó. Recibirás el pago de tu sesión.',
+          { type: 'NO_SHOW_CLIENT_PROFESSIONAL_PAID', bookingId },
+        );
+      }
+
+      // Notificar al cliente que no habrá reembolso
+      if (booking.client.fcmToken) {
+        this.notificationsService.sendPushNotification(
+          booking.client.fcmToken,
+          'Sesión no realizada',
+          'No asististe a tu sesión. El psicólogo recibirá su pago ya que sí estuvo disponible.',
+          { type: 'NO_SHOW_CLIENT_NO_REFUND', bookingId },
+        );
+      }
+
+      return { noShowType: 'CLIENT' };
+    }
+  }
+
+  async requestRefund(bookingId: string, clientId: string, clientPayoutAccountId: string) {
+    const now = new Date();
+
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+        status: true,
+        noShowType: true,
+        currency: true,
+        priceBob: true,
+        priceUsd: true,
+        scheduledStartAt: true,
+        refundWindowExpiresAt: true,
+        refundRequest: { select: { id: true } },
+        professional: { select: { fcmToken: true, firstName: true, lastName: true } },
+      },
+    });
+
+    if (!booking) throw new NotFoundException('Booking no encontrado.');
+    if (booking.clientId !== clientId) throw new ForbiddenException('No tienes permisos sobre esta reserva.');
+
+    if (booking.noShowType !== 'PROFESSIONAL' && booking.noShowType !== 'BOTH') {
+      throw new BadRequestException('El reembolso solo aplica cuando el psicólogo no se presentó.');
+    }
+
+    if (!booking.refundWindowExpiresAt || now > booking.refundWindowExpiresAt) {
+      throw new BadRequestException('La ventana para solicitar reembolso ha expirado.');
+    }
+
+    if (booking.refundRequest) {
+      throw new BadRequestException('Ya existe una solicitud de reembolso para esta reserva.');
+    }
+
+    const payoutAccount = await this.prisma.clientPayoutAccount.findUnique({
+      where: { id: clientPayoutAccountId },
+      select: { id: true, clientId: true },
+    });
+
+    if (!payoutAccount || payoutAccount.clientId !== clientId) {
+      throw new NotFoundException('Cuenta de pago no encontrada.');
+    }
+
+    const config = await this.systemConfigService.getRuntimeConfig();
+    const minutesElapsed = (now.getTime() - booking.scheduledStartAt.getTime()) / 60000;
+
+    let refundPercent: number;
+    if (minutesElapsed <= config.refundEarlyWindowMinutes) {
+      refundPercent = config.refundEarlyPercent;
+    } else {
+      refundPercent = config.refundLatePercent;
+    }
+
+    const percentDecimal = new Prisma.Decimal(refundPercent).div(100);
+    const amountBob = new Prisma.Decimal(booking.priceBob).mul(percentDecimal).toDecimalPlaces(2);
+    const amountUsd = new Prisma.Decimal(booking.priceUsd).mul(percentDecimal).toDecimalPlaces(2);
+
+    const refundRequest = await this.prisma.refundRequest.create({
+      data: {
+        bookingId,
+        clientId,
+        clientPayoutAccountId,
+        amountBob,
+        amountUsd,
+        percentage: refundPercent,
+        status: 'PENDING',
+        requestedAt: now,
+      },
+    });
+
+    // Notificar al admin si existe algún usuario con rol ADMIN que tenga fcmToken
+    this.prisma.user.findMany({
+      where: { role: UserRole.ADMIN },
+      select: { fcmToken: true },
+    }).then((admins) => {
+      for (const admin of admins) {
+        if (!admin.fcmToken) continue;
+        this.notificationsService.sendPushNotification(
+          admin.fcmToken,
+          'Nueva solicitud de reembolso',
+          `Un cliente solicitó un reembolso del ${refundPercent}% (${Number(booking.currency === 'USD' ? amountUsd : amountBob).toFixed(2)} ${booking.currency}).`,
+          { type: 'REFUND_REQUEST_PENDING', refundRequestId: refundRequest.id, bookingId },
+        );
+      }
+    }).catch((err) => {
+      this.logger.error(`[REFUND-REQUEST] admin notification failed refundRequestId=${refundRequest.id} err=${err?.message}`);
+    });
+
+    return {
+      id: refundRequest.id,
+      bookingId,
+      amountBob: Number(amountBob),
+      amountUsd: Number(amountUsd),
+      percentage: refundPercent,
+      status: refundRequest.status,
+      requestedAt: refundRequest.requestedAt,
+    };
+  }
+
+  async autoDetectBothNoShows() {
+    const config = await this.systemConfigService.getRuntimeConfig();
+    const now = new Date();
+    const refundWindowMs = Number(config.refundLateWindowMinutes) * 60 * 1000;
+    const lookbackCutoff = new Date(now.getTime() - refundWindowMs);
+
+    const bookings = await this.prisma.booking.findMany({
+      where: {
+        status: BookingStatus.CONFIRMED,
+        paymentStatus: BookingPaymentStatus.PAID,
+        noShowType: null,
+        professionalJoinedAt: null,
+        clientJoinedAt: null,
+        scheduledEndAt: { lt: now, gte: lookbackCutoff },
+      },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+        currency: true,
+        priceBob: true,
+        priceUsd: true,
+        scheduledStartAt: true,
+        scheduledEndAt: true,
+        earning: { select: { professionalAmount: true } },
+        client: { select: { fcmToken: true } },
+        professional: { select: { fcmToken: true } },
+      },
+    });
+
+    for (const booking of bookings) {
+      try {
+        const refundWindowExpiresAt = new Date(booking.scheduledEndAt.getTime() + refundWindowMs);
+        const isUsd = booking.currency === 'USD';
+
+        const earningReversal = booking.earning
+          ? new Prisma.Decimal(booking.earning.professionalAmount).toDecimalPlaces(2)
+          : new Prisma.Decimal(0);
+
+        await this.prisma.$transaction(async (tx) => {
+          await tx.booking.update({
+            where: { id: booking.id },
+            data: {
+              status: BookingStatus.NO_SHOW,
+              noShowType: 'BOTH',
+              refundWindowExpiresAt,
+            },
+          });
+
+          if (earningReversal.greaterThan(0)) {
+            const wallet = await tx.wallet.upsert({
+              where: { userId: booking.professionalId },
+              create: { userId: booking.professionalId },
+              update: {},
+            });
+
+            const currentBalance = isUsd
+              ? new Prisma.Decimal(wallet.balanceUsd)
+              : new Prisma.Decimal(wallet.balance);
+
+            if (currentBalance.greaterThanOrEqualTo(earningReversal)) {
+              await tx.wallet.update({
+                where: { id: wallet.id },
+                data: isUsd
+                  ? { balanceUsd: { decrement: earningReversal } }
+                  : { balance: { decrement: earningReversal } },
+              });
+            } else {
+              const debtAmount = earningReversal.minus(currentBalance).toDecimalPlaces(2);
+              await tx.wallet.update({
+                where: { id: wallet.id },
+                data: isUsd
+                  ? { balanceUsd: new Prisma.Decimal(0), debtUsd: { increment: debtAmount }, isBlocked: true }
+                  : { balance: new Prisma.Decimal(0), debtBob: { increment: debtAmount }, isBlocked: true },
+              });
+            }
+
+            // Liberar el lock del BookingEarning — el earning fue revertido, no debe contar como bloqueado
+            await tx.bookingEarning.updateMany({
+              where: { bookingId: booking.id },
+              data: { availableForWithdrawalAt: new Date(0) },
+            });
+
+            await tx.transaction.create({
+              data: {
+                walletId: wallet.id,
+                type: TransactionType.PENALTY,
+                amount: earningReversal,
+                promotionalAmount: new Prisma.Decimal(0),
+                realAmount: earningReversal,
+                description: JSON.stringify({
+                  event: 'NO_SHOW_BOTH_EARNING_REVERSAL',
+                  bookingId: booking.id,
+                  currency: booking.currency,
+                  earningReversal: Number(earningReversal),
+                }),
+              },
+            });
+          }
+        });
+
+        if (booking.client.fcmToken) {
+          this.notificationsService.sendPushNotification(
+            booking.client.fcmToken,
+            'Ninguno asistió a la sesión',
+            `Tienes hasta ${refundWindowExpiresAt.toLocaleDateString('es-BO')} para solicitar tu reembolso.`,
+            { type: 'NO_SHOW_REFUND_AVAILABLE', bookingId: booking.id },
+          );
+        }
+
+        if (booking.professional.fcmToken) {
+          this.notificationsService.sendPushNotification(
+            booking.professional.fcmToken,
+            'Ninguno asistió a la sesión',
+            `No se registró tu ingreso ni el del cliente. Tu ganancia fue revertida.`,
+            { type: 'NO_SHOW_BOTH', bookingId: booking.id },
+          );
+        }
+
+        this.logger.log(`[NO_SHOW_AUTO_BOTH] bookingId=${booking.id} earningReversal=${Number(earningReversal)}`);
+      } catch (err: any) {
+        this.logger.error(`[NO_SHOW_AUTO_BOTH] bookingId=${booking.id} error=${err?.message}`);
+      }
+    }
+  }
+
+  async autoDetectProfessionalNoShows() {
+    const config = await this.systemConfigService.getRuntimeConfig();
+    const now = new Date();
+    const refundWindowMs = Number(config.refundLateWindowMinutes) * 60 * 1000;
+    const lookbackCutoff = new Date(now.getTime() - refundWindowMs);
+
+    const bookings = await this.prisma.booking.findMany({
+      where: {
+        status: BookingStatus.CONFIRMED,
+        paymentStatus: BookingPaymentStatus.PAID,
+        noShowType: null,
+        professionalJoinedAt: null,
+        clientJoinedAt: { not: null },
+        scheduledEndAt: { lt: now, gte: lookbackCutoff },
+      },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+        currency: true,
+        priceBob: true,
+        priceUsd: true,
+        scheduledStartAt: true,
+        scheduledEndAt: true,
+        earning: { select: { professionalAmount: true } },
+        client: { select: { fcmToken: true } },
+        professional: { select: { fcmToken: true } },
+      },
+    });
+
+    for (const booking of bookings) {
+      try {
+        const refundWindowExpiresAt = new Date(booking.scheduledEndAt.getTime() + refundWindowMs);
+        const isUsd = booking.currency === 'USD';
+        const sessionPrice = isUsd
+          ? new Prisma.Decimal(booking.priceUsd)
+          : new Prisma.Decimal(booking.priceBob);
+
+        const earningReversal = booking.earning
+          ? new Prisma.Decimal(booking.earning.professionalAmount).toDecimalPlaces(2)
+          : new Prisma.Decimal(0);
+
+        const penaltyPercent = new Prisma.Decimal(config.noShowPenaltyPercent).div(100);
+        const penaltyAmount = sessionPrice.mul(penaltyPercent).toDecimalPlaces(2);
+
+        await this.prisma.$transaction(async (tx) => {
+          await tx.booking.update({
+            where: { id: booking.id },
+            data: {
+              status: BookingStatus.NO_SHOW,
+              noShowType: 'PROFESSIONAL',
+              refundWindowExpiresAt,
+            },
+          });
+
+          const wallet = await tx.wallet.upsert({
+            where: { userId: booking.professionalId },
+            create: { userId: booking.professionalId },
+            update: {},
+          });
+
+          const currentBalance = isUsd
+            ? new Prisma.Decimal(wallet.balanceUsd)
+            : new Prisma.Decimal(wallet.balance);
+
+          // Paso 1: revertir el earning sin generar deuda
+          const balanceAfterReversal = currentBalance.greaterThanOrEqualTo(earningReversal)
+            ? currentBalance.minus(earningReversal)
+            : new Prisma.Decimal(0);
+
+          // Paso 2: aplicar la multa sobre el saldo restante — esta sí puede generar deuda
+          if (balanceAfterReversal.greaterThanOrEqualTo(penaltyAmount)) {
+            await tx.wallet.update({
+              where: { id: wallet.id },
+              data: isUsd
+                ? { balanceUsd: balanceAfterReversal.minus(penaltyAmount) }
+                : { balance: balanceAfterReversal.minus(penaltyAmount) },
+            });
+          } else {
+            const debtAmount = penaltyAmount.minus(balanceAfterReversal).toDecimalPlaces(2);
+            await tx.wallet.update({
+              where: { id: wallet.id },
+              data: isUsd
+                ? { balanceUsd: new Prisma.Decimal(0), debtUsd: { increment: debtAmount }, isBlocked: true }
+                : { balance: new Prisma.Decimal(0), debtBob: { increment: debtAmount }, isBlocked: true },
+            });
+          }
+
+          // Liberar el lock del BookingEarning — el earning fue revertido, no debe contar como bloqueado
+          await tx.bookingEarning.updateMany({
+            where: { bookingId: booking.id },
+            data: { availableForWithdrawalAt: new Date(0) },
+          });
+
+          await tx.transaction.create({
+            data: {
+              walletId: wallet.id,
+              type: TransactionType.PENALTY,
+              amount: penaltyAmount,
+              promotionalAmount: new Prisma.Decimal(0),
+              realAmount: penaltyAmount,
+              description: JSON.stringify({
+                event: 'NO_SHOW_PENALTY_AUTO',
+                bookingId: booking.id,
+                currency: booking.currency,
+                earningReversal: Number(earningReversal),
+                penaltyPercent: Number(config.noShowPenaltyPercent),
+                penaltyAmount: Number(penaltyAmount),
+                totalDeduction: Number(totalDeduction),
+              }),
+            },
+          });
+        });
+
+        if (booking.client.fcmToken) {
+          this.notificationsService.sendPushNotification(
+            booking.client.fcmToken,
+            'Tu psicólogo no se presentó',
+            `Tienes hasta ${refundWindowExpiresAt.toLocaleDateString('es-BO')} para solicitar tu reembolso.`,
+            { type: 'NO_SHOW_REFUND_AVAILABLE', bookingId: booking.id },
+          );
+        }
+
+        if (booking.professional.fcmToken) {
+          this.notificationsService.sendPushNotification(
+            booking.professional.fcmToken,
+            'No asististe a una sesión',
+            `Se aplicó una penalidad de ${Number(totalDeduction).toFixed(2)} ${booking.currency} por no presentarte.`,
+            { type: 'NO_SHOW_PENALTY', bookingId: booking.id },
+          );
+        }
+
+        this.logger.log(`[NO_SHOW_AUTO] bookingId=${booking.id} penaltyApplied=${Number(totalDeduction)}`);
+      } catch (err: any) {
+        this.logger.error(`[NO_SHOW_AUTO] bookingId=${booking.id} error=${err?.message}`);
+      }
+    }
+  }
+
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async autoDetectNoShowsCron() {
+    await this.autoDetectBothNoShows();
+    await this.autoDetectProfessionalNoShows();
   }
 
   // CRON PARA EXPIRAR AUTOMÁTICAMENTE LAS DISPONIBILIDADES INMEDIATAS VENCIDAS (POR SI FALLA EL AUTO-DESACTIVO EN CONSULTAS)

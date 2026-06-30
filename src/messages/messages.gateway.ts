@@ -21,6 +21,7 @@ interface CallSession {
   professionalId: string;
   callType: 'CALL' | 'VIDEO_CALL';
   startedAt: number | null;
+  bookingId: string | null;
 }
 
 type RegisteredSocketUser = {
@@ -268,7 +269,14 @@ export class MessagesGateway implements OnGatewayDisconnect {
         return;
       }
 
-      await this.bookingsService.assertActiveBookingAccess(socketUser.userId, receiver.id, 'CALL');
+      const access = await this.bookingsService.assertActiveBookingAccess(socketUser.userId, receiver.id, 'CALL');
+
+      if (access.bookingId) {
+        void this.prisma.booking.updateMany({
+          where: { id: access.bookingId, clientJoinedAt: null },
+          data: { clientJoinedAt: new Date() },
+        });
+      }
 
       const caller = await this.prisma.user.findUnique({
         where: { id: socketUser.userId },
@@ -281,6 +289,7 @@ export class MessagesGateway implements OnGatewayDisconnect {
         professionalId: receiver.id,
         callType: data.callType,
         startedAt: null,
+        bookingId: access.bookingId ?? null,
       });
 
       const roomName = `user_${receiver.id}`;
@@ -368,6 +377,13 @@ export class MessagesGateway implements OnGatewayDisconnect {
     }
 
     session.startedAt = Date.now();
+
+    if (session.bookingId) {
+      void this.prisma.booking.updateMany({
+        where: { id: session.bookingId, professionalJoinedAt: null },
+        data: { professionalJoinedAt: new Date() },
+      });
+    }
 
     this.server.to(`user_${session.callerId}`).emit('call_accepted', { callId: data.callId });
 

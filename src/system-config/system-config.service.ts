@@ -12,6 +12,13 @@ export type RuntimeSystemConfig = {
   referralRewardPercent: number;
   paymentsEnabled: boolean;
   withdrawalsEnabled: boolean;
+  noShowGraceMinutes: number;
+  noShowPenaltyPercent: number;
+  refundEarlyWindowMinutes: number;
+  refundEarlyPercent: number;
+  refundLateWindowMinutes: number;
+  refundLatePercent: number;
+  earningLockMinutes: number;
 };
 
 @Injectable()
@@ -50,6 +57,13 @@ export class SystemConfigService {
       referralRewardPercent: this.normalizePercent(process.env.REFERRAL_REWARD_PERCENT, 5),
       paymentsEnabled: (process.env.PAYMENTS_ENABLED ?? 'true').toLowerCase() !== 'false',
       withdrawalsEnabled: (process.env.WITHDRAWALS_ENABLED ?? 'true').toLowerCase() !== 'false',
+      noShowGraceMinutes: this.normalizePositiveInt(process.env.NO_SHOW_GRACE_MINUTES, 15),
+      noShowPenaltyPercent: this.normalizePercent(process.env.NO_SHOW_PENALTY_PERCENT, 30),
+      refundEarlyWindowMinutes: this.normalizePositiveInt(process.env.REFUND_EARLY_WINDOW_MINUTES, 1440),
+      refundEarlyPercent: this.normalizePercent(process.env.REFUND_EARLY_PERCENT, 50),
+      refundLateWindowMinutes: this.normalizePositiveInt(process.env.REFUND_LATE_WINDOW_MINUTES, 2880),
+      refundLatePercent: this.normalizePercent(process.env.REFUND_LATE_PERCENT, 80),
+      earningLockMinutes: this.normalizePositiveInt(process.env.EARNING_LOCK_MINUTES, 1440),
     };
   }
 
@@ -103,6 +117,13 @@ export class SystemConfigService {
       ),
       paymentsEnabled: config.paymentsEnabled,
       withdrawalsEnabled: config.withdrawalsEnabled,
+      noShowGraceMinutes: this.normalizePositiveInt(config.noShowGraceMinutes ?? defaults.noShowGraceMinutes, defaults.noShowGraceMinutes),
+      noShowPenaltyPercent: this.normalizePercent(config.noShowPenaltyPercent ?? defaults.noShowPenaltyPercent, defaults.noShowPenaltyPercent),
+      refundEarlyWindowMinutes: this.normalizePositiveInt(config.refundEarlyWindowMinutes ?? defaults.refundEarlyWindowMinutes, defaults.refundEarlyWindowMinutes),
+      refundEarlyPercent: this.normalizePercent(config.refundEarlyPercent ?? defaults.refundEarlyPercent, defaults.refundEarlyPercent),
+      refundLateWindowMinutes: this.normalizePositiveInt(config.refundLateWindowMinutes ?? defaults.refundLateWindowMinutes, defaults.refundLateWindowMinutes),
+      refundLatePercent: this.normalizePercent(config.refundLatePercent ?? defaults.refundLatePercent, defaults.refundLatePercent),
+      earningLockMinutes: this.normalizePositiveInt(config.earningLockMinutes ?? defaults.earningLockMinutes, defaults.earningLockMinutes),
     };
   }
 
@@ -128,6 +149,13 @@ export class SystemConfigService {
           : {}),
         ...(payload.paymentsEnabled !== undefined ? { paymentsEnabled: payload.paymentsEnabled } : {}),
         ...(payload.withdrawalsEnabled !== undefined ? { withdrawalsEnabled: payload.withdrawalsEnabled } : {}),
+        ...(payload.noShowGraceMinutes !== undefined ? { noShowGraceMinutes: payload.noShowGraceMinutes } : {}),
+        ...(payload.noShowPenaltyPercent !== undefined ? { noShowPenaltyPercent: payload.noShowPenaltyPercent } : {}),
+        ...(payload.refundEarlyWindowMinutes !== undefined ? { refundEarlyWindowMinutes: payload.refundEarlyWindowMinutes } : {}),
+        ...(payload.refundEarlyPercent !== undefined ? { refundEarlyPercent: payload.refundEarlyPercent } : {}),
+        ...(payload.refundLateWindowMinutes !== undefined ? { refundLateWindowMinutes: payload.refundLateWindowMinutes } : {}),
+        ...(payload.refundLatePercent !== undefined ? { refundLatePercent: payload.refundLatePercent } : {}),
+        ...(payload.earningLockMinutes !== undefined ? { earningLockMinutes: payload.earningLockMinutes } : {}),
       },
     });
 
@@ -149,6 +177,7 @@ export class SystemConfigService {
       referralRewardPercent: config.referralRewardPercent,
       bobToUsdRate: config.usdExchangeRate,
       stripeBonusPercentage,
+      noShowGraceMinutes: config.noShowGraceMinutes,
     };
   }
 

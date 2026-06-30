@@ -584,6 +584,38 @@ export class CloudinaryService {
     });
   }
 
+  async uploadRefundReceipt(params: {
+    file: Express.Multer.File;
+    refundRequestId: string;
+  }): Promise<{ secureUrl: string; publicId: string }> {
+    const { file, refundRequestId } = params;
+
+    const isImage = file.mimetype.startsWith('image/');
+    const isPdf = file.mimetype === 'application/pdf';
+    if (!isImage && !isPdf) {
+      throw new InternalServerErrorException('Solo se permiten imágenes o PDF como comprobante.');
+    }
+
+    const resourceType: 'image' | 'raw' = isImage ? 'image' : 'raw';
+    const folder = `psicologos/refunds/${refundRequestId}`;
+    const publicId = `receipt_${Date.now()}`;
+
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder, public_id: publicId, resource_type: resourceType },
+        (error, result) => {
+          if (error || !result?.secure_url) {
+            return reject(
+              new InternalServerErrorException('Error al subir comprobante de reembolso a Cloudinary.'),
+            );
+          }
+          resolve({ secureUrl: result.secure_url, publicId: result.public_id });
+        },
+      );
+      uploadStream.end(file.buffer);
+    });
+  }
+
   async deleteGalleryImage(publicId: string): Promise<void> {
     try {
       await cloudinary.uploader.destroy(publicId, { invalidate: true, resource_type: 'image' });

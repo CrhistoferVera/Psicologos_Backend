@@ -17,10 +17,32 @@ export class WalletService {
   private computeWithdrawableBalance(
     balance: Prisma.Decimal | number,
     promotionalBalance: Prisma.Decimal | number,
+    lockedAmount: number = 0,
   ) {
     const total = Number(balance ?? 0);
     const promotional = Number(promotionalBalance ?? 0);
-    return Math.max(total - promotional, 0);
+    return Math.max(total - promotional - lockedAmount, 0);
+  }
+
+  private async getLockedAmounts(walletId: string): Promise<{ lockedBob: number; lockedUsd: number }> {
+    const now = new Date();
+    const locked = await this.prisma.bookingEarning.findMany({
+      where: {
+        walletId,
+        availableForWithdrawalAt: { gt: now },
+      },
+      select: { currency: true, professionalAmount: true },
+    });
+
+    const lockedBob = locked
+      .filter((e) => e.currency !== 'USD')
+      .reduce((sum, e) => sum + Number(e.professionalAmount), 0);
+
+    const lockedUsd = locked
+      .filter((e) => e.currency === 'USD')
+      .reduce((sum, e) => sum + Number(e.professionalAmount), 0);
+
+    return { lockedBob, lockedUsd };
   }
 
   async getMyBalance(userId: string) {
@@ -29,11 +51,71 @@ export class WalletService {
       create: { userId, balance: 0, promotionalBalance: 0, balanceUsd: 0 },
       update: {},
     });
+
+    const { lockedBob, lockedUsd } = await this.getLockedAmounts(wallet.id);
+
     return {
       balance: Number(wallet.balance ?? 0),
-      balanceUsd: Number(wallet.balanceUsd ?? 0),
       promotionalBalance: Number(wallet.promotionalBalance ?? 0),
+      lockedBob,
+      withdrawableBob: this.computeWithdrawableBalance(wallet.balance, wallet.promotionalBalance ?? 0, lockedBob),
+      balanceUsd: Number(wallet.balanceUsd ?? 0),
+      lockedUsd,
+      withdrawableUsd: Math.max(0, Number(wallet.balanceUsd ?? 0) - lockedUsd),
+      debtBob: Number(wallet.debtBob ?? 0),
+      debtUsd: Number(wallet.debtUsd ?? 0),
+      isBlocked: wallet.isBlocked ?? false,
     };
+  }
+
+  async getPenaltyTransactions(userId: string) {
+    const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
+    if (!wallet) return [];
+
+    const transactions = await this.prisma.transaction.findMany({
+      where: { walletId: wallet.id, type: TransactionType.PENALTY },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
+
+    const results = await Promise.all(
+      transactions.map(async (tx) => {
+        let parsed: any = {};
+        try { parsed = JSON.parse(tx.description ?? '{}'); } catch { /* ignore */ }
+
+        let booking: { scheduledStartAt: Date; scheduledEndAt: Date; sessionOffering: { title: string } | null } | null = null;
+        if (parsed.bookingId) {
+          booking = await this.prisma.booking.findUnique({
+            where: { id: parsed.bookingId },
+            select: {
+              scheduledStartAt: true,
+              scheduledEndAt: true,
+              sessionOffering: { select: { title: true } },
+            },
+          });
+        }
+
+        // totalDeduction = earningReversal + penaltyAmount (del JSON); fallback a tx.amount para registros viejos
+        const totalDeduction = parsed.totalDeduction != null
+          ? Number(parsed.totalDeduction)
+          : Number(tx.amount);
+
+        return {
+          id: tx.id,
+          createdAt: tx.createdAt.toISOString(),
+          totalDeduction,
+          currency: parsed.currency ?? 'BOB',
+          event: parsed.event ?? 'NO_SHOW_PENALTY',
+          earningReversal: parsed.earningReversal ?? 0,
+          penaltyPercent: parsed.penaltyPercent ?? null,
+          penaltyAmount: parsed.penaltyAmount ?? null,
+          sessionTitle: booking?.sessionOffering?.title ?? 'Sesión',
+          scheduledStartAt: booking?.scheduledStartAt?.toISOString() ?? null,
+        };
+      }),
+    );
+
+    return results;
   }
 
   async getMyEarnings(userId: string) {
@@ -121,14 +203,19 @@ export class WalletService {
       .reduce((sum, tx) => sum + tx.amount, 0);
 
     const promotionalBalance = Number(wallet.promotionalBalance ?? 0);
-    const realBalance = this.computeWithdrawableBalance(wallet.balance, wallet.promotionalBalance ?? 0);
+    const { lockedBob, lockedUsd } = await this.getLockedAmounts(wallet.id);
+    const realBalance = this.computeWithdrawableBalance(wallet.balance, wallet.promotionalBalance ?? 0, lockedBob);
+    const withdrawableUsd = Math.max(0, Number(wallet.balanceUsd ?? 0) - lockedUsd);
 
     return {
       balance: Number(wallet.balance),
       balanceUsd: Number(wallet.balanceUsd ?? 0),
       promotionalBalance,
+      lockedBob,
+      lockedUsd,
       realBalance,
       withdrawableBalance: realBalance,
+      withdrawableUsd,
       withdrawalsEnabled,
       today: todayBob,
       todayUsd,
@@ -274,12 +361,18 @@ export class WalletService {
     const currency = dto.currency ?? 'BOB';
     const isUsd = currency === 'USD';
 
+    const { lockedBob, lockedUsd } = await this.getLockedAmounts(wallet.id);
+
     const availableBalance = isUsd
-      ? Number(wallet.balanceUsd ?? 0)
-      : this.computeWithdrawableBalance(wallet.balance, wallet.promotionalBalance ?? 0);
+      ? Math.max(0, Number(wallet.balanceUsd ?? 0) - lockedUsd)
+      : this.computeWithdrawableBalance(wallet.balance, wallet.promotionalBalance ?? 0, lockedBob);
+
+    if (availableBalance <= 0) {
+      throw new BadRequestException('No tienes saldo disponible para retiro. Tus ganancias se liberan después de cada sesión.');
+    }
 
     if (availableBalance < dto.credits) {
-      throw new BadRequestException('Saldo disponible para retiro insuficiente.');
+      throw new BadRequestException(`Saldo disponible insuficiente. Puedes retirar hasta ${availableBalance.toFixed(2)} ${currency}.`);
     }
 
     // Validar cuenta bancaria si aplica

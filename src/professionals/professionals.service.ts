@@ -155,6 +155,9 @@ export class ProfessionalsService {
       professionalProfile: {
         is: { reviewStatus: 'APPROVED' },
       },
+      wallet: {
+        is: { isBlocked: false },
+      },
       ...(specialtyFilter
         ? {
             professionalSpecialties: {
@@ -256,6 +259,7 @@ export class ProfessionalsService {
         role: { in: PROFESSIONAL_ROLES },
         isActive: true,
         isProfileComplete: true,
+        wallet: { is: { isBlocked: false } },
       },
       select: {
         id: true,

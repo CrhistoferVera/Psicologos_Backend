@@ -30,6 +30,8 @@ import { SessionsModule } from './sessions/sessions.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { ChatIaModule } from './chat-ia/chat-ia.module';
+import { ClientPayoutAccountsModule } from './client-payout-accounts/client-payout-accounts.module';
+import { AdminRefundRequestsModule } from './admin/refund-requests/admin-refund-requests.module';
 
 @Module({
   imports: [
@@ -67,6 +69,8 @@ import { ChatIaModule } from './chat-ia/chat-ia.module';
     BookingsModule,
     ReviewsModule,
     ChatIaModule,
+    ClientPayoutAccountsModule,
+    AdminRefundRequestsModule,
   ],
   controllers: [],
   providers: [],
