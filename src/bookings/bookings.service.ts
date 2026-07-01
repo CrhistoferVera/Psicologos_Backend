@@ -3397,7 +3397,7 @@ export class BookingsService {
         this.notificationsService.sendPushNotification(
           booking.professional.fcmToken,
           'No asististe a una sesión',
-          `Se dedujo ${Number(totalDeduction).toFixed(2)} ${booking.currency} de tu cuenta (ganancia devuelta + multa por no presentarte).`,
+          `Se dedujo ${earningReversal.plus(penaltyAmount).toFixed(2)} ${booking.currency} de tu cuenta (ganancia devuelta + multa por no presentarte).`,
           { type: 'NO_SHOW_PENALTY', bookingId },
         );
       }
@@ -3671,6 +3671,70 @@ export class BookingsService {
     }
   }
 
+  async autoDetectClientNoShows() {
+    const config = await this.systemConfigService.getRuntimeConfig();
+    const now = new Date();
+    const refundWindowMs = Number(config.refundLateWindowMinutes) * 60 * 1000;
+    const lookbackCutoff = new Date(now.getTime() - refundWindowMs);
+
+    const bookings = await this.prisma.booking.findMany({
+      where: {
+        status: BookingStatus.CONFIRMED,
+        paymentStatus: BookingPaymentStatus.PAID,
+        noShowType: null,
+        clientJoinedAt: null,
+        professionalJoinedAt: { not: null },
+        scheduledEndAt: { lt: now, gte: lookbackCutoff },
+      },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+        client: { select: { fcmToken: true } },
+        professional: { select: { fcmToken: true } },
+      },
+    });
+
+    for (const booking of bookings) {
+      try {
+        await this.bookingEarningsService.creditProfessionalEarningForBooking({
+          bookingId: booking.id,
+          source: 'NO_SHOW_CLIENT_AUTO',
+        });
+
+        await this.prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            status: BookingStatus.NO_SHOW,
+            noShowType: 'CLIENT',
+          },
+        });
+
+        if (booking.professional.fcmToken) {
+          this.notificationsService.sendPushNotification(
+            booking.professional.fcmToken,
+            'Cliente no asistió',
+            'El cliente no se presentó. Recibirás el pago de tu sesión.',
+            { type: 'NO_SHOW_CLIENT_PROFESSIONAL_PAID', bookingId: booking.id },
+          );
+        }
+
+        if (booking.client.fcmToken) {
+          this.notificationsService.sendPushNotification(
+            booking.client.fcmToken,
+            'Sesión no realizada',
+            'No asististe a tu sesión. El psicólogo recibirá su pago ya que sí estuvo disponible.',
+            { type: 'NO_SHOW_CLIENT_NO_REFUND', bookingId: booking.id },
+          );
+        }
+
+        this.logger.log(`[NO_SHOW_AUTO_CLIENT] bookingId=${booking.id} professionalCredited=true`);
+      } catch (err: any) {
+        this.logger.error(`[NO_SHOW_AUTO_CLIENT] bookingId=${booking.id} error=${err?.message}`);
+      }
+    }
+  }
+
   async autoDetectProfessionalNoShows() {
     const config = await this.systemConfigService.getRuntimeConfig();
     const now = new Date();
@@ -3779,7 +3843,7 @@ export class BookingsService {
                 earningReversal: Number(earningReversal),
                 penaltyPercent: Number(config.noShowPenaltyPercent),
                 penaltyAmount: Number(penaltyAmount),
-                totalDeduction: Number(totalDeduction),
+                totalDeduction: Number(earningReversal.plus(penaltyAmount)),
               }),
             },
           });
@@ -3798,12 +3862,12 @@ export class BookingsService {
           this.notificationsService.sendPushNotification(
             booking.professional.fcmToken,
             'No asististe a una sesión',
-            `Se aplicó una penalidad de ${Number(totalDeduction).toFixed(2)} ${booking.currency} por no presentarte.`,
+            `Se aplicó una penalidad de ${earningReversal.plus(penaltyAmount).toFixed(2)} ${booking.currency} por no presentarte.`,
             { type: 'NO_SHOW_PENALTY', bookingId: booking.id },
           );
         }
 
-        this.logger.log(`[NO_SHOW_AUTO] bookingId=${booking.id} penaltyApplied=${Number(totalDeduction)}`);
+        this.logger.log(`[NO_SHOW_AUTO] bookingId=${booking.id} penaltyApplied=${Number(earningReversal.plus(penaltyAmount))}`);
       } catch (err: any) {
         this.logger.error(`[NO_SHOW_AUTO] bookingId=${booking.id} error=${err?.message}`);
       }
@@ -3813,6 +3877,7 @@ export class BookingsService {
   @Cron(CronExpression.EVERY_5_MINUTES)
   async autoDetectNoShowsCron() {
     await this.autoDetectBothNoShows();
+    await this.autoDetectClientNoShows();
     await this.autoDetectProfessionalNoShows();
   }
 
