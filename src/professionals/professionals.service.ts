@@ -143,10 +143,19 @@ export class ProfessionalsService {
   async findAllPublic(
     page = 1,
     limit = 10,
-    _currentUserId?: string,
+    currentUserId?: string,
     specialty?: string,
   ): Promise<ProfessionalPublicListResponseDto> {
     const specialtyFilter = this.buildSpecialtyFilter(specialty);
+
+    let countryFilter: string | null = null;
+    if (currentUserId) {
+      const viewer = await this.prisma.user.findUnique({
+        where: { id: currentUserId },
+        select: { country: true },
+      });
+      countryFilter = viewer?.country ?? null;
+    }
 
     const where: Prisma.UserWhereInput = {
       role: { in: PROFESSIONAL_ROLES },
@@ -158,6 +167,7 @@ export class ProfessionalsService {
       wallet: {
         is: { isBlocked: false },
       },
+      ...(countryFilter ? { country: countryFilter } : {}),
       ...(specialtyFilter
         ? {
             professionalSpecialties: {

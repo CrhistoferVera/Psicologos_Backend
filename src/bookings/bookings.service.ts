@@ -3010,8 +3010,17 @@ export class BookingsService {
   }
 
   // METODO PARA LISTAR PROFESIONALES CON ATENCIÓN INMEDIATA ACTIVA
-  async getImmediateProfessionals() {
+  async getImmediateProfessionals(currentUserId?: string) {
     const bobToUsdRate = await this.getBobToUsdRate();
+
+    let countryFilter: string | null = null;
+    if (currentUserId) {
+      const viewer = await this.prisma.user.findUnique({
+        where: { id: currentUserId },
+        select: { country: true },
+      });
+      countryFilter = viewer?.country ?? null;
+    }
 
     const records = await this.prisma.professionalImmediateAvailability.findMany({
       where: {
@@ -3020,6 +3029,7 @@ export class BookingsService {
         professional: {
           isActive: true,
           wallet: { is: { isBlocked: false } },
+          ...(countryFilter ? { country: countryFilter } : {}),
         },
       },
       include: {

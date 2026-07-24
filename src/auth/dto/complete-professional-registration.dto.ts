@@ -66,4 +66,9 @@ export class CompleteProfessionalRegistrationDto {
   @IsOptional()
   @IsString()
   referralCode?: string;
+
+  @ApiProperty({ example: 'BO', description: 'ISO 3166-1 alpha-2 del país de residencia profesional' })
+  @IsString()
+  @IsNotEmpty()
+  country: string;
 }

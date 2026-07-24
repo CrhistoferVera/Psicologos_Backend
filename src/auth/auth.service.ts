@@ -314,6 +314,7 @@ export class AuthService {
           email: email ?? null,
           firstName: dto.firstName,
           lastName: dto.lastName,
+          country: dto.country ?? null,
           password: hashedPassword,
           role: PROFESSIONAL_ROLE,
           referralCode,

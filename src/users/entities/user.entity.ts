@@ -8,6 +8,7 @@ export class UserEntity implements User {
   phoneNationalNumber: string | null;
   phoneCountryIso: string | null;
   phoneCountryName: string | null;
+  country: string | null;
   billingRegion: string | null;
   preferredCurrency: string | null;
   email: string | null;

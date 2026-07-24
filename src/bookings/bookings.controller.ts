@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  Request,
   UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -14,6 +15,7 @@ import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { PROFESSIONAL_ROLES } from '../common/professional-role';
 import { AvailableSlotsQueryDto } from './dto/available-slots-query.dto';
@@ -340,9 +342,12 @@ export class BookingsController {
 
   // API PARA USUARIOS: LISTAR PSICÓLOGOS CON ATENCIÓN INMEDIATA ACTIVA Y RESERVAR
   @Get('immediate-professionals')
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'Listar psicólogos con atención inmediata activa ahora' })
-  getImmediateProfessionals() {
-    return this.bookingsService.getImmediateProfessionals();
+  getImmediateProfessionals(@Request() req: any) {
+    const currentUserId: string | undefined =
+      req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.bookingsService.getImmediateProfessionals(currentUserId);
   }
 
   // API PARA USUARIOS: CONSULTAR DETALLE DE ATENCIÓN INMEDIATA DE UN PSICÓLOGO (SI ESTA ACTIVA, DURACIÓN, PRECIO, DESCRIPCIÓN, ETC) Y RESERVAR

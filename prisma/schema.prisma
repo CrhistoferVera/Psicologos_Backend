@@ -13,6 +13,7 @@ model User {
   phoneNationalNumber String?
   phoneCountryIso     String?
   phoneCountryName    String?
+  country             String?
   billingRegion       String?
   preferredCurrency   String?
   email               String?   @unique

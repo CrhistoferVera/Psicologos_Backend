@@ -90,6 +90,19 @@ export class UsersController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Patch('me/country')
+  async updateMyCountry(
+    @CurrentUser() user: JwtUser,
+    @Body() body: { country: string },
+  ) {
+    if (!body.country || typeof body.country !== 'string' || body.country.trim().length < 2) {
+      throw new BadRequestException('País inválido.');
+    }
+    const updated = await this.usersService.update(user.userId, { country: body.country.trim().toUpperCase() });
+    return new UserEntity(updated);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Patch('my/profile')
   @UseInterceptors(FileInterceptor('avatar', { storage: memoryStorage() }))
   async updateMyProfileData(
