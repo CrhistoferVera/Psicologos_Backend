@@ -622,11 +622,10 @@ export class AuthService {
   }
 
   private getAllowedGoogleAudiences() {
-    const raw = process.env.GOOGLE_CLIENT_IDS ?? process.env.GOOGLE_CLIENT_ID ?? '';
-    return raw
-      .split(',')
-      .map((value) => value.trim())
-      .filter((value) => value.length > 0);
+    return [
+      process.env.GOOGLE_MOBILE_WEB_CLIENT_ID,
+      process.env.GOOGLE_MOBILE_IOS_CLIENT_ID,
+    ].filter((v): v is string => Boolean(v?.trim()));
   }
 
   private buildGooglePhoneNumber(googleSub?: string) {
