@@ -2,7 +2,8 @@ import { IsBoolean, IsEmail, IsOptional, IsString, MinLength } from 'class-valid
 
 export class CreateUserDto {
   @IsString()
-  phoneNumber: string;
+  @IsOptional()
+  phoneNumber?: string;
 
   @IsOptional()
   @IsString()

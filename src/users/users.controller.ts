@@ -25,6 +25,7 @@ import { UpdateMyProfileDto } from './dto/update-my-profile.dto';
 import * as bcrypt from 'bcrypt';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
+import { deriveBillingFields } from '../common/phone-metadata.util';
 
 interface JwtUser {
   userId: string;
@@ -98,7 +99,9 @@ export class UsersController {
     if (!body.country || typeof body.country !== 'string' || body.country.trim().length < 2) {
       throw new BadRequestException('País inválido.');
     }
-    const updated = await this.usersService.update(user.userId, { country: body.country.trim().toUpperCase() });
+    const countryIso = body.country.trim().toUpperCase();
+    const { billingRegion, preferredCurrency } = deriveBillingFields(countryIso);
+    const updated = await this.usersService.update(user.userId, { country: countryIso, billingRegion, preferredCurrency });
     return new UserEntity(updated);
   }
 

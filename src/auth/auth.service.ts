@@ -3,7 +3,6 @@ import {
   ConflictException,
   Inject,
   Injectable,
-  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -386,42 +385,17 @@ export class AuthService {
       throw new UnauthorizedException('Debes verificar tu email en Google');
     }
 
-    const googlePhoneNumber = this.buildGooglePhoneNumber(tokenInfo.sub);
-    const [userByGooglePhone, userByEmail] = await Promise.all([
-      this.usersService.findOneByPhone(googlePhoneNumber),
-      this.usersService.findOneByEmail(normalizedEmail),
-    ]);
-
-    let user: User | null = null;
-
-    if (userByGooglePhone) {
-      const needsEmailUpdate =
-        !userByGooglePhone.email ||
-        userByGooglePhone.email.toLowerCase() !== normalizedEmail;
-
-      if (needsEmailUpdate && userByEmail && userByEmail.id !== userByGooglePhone.id) {
-        throw new ConflictException(
-          'El email de Google ya esta asociado a otra cuenta',
-        );
-      }
-
-      if (needsEmailUpdate) {
-        user = await this.usersService.update(userByGooglePhone.id, {
-          email: normalizedEmail,
-        });
-      } else {
-        user = userByGooglePhone;
-      }
-    } else if (userByEmail) {
-      user = userByEmail;
-    } else {
-      throw new NotFoundException(
-        'No tienes una cuenta registrada con este correo. Regístrate primero desde la app.',
-      );
-    }
+    let user: User | null = await this.usersService.findOneByEmail(normalizedEmail);
 
     if (!user) {
-      throw new UnauthorizedException('No se pudo autenticar con Google');
+      // Email no encontrado — se crea una cuenta nueva para ese email
+      const [firstName, lastName] = this.extractNames(tokenInfo);
+      user = await this.usersService.create({
+        email: normalizedEmail,
+        firstName: firstName ?? undefined,
+        lastName: lastName ?? undefined,
+        isProfileComplete: true,
+      });
     }
 
     const shouldSyncName =
@@ -444,7 +418,7 @@ export class AuthService {
     const normalizedEmail = this.normalizeEmail(email);
     const user = await this.usersService.findOneByEmail(normalizedEmail);
 
-    if (!user || !user.email) {
+    if (!user?.email) {
       return this.resetGenericMessage();
     }
 
@@ -478,8 +452,7 @@ export class AuthService {
 
     const user = await this.usersService.findOneByEmail(normalizedEmail);
     if (
-      !user ||
-      !user.resetPasswordToken ||
+      !user?.resetPasswordToken ||
       !user.resetPasswordExpiry ||
       user.resetPasswordExpiry.getTime() <= Date.now()
     ) {

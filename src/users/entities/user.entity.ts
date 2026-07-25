@@ -3,7 +3,7 @@ import { Exclude } from 'class-transformer';
 
 export class UserEntity implements User {
   id: string;
-  phoneNumber: string;
+  phoneNumber: string | null;
   phoneDialCode: string | null;
   phoneNationalNumber: string | null;
   phoneCountryIso: string | null;
