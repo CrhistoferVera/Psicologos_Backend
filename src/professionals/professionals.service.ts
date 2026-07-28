@@ -230,6 +230,13 @@ export class ProfessionalsService {
               },
             },
           },
+          professionalSessionOfferings: {
+            where: { isActive: true },
+            select: {
+              priceBob: true,
+              priceUsd: true,
+            },
+          },
         },
       }),
       this.prisma.user.count({ where }),
@@ -238,6 +245,16 @@ export class ProfessionalsService {
     const data: ProfessionalPublicListItemDto[] = users.map((u) => {
       const profile = u.professionalProfile;
       const mainImage = profile?.coverUrl ?? profile?.avatarUrl ?? null;
+
+      // Precio de la sesion mas barata; se calcula por moneda porque la oferta
+      // mas barata en Bs no tiene por que ser la mas barata en USD.
+      const offerings = u.professionalSessionOfferings ?? [];
+      const lowestSessionPriceBob = offerings.length
+        ? Math.min(...offerings.map((o) => Number(o.priceBob)))
+        : null;
+      const lowestSessionPriceUsd = offerings.length
+        ? Math.min(...offerings.map((o) => Number(o.priceUsd)))
+        : null;
 
       return {
         id: u.id,
@@ -255,6 +272,8 @@ export class ProfessionalsService {
           serviceType: String(sp.serviceType),
           price: Number(sp.price),
         })),
+        lowestSessionPriceBob,
+        lowestSessionPriceUsd,
       };
     });
 

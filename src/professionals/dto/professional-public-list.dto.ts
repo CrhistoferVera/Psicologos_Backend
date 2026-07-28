@@ -70,6 +70,20 @@ export class ProfessionalPublicListItemDto {
     description: 'Precios por tipo de servicio (chat, llamada, video)',
   })
   servicePrices: ServicePricePublicDto[];
+
+  @ApiProperty({
+    example: 150,
+    nullable: true,
+    description: 'Precio en Bs de la sesion activa mas barata (null si no ofrece sesiones)',
+  })
+  lowestSessionPriceBob: number | null;
+
+  @ApiProperty({
+    example: 25,
+    nullable: true,
+    description: 'Precio en USD de la sesion activa mas barata (null si no ofrece sesiones)',
+  })
+  lowestSessionPriceUsd: number | null;
 }
 
 export class ProfessionalPublicListResponseDto {
