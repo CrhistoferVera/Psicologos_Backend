@@ -7,19 +7,7 @@ export class CreateUserDto {
 
   @IsOptional()
   @IsString()
-  phoneDialCode?: string;
-
-  @IsOptional()
-  @IsString()
-  phoneNationalNumber?: string;
-
-  @IsOptional()
-  @IsString()
-  phoneCountryIso?: string;
-
-  @IsOptional()
-  @IsString()
-  phoneCountryName?: string;
+  country?: string;
 
   @IsOptional()
   @IsString()

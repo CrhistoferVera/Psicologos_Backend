@@ -7,7 +7,6 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { MailModule } from '../mail/mail.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { CloudinaryModule } from '../cloudinary/cloudinary.module';
@@ -19,7 +18,6 @@ import { KycModule } from '../kyc/kyc.module';
     forwardRef(() => UsersModule),
     PassportModule,
     CacheModule.register(),
-    WhatsappModule,
     MailModule,
     PrismaModule,
     CloudinaryModule,

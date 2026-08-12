@@ -65,9 +65,7 @@ async function upsertUser(
       isActive: true,
       isProfileComplete: true,
       phoneNumber: phone,
-      phoneDialCode: isForeign ? '+1' : '+591',
-      phoneCountryIso: isForeign ? 'US' : 'BO',
-      phoneCountryName: isForeign ? 'United States' : 'Bolivia',
+      country: isForeign ? 'US' : 'BO',
       billingRegion: isForeign ? 'INTERNATIONAL' : 'BOLIVIA',
       preferredCurrency: isForeign ? 'USD' : 'BOB',
       wallet: {

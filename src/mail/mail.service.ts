@@ -77,6 +77,33 @@ export class MailService {
         }
     }
 
+    //METODO PARA ENVIAR CODIGO OTP DE VERIFICACION DE CUENTA (REGISTRO)
+    async sendOtpEmail(
+        email: string,
+        firstName: string,
+        code: string,
+        expiresInMinutes = 15,
+    ) {
+        try {
+            await this.mailerService.sendMail({
+                to: email,
+                subject: 'Codigo de verificacion - SanaMente',
+                template: 'verify-otp',
+                context: {
+                    firstName,
+                    code,
+                    expiresInMinutes,
+                },
+            });
+            this.logger.log(`📧 Codigo OTP enviado a ${email}`);
+        } catch (error) {
+            this.logger.error(`Error enviando codigo OTP a ${email}. code=${this.getErrorCode(error)}`);
+            throw new ServiceUnavailableException(
+                'No se pudo enviar el codigo de verificacion en este momento. Intenta nuevamente.',
+            );
+        }
+    }
+
     //METODO PARA ENVIAR NOTIFICACION DE ESTADO DE SOLICITUD DE RETIRO
     async sendWithdrawalRequestNotification(
         email: string,

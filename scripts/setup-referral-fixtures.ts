@@ -44,9 +44,7 @@ async function ensureUser(
       role: UserRole.USER,
       isActive: true,
       phoneNumber,
-      phoneDialCode: '+591',
-      phoneCountryIso: 'BO',
-      phoneCountryName: 'Bolivia',
+      country: 'BO',
       billingRegion: 'BOLIVIA',
       preferredCurrency: 'BOB',
       userProfile: {

@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -17,7 +18,6 @@ import { CompleteRegistrationDto } from './dto/complete-registration.dto';
 import { CompleteProfessionalRegistrationDto } from './dto/complete-professional-registration.dto';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
-import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -26,7 +26,7 @@ import { PROFESSIONAL_ROLE } from '../common/professional-role';
 import { ReferralsService } from '../referrals/referrals.service';
 import { createUniqueReferralCode } from '../referrals/utils/referral-code.util';
 import { FaceMatchService } from '../kyc/face-match.service';
-import { normalizePhoneRegistrationInput } from '../common/phone-metadata.util';
+import { deriveBillingFields } from '../common/phone-metadata.util';
 
 type GoogleTokenInfo = {
   iss?: string;
@@ -44,27 +44,22 @@ type GoogleVerifiedTokenInfo = GoogleTokenInfo & {
   sub: string;
 };
 
-type PhoneVerifiedTokenPayload = {
+type EmailVerifiedTokenPayload = {
   sub: string;
-  type: 'phone_verified';
-  phoneDialCode: string;
-  phoneNationalNumber: string;
-  phoneCountryIso: string;
-  phoneCountryName: string;
-  billingRegion: string;
-  preferredCurrency: string;
+  type: 'email_verified';
+  email: string;
 };
 
 @Injectable()
 export class AuthService {
   private static readonly RESET_CODE_TTL_MS = 15 * 60 * 1000;
   private static readonly RESET_MAX_ATTEMPTS = 5;
+  private readonly logger = new Logger(AuthService.name);
 
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
-    private readonly whatsappService: WhatsappService,
     private readonly mailService: MailService,
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
@@ -101,47 +96,31 @@ export class AuthService {
   }
 
   async sendOtp(dto: SendOtpDto) {
-    const normalized = normalizePhoneRegistrationInput({
-      phoneDialCode: dto.phoneDialCode,
-      phoneNationalNumber: dto.phoneNationalNumber,
-      phoneCountryIso: dto.phoneCountryIso,
-      phoneCountryName: dto.phoneCountryName,
-    });
-    const phoneNumber = normalized.phoneNumber;
-    if (dto.phoneNumber && dto.phoneNumber.trim() !== phoneNumber) {
-      throw new BadRequestException('El numero de telefono no coincide con el pais seleccionado');
-    }
+    const email = this.normalizeEmail(dto.email);
+    if (!email) throw new BadRequestException('El email es obligatorio');
+
     const code = randomInt(0, 1000000).toString().padStart(6, '0');
-    await this.cacheManager.set(`otp_${phoneNumber}`, code, 900000);
+    await this.cacheManager.set(`otp_${email}`, code, 900000);
 
-    await this.whatsappService.sendText(
-      phoneNumber,
-      `Tu codigo de verificacion es: *${code}*\nExpira en 15 minutos.`,
-    );
+    const existing = await this.usersService.findOneByEmail(email);
+    await this.mailService.sendOtpEmail(email, existing?.firstName ?? 'Usuario', code, 15);
 
-    return { message: 'Codigo OTP enviado por WhatsApp. Expira en 15 minutos.' };
+    return { message: 'Codigo OTP enviado por correo. Expira en 15 minutos.' };
   }
 
   async verifyOtp(dto: VerifyOtpDto) {
-    const normalized = normalizePhoneRegistrationInput({
-      phoneDialCode: dto.phoneDialCode,
-      phoneNationalNumber: dto.phoneNationalNumber,
-      phoneCountryIso: dto.phoneCountryIso,
-      phoneCountryName: dto.phoneCountryName,
-    });
-    const phoneNumber = normalized.phoneNumber;
-    if (dto.phoneNumber && dto.phoneNumber.trim() !== phoneNumber) {
-      throw new BadRequestException('El numero de telefono no coincide con el pais seleccionado');
-    }
-    const cached = await this.cacheManager.get<string>(`otp_${phoneNumber}`);
+    const email = this.normalizeEmail(dto.email);
+    if (!email) throw new BadRequestException('El email es obligatorio');
+
+    const cached = await this.cacheManager.get<string>(`otp_${email}`);
 
     if (!cached || cached !== dto.code) {
       throw new BadRequestException('Codigo OTP invalido o expirado');
     }
 
-    await this.cacheManager.del(`otp_${phoneNumber}`);
+    await this.cacheManager.del(`otp_${email}`);
 
-    const user = await this.usersService.findOneByPhone(phoneNumber);
+    const user = await this.usersService.findOneByEmail(email);
 
     if (user) {
       const { password: _, ...userWithoutPass } = user;
@@ -150,15 +129,42 @@ export class AuthService {
 
     const tempToken = this.jwtService.sign(
       {
-        sub: phoneNumber,
-        type: 'phone_verified',
-        phoneDialCode: normalized.phoneDialCode,
-        phoneNationalNumber: normalized.phoneNationalNumber,
-        phoneCountryIso: normalized.phoneCountryIso,
-        phoneCountryName: normalized.phoneCountryName,
-        billingRegion: normalized.billingRegion,
-        preferredCurrency: normalized.preferredCurrency,
-      } as PhoneVerifiedTokenPayload,
+        sub: email,
+        type: 'email_verified',
+        email,
+      } as EmailVerifiedTokenPayload,
+      { expiresIn: '60m' },
+    );
+
+    return { needsProfile: true, tempToken };
+  }
+
+  // Verifica el email via Google (sin OTP) y devuelve un token temporal
+  // email_verified para continuar un registro (usuario o profesional).
+  // Si el correo ya tiene cuenta, devuelve la sesion directamente.
+  async verifyGoogleForRegistration(idToken: string) {
+    const tokenInfo = await this.verifyGoogleIdToken(idToken);
+
+    const email = tokenInfo.email?.trim().toLowerCase();
+    if (!email) {
+      throw new BadRequestException('La cuenta de Google no incluye email');
+    }
+    if (tokenInfo.email_verified !== 'true') {
+      throw new UnauthorizedException('Debes verificar tu email en Google');
+    }
+
+    const user = await this.usersService.findOneByEmail(email);
+    if (user) {
+      const { password: _, ...userWithoutPass } = user;
+      return this.generateTokenResponse(userWithoutPass);
+    }
+
+    const tempToken = this.jwtService.sign(
+      {
+        sub: email,
+        type: 'email_verified',
+        email,
+      } as EmailVerifiedTokenPayload,
       { expiresIn: '60m' },
     );
 
@@ -166,17 +172,20 @@ export class AuthService {
   }
 
   async completeRegistration(dto: CompleteRegistrationDto) {
-    const payload = this.verifyPhoneToken(dto.tempToken);
+    const payload = this.verifyEmailToken(dto.tempToken);
 
     if (dto.password !== dto.confirmPassword) {
       throw new BadRequestException('Las contrasenas no coinciden');
     }
 
-    const email = dto.email?.trim().toLowerCase();
-    if (!email) throw new BadRequestException('El email es obligatorio');
+    const email = payload.email;
 
     const existing = await this.usersService.findOneByEmail(email);
     if (existing) throw new ConflictException('El email ya esta registrado');
+
+    const countryIso = (dto.country ?? '').trim().toUpperCase();
+    if (!countryIso) throw new BadRequestException('El pais es obligatorio');
+    const { billingRegion, preferredCurrency } = deriveBillingFields(countryIso);
 
     const requestedReferralCode = dto.referralCode?.trim();
     if (requestedReferralCode) {
@@ -186,13 +195,9 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     const newUser = await this.usersService.create({
-      phoneNumber: payload.sub,
-      phoneDialCode: payload.phoneDialCode,
-      phoneNationalNumber: payload.phoneNationalNumber,
-      phoneCountryIso: payload.phoneCountryIso,
-      phoneCountryName: payload.phoneCountryName,
-      billingRegion: payload.billingRegion,
-      preferredCurrency: payload.preferredCurrency,
+      country: countryIso,
+      billingRegion,
+      preferredCurrency,
       email,
       firstName: dto.firstName,
       lastName: dto.lastName,
@@ -218,40 +223,43 @@ export class AuthService {
       tituloProfesional?: Express.Multer.File;
     },
   ) {
-    const payload = this.verifyPhoneToken(dto.tempToken);
+    const payload = this.verifyEmailToken(dto.tempToken);
 
     if (dto.password !== dto.confirmPassword) {
       throw new BadRequestException('Las contrasenas no coinciden');
     }
 
-    const [existingPhone, existingCedula, existingUsername, existingEmail] = await Promise.all([
-      this.prisma.user.findUnique({ where: { phoneNumber: payload.sub } }),
+    const email = payload.email;
+    const countryIso = (dto.country ?? '').trim().toUpperCase();
+    if (!countryIso) throw new BadRequestException('El pais es obligatorio');
+    const { billingRegion, preferredCurrency } = deriveBillingFields(countryIso);
+
+    const [existingUser, existingCedula, existingUsername] = await Promise.all([
+      this.usersService.findOneByEmail(email),
       this.prisma.professionalProfile.findUnique({ where: { cedula: dto.cedula } }),
       this.prisma.professionalProfile.findUnique({ where: { username: dto.username } }),
-      dto.email ? this.usersService.findOneByEmail(dto.email.trim().toLowerCase()) : null,
     ]);
 
-    if (existingPhone) {
+    if (existingUser) {
       // Si ya es profesional pendiente de revisión, el registro se completó antes pero
       // el cliente no recibió la respuesta (network error). Devolvemos el token sin error.
       const isPendingProfessional =
-        PROFESSIONAL_ROLE === existingPhone.role ||
-        existingPhone.role === 'ANFITRIONA' as any;
+        PROFESSIONAL_ROLE === existingUser.role ||
+        existingUser.role === 'ANFITRIONA' as any;
 
       const existingProfile = isPendingProfessional
-        ? await this.prisma.professionalProfile.findUnique({ where: { userId: existingPhone.id } })
+        ? await this.prisma.professionalProfile.findUnique({ where: { userId: existingUser.id } })
         : null;
 
       if (existingProfile) {
-        const { password: _, ...userWithoutPass } = existingPhone;
+        const { password: _, ...userWithoutPass } = existingUser;
         return { ...this.generateTokenResponse(userWithoutPass), profile: existingProfile };
       }
 
-      throw new ConflictException('Este número de teléfono ya tiene una cuenta registrada.');
+      throw new ConflictException('Este correo ya tiene una cuenta registrada.');
     }
     if (existingCedula) throw new ConflictException('La cedula ya esta registrada.');
     if (existingUsername) throw new ConflictException('El nombre de usuario ya esta en uso.');
-    if (existingEmail) throw new ConflictException('El email ya esta registrado.');
 
     const requestedReferralCode = dto.referralCode?.trim();
     if (requestedReferralCode) {
@@ -259,7 +267,6 @@ export class AuthService {
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
-    const email = dto.email?.trim().toLowerCase();
     const referralCode = await createUniqueReferralCode(this.prisma, dto.firstName ?? dto.username);
 
     // Generate ID upfront so Cloudinary uploads can use it before any DB write
@@ -303,17 +310,12 @@ export class AuthService {
       const user = await tx.user.create({
         data: {
           id: uid,
-          phoneNumber: payload.sub,
-          phoneDialCode: payload.phoneDialCode,
-          phoneNationalNumber: payload.phoneNationalNumber,
-          phoneCountryIso: payload.phoneCountryIso,
-          phoneCountryName: payload.phoneCountryName,
-          billingRegion: payload.billingRegion,
-          preferredCurrency: payload.preferredCurrency,
-          email: email ?? null,
+          billingRegion,
+          preferredCurrency,
+          email,
           firstName: dto.firstName,
           lastName: dto.lastName,
-          country: dto.country ?? null,
+          country: countryIso,
           password: hashedPassword,
           role: PROFESSIONAL_ROLE,
           referralCode,
@@ -373,7 +375,7 @@ export class AuthService {
     return this.generateTokenResponse(user);
   }
 
-  async loginWithGoogle(idToken: string) {
+  async loginWithGoogle(idToken: string, country?: string) {
     const tokenInfo = await this.verifyGoogleIdToken(idToken);
 
     const normalizedEmail = tokenInfo.email?.trim().toLowerCase();
@@ -388,12 +390,19 @@ export class AuthService {
     let user: User | null = await this.usersService.findOneByEmail(normalizedEmail);
 
     if (!user) {
-      // Email no encontrado — se crea una cuenta nueva para ese email
+      // Email no encontrado — se crea una cuenta nueva para ese email.
+      // Google ya verifico el correo, asi que no hace falta OTP. El pais elegido
+      // en el registro define la region/moneda (igual que en el flujo por correo).
       const [firstName, lastName] = this.extractNames(tokenInfo);
+      const countryIso = (country ?? '').trim().toUpperCase();
+      const billing = countryIso ? deriveBillingFields(countryIso) : null;
       user = await this.usersService.create({
         email: normalizedEmail,
         firstName: firstName ?? undefined,
         lastName: lastName ?? undefined,
+        country: countryIso || undefined,
+        billingRegion: billing?.billingRegion,
+        preferredCurrency: billing?.preferredCurrency,
         isProfileComplete: true,
       });
     }
@@ -523,37 +532,21 @@ export class AuthService {
     };
   }
 
-  private verifyPhoneToken(token: string): PhoneVerifiedTokenPayload {
-    let payload: PhoneVerifiedTokenPayload;
+  private verifyEmailToken(token: string): EmailVerifiedTokenPayload {
+    let payload: EmailVerifiedTokenPayload;
     try {
       payload = this.jwtService.verify(token);
     } catch {
       throw new BadRequestException('Token invalido o expirado');
     }
 
-    if (payload.type !== 'phone_verified' || !payload.sub) {
-      throw new BadRequestException('Token invalido');
-    }
-
-    const normalized = normalizePhoneRegistrationInput({
-      phoneDialCode: payload.phoneDialCode,
-      phoneNationalNumber: payload.phoneNationalNumber,
-      phoneCountryIso: payload.phoneCountryIso,
-      phoneCountryName: payload.phoneCountryName,
-    });
-
-    if (normalized.phoneNumber !== payload.sub) {
+    if (payload.type !== 'email_verified' || !payload.sub || !payload.email) {
       throw new BadRequestException('Token invalido');
     }
 
     return {
       ...payload,
-      phoneDialCode: normalized.phoneDialCode,
-      phoneNationalNumber: normalized.phoneNationalNumber,
-      phoneCountryIso: normalized.phoneCountryIso,
-      phoneCountryName: normalized.phoneCountryName,
-      billingRegion: normalized.billingRegion,
-      preferredCurrency: normalized.preferredCurrency,
+      email: this.normalizeEmail(payload.email),
     };
   }
 
@@ -580,6 +573,9 @@ export class AuthService {
 
     const allowedAudiences = this.getAllowedGoogleAudiences();
     if (allowedAudiences.length === 0) {
+      this.logger.error(
+        'Google Login sin configurar: define GOOGLE_MOBILE_WEB_CLIENT_ID y/o GOOGLE_MOBILE_IOS_CLIENT_ID en el backend.',
+      );
       throw new UnauthorizedException(
         'Google Login no esta configurado en el servidor',
       );
@@ -588,6 +584,9 @@ export class AuthService {
     if (
       (!tokenInfo.aud || !allowedAudiences.includes(tokenInfo.aud))
     ) {
+      this.logger.warn(
+        `Google aud no autorizado. aud recibido="${tokenInfo.aud ?? '(vacio)'}" | permitidos=[${allowedAudiences.join(', ')}]`,
+      );
       throw new UnauthorizedException('Google Client ID no autorizado');
     }
 
@@ -599,13 +598,6 @@ export class AuthService {
       process.env.GOOGLE_MOBILE_WEB_CLIENT_ID,
       process.env.GOOGLE_MOBILE_IOS_CLIENT_ID,
     ].filter((v): v is string => Boolean(v?.trim()));
-  }
-
-  private buildGooglePhoneNumber(googleSub?: string) {
-    if (!googleSub) {
-      throw new UnauthorizedException('No se pudo identificar la cuenta de Google');
-    }
-    return `google_${googleSub}`;
   }
 
   private extractNames(tokenInfo: GoogleTokenInfo): [string | undefined, string | undefined] {

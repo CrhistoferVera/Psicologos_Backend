@@ -99,15 +99,15 @@ export class BanecoQrService {
   private canUseBaneco(user: {
     billingRegion: string | null;
     preferredCurrency: string | null;
-    phoneCountryIso: string | null;
+    country: string | null;
   }) {
     const billingRegion = (user.billingRegion ?? '').trim().toUpperCase();
     const preferredCurrency = (user.preferredCurrency ?? '').trim().toUpperCase();
-    const phoneCountryIso = (user.phoneCountryIso ?? '').trim().toUpperCase();
+    const country = (user.country ?? '').trim().toUpperCase();
     return (
       billingRegion === BILLING_REGION_BOLIVIA ||
       preferredCurrency === CURRENCY_BOB ||
-      phoneCountryIso === 'BO'
+      country === 'BO'
     );
   }
 
@@ -117,7 +117,7 @@ export class BanecoQrService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { billingRegion: true, preferredCurrency: true, phoneCountryIso: true },
+      select: { billingRegion: true, preferredCurrency: true, country: true },
     });
     if (!user) {
       throw new NotFoundException('Usuario no encontrado.');
@@ -844,7 +844,7 @@ export class BanecoQrService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: clientUserId },
-      select: { billingRegion: true, preferredCurrency: true, phoneCountryIso: true },
+      select: { billingRegion: true, preferredCurrency: true, country: true },
     });
     if (!user) throw new NotFoundException('Usuario no encontrado.');
     if (!this.canUseBaneco(user)) {

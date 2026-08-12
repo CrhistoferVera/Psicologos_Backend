@@ -67,15 +67,15 @@ export class StripeService {
   private canUseStripe(user: {
     billingRegion: string | null;
     preferredCurrency: string | null;
-    phoneCountryIso: string | null;
+    country: string | null;
   }) {
     const billingRegion = (user.billingRegion ?? '').trim().toUpperCase();
     const preferredCurrency = (user.preferredCurrency ?? '').trim().toUpperCase();
-    const phoneCountryIso = (user.phoneCountryIso ?? '').trim().toUpperCase();
+    const country = (user.country ?? '').trim().toUpperCase();
     return (
       billingRegion === BILLING_REGION_INTERNATIONAL ||
       preferredCurrency === CURRENCY_USD ||
-      (phoneCountryIso.length > 0 && phoneCountryIso !== 'BO')
+      (country.length > 0 && country !== 'BO')
     );
   }
 
@@ -117,7 +117,7 @@ export class StripeService {
   async createPaymentIntent(userId: string, packageId: string, saveCard = false) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { billingRegion: true, preferredCurrency: true, phoneCountryIso: true },
+      select: { billingRegion: true, preferredCurrency: true, country: true },
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
     if (!this.canUseStripe(user)) {
@@ -206,7 +206,7 @@ export class StripeService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: payload.clientUserId },
-      select: { billingRegion: true, preferredCurrency: true, phoneCountryIso: true },
+      select: { billingRegion: true, preferredCurrency: true, country: true },
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
     if (!this.canUseStripe(user)) {
@@ -780,7 +780,7 @@ export class StripeService {
   async createPaymentIntentForSession(clientUserId: string, session: { id: string; title: string; priceInBs: any; priceInUsd: any; professionalUserId: string }) {
     const user = await this.prisma.user.findUnique({
       where: { id: clientUserId },
-      select: { billingRegion: true, preferredCurrency: true, phoneCountryIso: true },
+      select: { billingRegion: true, preferredCurrency: true, country: true },
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
     if (!this.canUseStripe(user)) {

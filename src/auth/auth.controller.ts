@@ -87,7 +87,13 @@ export class AuthController {
   @Post('google')
   @HttpCode(HttpStatus.OK)
   async loginWithGoogle(@Body() dto: GoogleLoginDto) {
-    return this.authService.loginWithGoogle(dto.idToken);
+    return this.authService.loginWithGoogle(dto.idToken, dto.country);
+  }
+
+  @Post('google/verify')
+  @HttpCode(HttpStatus.OK)
+  async verifyGoogleForRegistration(@Body() dto: GoogleLoginDto) {
+    return this.authService.verifyGoogleForRegistration(dto.idToken);
   }
 
   @Post('forgot-password')

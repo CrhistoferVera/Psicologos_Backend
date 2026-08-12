@@ -143,10 +143,6 @@ export class UsersService {
     return 'Transaccion general';
   }
 
-  async findOneByPhone(phoneNumber: string): Promise<User | null> {
-    return this.prisma.user.findUnique({ where: { phoneNumber } });
-  }
-
   async findOneByEmail(email: string): Promise<User | null> {
     return this.prisma.user.findFirst({
       where: { email: { equals: email, mode: 'insensitive' } },

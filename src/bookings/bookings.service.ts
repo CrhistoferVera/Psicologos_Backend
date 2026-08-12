@@ -860,7 +860,7 @@ export class BookingsService {
     };
   }
 
-  private normalizeBookingRegion(user: { billingRegion: string | null; phoneCountryIso: string | null }) {
+  private normalizeBookingRegion(user: { billingRegion: string | null; country: string | null }) {
     const billingRegion = (user.billingRegion ?? '').trim().toUpperCase();
 
     if (billingRegion === BILLING_REGION_BOLIVIA) {
@@ -871,8 +871,8 @@ export class BookingsService {
       return { currency: CURRENCY_USD, paymentMethod: BookingPaymentMethod.WALLET };
     }
 
-    // billingRegion es null: derivar desde el código de país del teléfono
-    const derived = deriveBillingFields(user.phoneCountryIso ?? '');
+    // billingRegion es null: derivar desde el país seleccionado por el usuario
+    const derived = deriveBillingFields(user.country ?? '');
     if (derived.billingRegion === BILLING_REGION_BOLIVIA) {
       return { currency: CURRENCY_BOB, paymentMethod: BookingPaymentMethod.WALLET };
     }
@@ -1537,7 +1537,7 @@ export class BookingsService {
 
     const client = await this.prisma.user.findUnique({
       where: { id: clientId },
-      select: { id: true, role: true, billingRegion: true, phoneCountryIso: true, firstName: true, lastName: true },
+      select: { id: true, role: true, billingRegion: true, country: true, firstName: true, lastName: true },
     });
 
     if (!client) throw new NotFoundException('Cliente no encontrado.');
@@ -2556,7 +2556,7 @@ export class BookingsService {
 
     const client = await this.prisma.user.findUnique({
       where: { id: clientId },
-      select: { id: true, role: true, billingRegion: true, phoneCountryIso: true, firstName: true, lastName: true },
+      select: { id: true, role: true, billingRegion: true, country: true, firstName: true, lastName: true },
     });
     if (!client) throw new NotFoundException('Cliente no encontrado.');
     if (client.role !== UserRole.USER) {
@@ -3144,7 +3144,7 @@ export class BookingsService {
 
     const client = await this.prisma.user.findUnique({
       where: { id: clientId },
-      select: { id: true, role: true, billingRegion: true, phoneCountryIso: true },
+      select: { id: true, role: true, billingRegion: true, country: true },
     });
     if (!client) throw new NotFoundException('Cliente no encontrado.');
     if (client.role !== UserRole.USER) throw new ForbiddenException('Solo clientes pueden crear reservas.');
