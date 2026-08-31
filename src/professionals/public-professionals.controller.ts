@@ -22,6 +22,11 @@ export class PublicProfessionalsController {
     required: false,
     description: 'Filtro por especialidad (id, slug o texto de nombre).',
   })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description: 'Busca por nombre, apellido, username o especialidad del profesional.',
+  })
   @ApiResponse({
     status: 200,
     description: 'Lista de profesionales',
@@ -31,12 +36,19 @@ export class PublicProfessionalsController {
     @Query('page') page = '1',
     @Query('limit') limit = '10',
     @Query('specialty') specialty = '',
+    @Query('search') search = '',
     @Request() req: any,
   ): Promise<ProfessionalPublicListResponseDto> {
     const currentUserId: string | undefined =
       req.user?.id ?? req.user?.userId ?? req.user?.sub;
 
-    return this.service.findAllPublic(Number(page), Number(limit), currentUserId, specialty);
+    return this.service.findAllPublic(
+      Number(page),
+      Number(limit),
+      currentUserId,
+      specialty,
+      search,
+    );
   }
 
   @Get(':id')

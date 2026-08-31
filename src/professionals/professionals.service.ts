@@ -145,8 +145,10 @@ export class ProfessionalsService {
     limit = 10,
     currentUserId?: string,
     specialty?: string,
+    search?: string,
   ): Promise<ProfessionalPublicListResponseDto> {
     const specialtyFilter = this.buildSpecialtyFilter(specialty);
+    const searchTerm = search?.trim() ?? '';
 
     let countryFilter: string | null = null;
     if (currentUserId) {
@@ -178,6 +180,29 @@ export class ProfessionalsService {
                 },
               },
             },
+          }
+        : {}),
+      ...(searchTerm
+        ? {
+            OR: [
+              { firstName: { contains: searchTerm, mode: Prisma.QueryMode.insensitive } },
+              { lastName: { contains: searchTerm, mode: Prisma.QueryMode.insensitive } },
+              {
+                professionalProfile: {
+                  is: { username: { contains: searchTerm, mode: Prisma.QueryMode.insensitive } },
+                },
+              },
+              {
+                professionalSpecialties: {
+                  some: {
+                    specialty: {
+                      isActive: true,
+                      name: { contains: searchTerm, mode: Prisma.QueryMode.insensitive },
+                    },
+                  },
+                },
+              },
+            ],
           }
         : {}),
     };
