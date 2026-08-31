@@ -1,17 +1,18 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, TransactionType, User, UserRole } from '@prisma/client';
+import { BookingStatus, Prisma, TransactionType, User, UserRole, WithdrawalStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { createUniqueReferralCode } from '../referrals/utils/referral-code.util';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async create(data: CreateUserDto): Promise<User> {
     try {
@@ -280,5 +281,69 @@ export class UsersService {
     } catch {
       throw new InternalServerErrorException('Error al obtener metodos de pago');
     }
+  }
+
+  // METODO PARA ELIMINAR UN USUARIO (SOFT DELETE)
+  async deleteUser(userId: string): Promise<void> {
+    const user = await this.prisma.user.findUnique(
+      {
+        where: { id: userId},
+      }
+    );
+
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    if(user.role !== UserRole.USER){
+      throw new BadRequestException('Solo se puede eliminar usuario con rol USER');
+    }
+
+    const tieneBookingActivo = await this.prisma.booking.findFirst({
+      where: {
+        OR: [{ clientId: userId }, { professionalId: userId }],
+        status: { in: [BookingStatus.CONFIRMED, BookingStatus.PENDING_PAYMENT] },
+      },
+    });
+
+    if (tieneBookingActivo) {
+      throw new BadRequestException('No se puede eliminar un usuario con bookings activos');
+    }
+
+    const tieneRetiroPendiente = await this.prisma.withdrawalRequest.findFirst({
+      where: {
+        wallet: {userId: userId},
+        status: WithdrawalStatus.PENDING,
+      },
+    });
+
+    if (tieneRetiroPendiente) {
+      throw new BadRequestException('No se puede eliminar un usuario con retiro pendiente');
+    }
+
+    await this.prisma.user.delete({
+      where: { id: userId },
+    })
+  }
+
+  // METODO PARA ELIMINAR SIN CONSULTAR QUE COSAS TIENE EL USUARIO
+  async forceDeleteUser(userId: string): Promise<void> {
+    const user = await this.prisma.user.findUnique(
+      {
+        where: { id: userId},
+      }
+    );
+
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    if (user.role !== UserRole.USER) {
+      throw new BadRequestException('Solo se puede eliminar usuario con rol USER');
+    }
+
+    await this.prisma.user.delete({
+      where: { id: userId },
+    })
   }
 }

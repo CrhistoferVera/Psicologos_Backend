@@ -8,7 +8,9 @@ import {
   UseGuards,
   Body,
   BadRequestException,
+  ForbiddenException,
   Patch,
+  Delete,
   UploadedFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -26,6 +28,8 @@ import * as bcrypt from 'bcrypt';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { deriveBillingFields } from '../common/phone-metadata.util';
+import { RolesGuard } from 'src/auth/guards/roles.guard';
+import { Roles } from 'src/auth/decorators/roles.decorator';
 
 interface JwtUser {
   userId: string;
@@ -190,6 +194,34 @@ export class UsersController {
       message: 'Numero de telefono actualizado correctamente',
       phoneNumber: updated.phoneNumber,
     };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Delete('delete-user/:id')
+  async deleteUserById(
+    @CurrentUser() admin: JwtUser,
+    @Param('id') id: string,
+  ) {
+    if (id === admin.userId) {
+      throw new ForbiddenException('No puedes eliminar tu propia cuenta');
+    }
+    await this.usersService.deleteUser(id);
+    return { success: true, message: 'Usuario eliminado correctamente' };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Delete('force-delete/:id')
+  async forceDeleteUser(
+    @CurrentUser() admin: JwtUser,
+    @Param('id') id: string,
+  ) {
+    if (id === admin.userId) {
+      throw new ForbiddenException('No puedes eliminar tu propia cuenta');
+    }
+    await this.usersService.forceDeleteUser(id);
+    return { success: true, message: 'Usuario eliminado correctamente' };
   }
 
   @UseGuards(JwtAuthGuard)
