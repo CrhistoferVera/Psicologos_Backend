@@ -623,4 +623,35 @@ export class CloudinaryService {
       throw new InternalServerErrorException('Error al eliminar la imagen de galería de Cloudinary.');
     }
   }
+
+  async uploadEnvironmentMedia(params: {
+    file: Express.Multer.File;
+    userId: string;
+  }): Promise<{ secureUrl: string; publicId: string; resourceType: 'image' | 'video' }> {
+    const { file, userId } = params;
+
+    const isImage = file.mimetype.startsWith('image/');
+    const isVideo = file.mimetype.startsWith('video/');
+
+    if (!isImage && !isVideo) {
+      throw new BadRequestException('Formato no permitido. Solo imágenes o videos.');
+    }
+
+    const resourceType = isImage ? 'image' : 'video';
+    const folder = `psicologos/professionals/${userId}/environments`;
+    const publicId = `env_${Date.now()}`;
+
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder, public_id: publicId, resource_type: resourceType },
+        (error, result) => {
+          if (error || !result?.secure_url) {
+            return reject(new InternalServerErrorException('Error al subir media de ambiente a Cloudinary.'));
+          }
+          resolve({ secureUrl: result.secure_url, publicId: result.public_id, resourceType });
+        },
+      );
+      uploadStream.end(file.buffer);
+    });
+  }
 }

@@ -63,6 +63,24 @@ model User {
   @@map("users")
 }
 
+model AcademyBackground {
+  id                  String    @id @default(uuid())
+  professionalId      String
+  titulo              String
+  institution         String
+  startDate           DateTime?
+  endDate             DateTime?
+  diplomaUrl          String?
+  diplomaUrl_publicId String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@index([professionalId])
+  @@map("academy_backgrounds")
+}
+
 model UserProfile {
   id             String   @id @default(uuid())
   userId         String   @unique
@@ -128,7 +146,7 @@ model ProfessionalProfile {
   availability   Json?
   coverPublicId  String?
   coverUrl       String?
-  languages      String[] @default([])
+  languages      String[]                 @default([])
 
   // KYC
   kycVideoUrl               String?
@@ -148,6 +166,8 @@ model ProfessionalProfile {
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   bankAccounts  BankAccount[]
   servicePrices ServicePrice[]
+  academyBackgrounds AcademyBackground[]
+  environments Environments[]
 
   @@map("professional_profiles")
 }
@@ -163,7 +183,6 @@ model Wallet {
   isBlocked          Boolean  @default(false)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
-
 
   user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions       Transaction[]
@@ -211,8 +230,8 @@ model RefundRequest {
   requestedAt           DateTime     @default(now())
   resolvedAt            DateTime?
 
-  booking            Booking            @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  client             User               @relation("ClientRefundRequests", fields: [clientId], references: [id], onDelete: Cascade)
+  booking             Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  client              User                @relation("ClientRefundRequests", fields: [clientId], references: [id], onDelete: Cascade)
   clientPayoutAccount ClientPayoutAccount @relation(fields: [clientPayoutAccountId], references: [id], onDelete: Restrict)
 
   @@index([clientId])
@@ -747,8 +766,24 @@ model SystemConfig {
   earningLockMinutes                Int      @default(1440)
   createdAt                         DateTime @default(now())
   updatedAt                         DateTime @default(now()) @updatedAt
+  limitAddAcademyBackgrounds                Int      @default(5)
 
   @@map("system_config")
+}
+
+model Environments {
+  id String @id @default(uuid())
+  professionalId String
+  ImageUrl String
+  Image_publicId String
+  resourceType String @default("image")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  
+  @@index([professionalId])
+  @@map("environments")
 }
 
 model BookingReview {

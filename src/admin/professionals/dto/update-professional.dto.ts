@@ -10,7 +10,7 @@ export class UpdateProfessionalDto {
     })
     @IsBoolean({ message: 'El estado debe ser un valor booleano (true o false)' })
     @IsNotEmpty({ message: 'El campo isActive es obligatorio para esta operacion' })
-    isActive: boolean;
+    isActive!: boolean;
 
     @ApiPropertyOptional({ enum: ProfessionalReviewStatus, description: 'Estado de revision profesional' })
     @IsOptional()
@@ -24,15 +24,15 @@ export class UpdateProfessionalDto {
 }
 
 export class UpdateKycDocDto {
-  @ApiProperty({ example: 'idDocUrl', description: 'Campo a actualizar', enum: ['idDocUrl', 'kycVideoUrl', 'matriculaUrl', 'tituloProfesionalUrl'] })
-  @IsString()
-  @IsIn(['idDocUrl', 'kycVideoUrl', 'matriculaUrl', 'tituloProfesionalUrl'])
-  field!: 'idDocUrl' | 'kycVideoUrl' | 'matriculaUrl' | 'tituloProfesionalUrl';
+    @ApiProperty({ example: 'idDocUrl', description: 'Campo a actualizar', enum: ['idDocUrl', 'kycVideoUrl', 'matriculaUrl', 'tituloProfesionalUrl'] })
+    @IsString()
+    @IsIn(['idDocUrl', 'kycVideoUrl', 'matriculaUrl', 'tituloProfesionalUrl'])
+    field!: 'idDocUrl' | 'kycVideoUrl' | 'matriculaUrl' | 'tituloProfesionalUrl';
 
-  @ApiProperty({ example: 'https://res.cloudinary.com/...', description: 'URL del documento' })
-  @IsString()
-  @IsUrl()
-  url!: string;
+    @ApiProperty({ example: 'https://res.cloudinary.com/...', description: 'URL del documento' })
+    @IsString()
+    @IsUrl()
+    url!: string;
 }
 
 export class EditProfessionalDto {

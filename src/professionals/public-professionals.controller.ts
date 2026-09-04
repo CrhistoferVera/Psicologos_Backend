@@ -4,11 +4,15 @@ import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { ProfessionalsService } from './professionals.service';
 import { ProfessionalPublicListResponseDto } from './dto/professional-public-list.dto';
 import { ProfessionalPublicDetailDto } from './dto/professional-public-detail.dto';
+import { ProfessionalEnvironmentService } from './professional.environment.service';
 
 @ApiTags('Professionals - Public')
 @Controller('professionals/public')
 export class PublicProfessionalsController {
-  constructor(private readonly service: ProfessionalsService) {}
+  constructor(
+    private readonly service: ProfessionalsService,
+    private readonly environmentService: ProfessionalEnvironmentService,
+  ) {}
 
   @Get()
   @UseGuards(OptionalJwtAuthGuard)
@@ -49,6 +53,11 @@ export class PublicProfessionalsController {
       specialty,
       search,
     );
+  }
+
+  @Get(':id/environments')
+  getEnvironments(@Param('id', ParseUUIDPipe) id: string) {
+    return this.environmentService.getEnvironmentsByProfessionalId(id);
   }
 
   @Get(':id')

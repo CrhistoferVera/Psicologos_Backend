@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -20,12 +21,22 @@ import { ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+
+interface JwtUser {
+  userId: string;
+  role: string;
+}
 import { ProfessionalsService } from './professionals.service';
 import { CreateProfessionalDto } from './dto/create-professional.dto';
 import { UpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
 import { PROFESSIONAL_ROLES } from '../common/professional-role';
 import { SpecialtyService } from '../admin/specialty/specialty.service';
 import { AssignProfessionalSpecialtiesDto } from '../admin/specialty/dto/assign-professional-specialties.dto';
+import { ProfessionalPerfilService } from './professional.perfil.service';
+import { CreateAcademyBackgroundDto } from './dto/createAcademyBackground-professional.dto';
+import { UpdateAcademyBackgroundDto } from './dto/updateAcademyBackground-professional.dto';
+import { ProfessionalEnvironmentService } from './professional.environment.service';
 
 @ApiTags('Professionals - Private')
 @Controller('professionals')
@@ -34,6 +45,8 @@ export class ProfessionalsController {
   constructor(
     private readonly service: ProfessionalsService,
     private readonly specialtyService: SpecialtyService,
+    private readonly perfilService: ProfessionalPerfilService,
+    private readonly environmentsService: ProfessionalEnvironmentService,
   ) {}
 
   @Post()
@@ -123,6 +136,69 @@ export class ProfessionalsController {
   ) {
     const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
     return this.service.uploadEducationPhoto(userId, file);
+  }
+
+  @Post('me/academy-background')
+  @Roles(UserRole.PROFESSIONAL)
+  addAcademicBackground(
+    @CurrentUser() user: JwtUser,
+    @Body() dto: CreateAcademyBackgroundDto,
+  ) {
+    return this.perfilService.addAcademicBackground(user.userId, dto);
+  }
+
+  @Patch('me/academy-background/:id')
+  @Roles(UserRole.PROFESSIONAL)
+  updateAcademicBackground(
+    @CurrentUser() user: JwtUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateAcademyBackgroundDto,
+  ) {
+    return this.perfilService.updateAcademyBackground(user.userId, id, dto);
+  }
+
+  @Delete('me/academy-background/:id')
+  @Roles(UserRole.PROFESSIONAL)
+  deleteAcademicBackground(
+    @CurrentUser() user: JwtUser,
+    @Param('id') id: string,
+  ) {
+    return this.perfilService.deleteAcademicBackground(user.userId, id);
+  }
+
+  @Get('me/academy-background')
+  @Roles(UserRole.PROFESSIONAL)
+  getAcademicBackgrounds(
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.perfilService.getAcademyBackgrounds(user.userId);
+  }
+
+
+
+  @Get('me/environments')
+  @Roles(...PROFESSIONAL_ROLES)
+  getEnvironments(@CurrentUser() user: JwtUser) {
+    return this.environmentsService.getEnvironments(user.userId);
+  }
+
+  @Post('me/environments')
+  @Roles(...PROFESSIONAL_ROLES)
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } }))
+  addEnvironment(
+    @CurrentUser() user: JwtUser,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.environmentsService.addEnvironment(user.userId, file);
+  }
+
+  @Delete('me/environments/:id')
+  @Roles(...PROFESSIONAL_ROLES)
+  deleteEnvironment(
+    @CurrentUser() user: JwtUser,
+    @Param('id') id: string,
+  ) {
+    return this.environmentsService.deleteEnvironment(user.userId, id);
   }
 
   @Get(':id')

@@ -3,10 +3,14 @@ import { AppModule } from './app.module';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import * as bodyParser from 'body-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
   const logger = new Logger('Bootstrap');
+
+  app.use(bodyParser.json({ limit: '200mb' }));
+  app.use(bodyParser.urlencoded({ limit: '200mb', extended: true }));
   // Obtener el ConfigService
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') ?? 4000;
