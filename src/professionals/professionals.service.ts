@@ -1,13 +1,16 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
+import { FaceMatchService } from '../kyc/face-match.service';
+import { UpgradeToProfessionalDto } from './dto/upgrade-to-professional.dto';
 import { CreateProfessionalDto } from './dto/create-professional.dto';
 import { UpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
 import {
@@ -23,6 +26,7 @@ export class ProfessionalsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
+    private readonly faceMatch: FaceMatchService,
   ) {}
 
   async create(dto: CreateProfessionalDto, idDocFile?: Express.Multer.File) {
@@ -583,6 +587,113 @@ export class ProfessionalsService {
         { slug: { equals: value.toLowerCase(), mode: 'insensitive' } },
         { name: { contains: value, mode: 'insensitive' } },
       ],
+    };
+  }
+
+  // Convierte una cuenta EXISTENTE en profesional (estilo inDrive: "activar modo
+  // profesional"). Crea el ProfessionalProfile en PENDING sobre la misma cuenta,
+  // sin crear un usuario nuevo y sin tocar su saldo/datos de cliente. Mantiene
+  // isActive para no perder el acceso como cliente mientras se revisa el KYC.
+  async upgradeToProfessional(
+    userId: string,
+    dto: UpgradeToProfessionalDto,
+    files?: {
+      idDoc?: Express.Multer.File;
+      kycVideo?: Express.Multer.File;
+      kycSelfie?: Express.Multer.File;
+      matricula?: Express.Multer.File;
+      tituloProfesional?: Express.Multer.File;
+    },
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, professionalProfile: { select: { id: true } } },
+    });
+
+    if (!user) throw new NotFoundException('Usuario no encontrado.');
+    if (user.professionalProfile) {
+      throw new ConflictException('Esta cuenta ya tiene un perfil profesional.');
+    }
+
+    const [existingCedula, existingUsername] = await Promise.all([
+      this.prisma.professionalProfile.findUnique({ where: { cedula: dto.cedula } }),
+      this.prisma.professionalProfile.findUnique({ where: { username: dto.username } }),
+    ]);
+    if (existingCedula) throw new ConflictException('La cedula ya esta registrada.');
+    if (existingUsername) throw new ConflictException('El nombre de usuario ya esta en uso.');
+
+    // Se suben los archivos KYC antes de escribir en la BD; si algo falla, no queda
+    // un perfil a medias.
+    const [idDocResult, kycVideoResult, kycSelfieResult, matriculaResult, tituloResult] =
+      await Promise.all([
+        files?.idDoc
+          ? this.cloudinary.uploadProfessionalIdDoc({ file: files.idDoc, userId })
+          : null,
+        files?.kycVideo
+          ? this.cloudinary.uploadKycFile({ file: files.kycVideo, userId, folder: 'kyc/video', publicIdPrefix: 'kyc_video' })
+          : null,
+        files?.kycSelfie
+          ? this.cloudinary.uploadKycFile({ file: files.kycSelfie, userId, folder: 'kyc/selfie', publicIdPrefix: 'kyc_selfie' })
+          : null,
+        files?.matricula
+          ? this.cloudinary.uploadKycFile({ file: files.matricula, userId, folder: 'kyc/matricula', publicIdPrefix: 'matricula' })
+          : null,
+        files?.tituloProfesional
+          ? this.cloudinary.uploadKycFile({ file: files.tituloProfesional, userId, folder: 'kyc/titulo', publicIdPrefix: 'titulo' })
+          : null,
+      ]);
+
+    // Comparación facial automática: selfie vs documento de identidad.
+    let faceMatchScore: number | null = null;
+    let kycFaceMatchStatus: 'PENDING' | 'PASSED' | 'FAILED' | 'SKIPPED' = 'SKIPPED';
+
+    if (files?.kycSelfie && files?.idDoc?.mimetype.startsWith('image/')) {
+      const result = await this.faceMatch.compareFaces(
+        files.kycSelfie.buffer,
+        files.idDoc.buffer,
+      );
+      faceMatchScore = result.score;
+      kycFaceMatchStatus = result.status;
+    }
+
+    const profile = await this.prisma.$transaction(async (tx) => {
+      const prof = await tx.professionalProfile.create({
+        data: {
+          userId,
+          dateOfBirth: new Date(dto.dateOfBirth),
+          cedula: dto.cedula,
+          username: dto.username,
+          bio: dto.bio?.trim() || null,
+          idDocUrl: idDocResult?.secureUrl ?? null,
+          idDocPublicId: idDocResult?.publicId ?? null,
+          kycVideoUrl: kycVideoResult?.secureUrl ?? null,
+          kycVideoPublicId: kycVideoResult?.publicId ?? null,
+          kycSelfieUrl: kycSelfieResult?.secureUrl ?? null,
+          kycSelfiePublicId: kycSelfieResult?.publicId ?? null,
+          matriculaUrl: matriculaResult?.secureUrl ?? null,
+          matriculaPublicId: matriculaResult?.publicId ?? null,
+          tituloProfesionalUrl: tituloResult?.secureUrl ?? null,
+          tituloProfesionalPublicId: tituloResult?.publicId ?? null,
+          kycFaceMatchScore: faceMatchScore,
+          kycFaceMatchStatus,
+          reviewStatus: 'PENDING',
+        },
+      });
+
+      // La cuenta pasa a rol profesional y arranca en modo profesional (pendiente
+      // de revisión). Conserva su capacidad de cliente (isClient = no-admin).
+      await tx.user.update({
+        where: { id: userId },
+        data: { role: PROFESSIONAL_ROLE, activeMode: UserRole.PROFESSIONAL },
+      });
+
+      return prof;
+    });
+
+    return {
+      message: 'Solicitud enviada. Tu perfil profesional está en revisión.',
+      activeMode: UserRole.PROFESSIONAL,
+      profile,
     };
   }
 }

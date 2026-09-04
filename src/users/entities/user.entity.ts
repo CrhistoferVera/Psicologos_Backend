@@ -13,6 +13,7 @@ export class UserEntity implements User {
   lastName: string | null;
   isProfileComplete: boolean;
   role: UserRole;
+  activeMode: UserRole;
   createdAt: Date;
   updatedAt: Date;
   lastLogin: Date | null;

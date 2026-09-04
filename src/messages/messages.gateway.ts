@@ -238,7 +238,10 @@ export class MessagesGateway implements OnGatewayDisconnect {
       return;
     }
 
-    if (socketUser.role !== UserRole.USER) {
+    // El lado "cliente" inicia la llamada. Un profesional también puede ser cliente de
+    // otro profesional, así que solo se excluye a los admin; que el llamante sea el
+    // cliente del booking activo se valida más abajo con assertActiveBookingAccess.
+    if (socketUser.role === UserRole.ADMIN) {
       client.emit('call_error', {
         message: 'Solo el cliente puede iniciar la llamada durante la sesion activa.',
       });

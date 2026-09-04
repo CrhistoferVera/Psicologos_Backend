@@ -19,25 +19,19 @@ import { UsersService } from './users.service';
 import { UserEntity } from './entities/user.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { UserRole } from '@prisma/client';
 import { EditPhoneNumberDto } from './dto/edit-phone-number.dto';
 import { EditPasswordDto } from './dto/edit-password.dto';
 import { UpdateFcmTokenDto } from './dto/update-fcm-token.dto';
 import { UpdateMyProfileDto } from './dto/update-my-profile.dto';
+import { SwitchActiveModeDto } from './dto/switch-active-mode.dto';
 import * as bcrypt from 'bcrypt';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { deriveBillingFields } from '../common/phone-metadata.util';
-import { RolesGuard } from 'src/auth/guards/roles.guard';
-import { Roles } from 'src/auth/decorators/roles.decorator';
-
-interface JwtUser {
-  userId: string;
-  phoneNumber: string;
-  email: string | null;
-  role: UserRole;
-  isProfileComplete: boolean;
-}
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import type { JwtUser } from '../common/capabilities';
+import { UserRole } from '@prisma/client';
 
 @Controller('users')
 @UseInterceptors(ClassSerializerInterceptor)
@@ -92,6 +86,24 @@ export class UsersController {
     const profile = await this.usersService.getUserFullProfile(user.userId);
 
     return new UserEntity(profile);
+  }
+
+  // Contexto del toggle: modo activo + capacidades (decide si mostrar el switch).
+  @UseGuards(JwtAuthGuard)
+  @Get('me/mode')
+  async getMyMode(@CurrentUser() user: JwtUser) {
+    return this.usersService.getModeContext(user.userId);
+  }
+
+  // Cambia el modo del toggle (usuario <-> profesional). No re-emite token:
+  // el JwtStrategy lee el modo fresco de la BD en cada request.
+  @UseGuards(JwtAuthGuard)
+  @Patch('me/active-mode')
+  async switchActiveMode(
+    @CurrentUser() user: JwtUser,
+    @Body() body: SwitchActiveModeDto,
+  ) {
+    return this.usersService.switchActiveMode(user.userId, body.mode);
   }
 
   @UseGuards(JwtAuthGuard)

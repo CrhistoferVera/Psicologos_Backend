@@ -30,6 +30,7 @@ interface JwtUser {
 import { ProfessionalsService } from './professionals.service';
 import { CreateProfessionalDto } from './dto/create-professional.dto';
 import { UpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
+import { UpgradeToProfessionalDto } from './dto/upgrade-to-professional.dto';
 import { PROFESSIONAL_ROLES } from '../common/professional-role';
 import { SpecialtyService } from '../admin/specialty/specialty.service';
 import { AssignProfessionalSpecialtiesDto } from '../admin/specialty/dto/assign-professional-specialties.dto';
@@ -77,6 +78,43 @@ export class ProfessionalsController {
   getMyReviewStatus(@Request() req) {
     const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
     return this.service.getMyReviewStatus(userId);
+  }
+
+  // Convertir una cuenta existente en profesional (activar modo profesional).
+  // Sin @Roles: accesible a cualquier usuario autenticado que aún no sea profesional.
+  @Post('me/upgrade')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'idDoc', maxCount: 1 },
+        { name: 'kycVideo', maxCount: 1 },
+        { name: 'kycSelfie', maxCount: 1 },
+        { name: 'matricula', maxCount: 1 },
+        { name: 'tituloProfesional', maxCount: 1 },
+      ],
+      { storage: memoryStorage() },
+    ),
+  )
+  upgradeToProfessional(
+    @Request() req,
+    @Body() dto: UpgradeToProfessionalDto,
+    @UploadedFiles()
+    files?: {
+      idDoc?: Express.Multer.File[];
+      kycVideo?: Express.Multer.File[];
+      kycSelfie?: Express.Multer.File[];
+      matricula?: Express.Multer.File[];
+      tituloProfesional?: Express.Multer.File[];
+    },
+  ) {
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.service.upgradeToProfessional(userId, dto, {
+      idDoc: files?.idDoc?.[0],
+      kycVideo: files?.kycVideo?.[0],
+      kycSelfie: files?.kycSelfie?.[0],
+      matricula: files?.matricula?.[0],
+      tituloProfesional: files?.tituloProfesional?.[0],
+    });
   }
 
   @Patch('me/profile')

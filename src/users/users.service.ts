@@ -9,6 +9,7 @@ import { BookingStatus, Prisma, TransactionType, User, UserRole, WithdrawalStatu
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { createUniqueReferralCode } from '../referrals/utils/referral-code.util';
+import { computeCapabilities } from '../common/capabilities';
 
 @Injectable()
 export class UsersService {
@@ -345,5 +346,71 @@ export class UsersService {
     await this.prisma.user.delete({
       where: { id: userId },
     })
+  }
+
+  // Devuelve el modo activo + capacidades del usuario. Lo usa el frontend para
+  // decidir si mostrar el toggle (isProfessional) y qué modo pintar por defecto.
+  async getModeContext(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        role: true,
+        activeMode: true,
+        professionalProfile: { select: { reviewStatus: true } },
+      },
+    });
+
+    if (!user) throw new NotFoundException('Usuario no encontrado.');
+
+    const capabilities = computeCapabilities({
+      role: user.role,
+      hasProfessionalProfile: Boolean(user.professionalProfile),
+    });
+
+    return {
+      activeMode: user.activeMode,
+      capabilities,
+      // Estado de la verificación profesional (útil para mostrar "pendiente de revisión").
+      professionalReviewStatus: user.professionalProfile?.reviewStatus ?? null,
+    };
+  }
+
+  // Cambia el modo del toggle. Cambiar a PROFESSIONAL exige tener capacidad
+  // profesional (un ProfessionalProfile); si no, el frontend debe llevar al onboarding.
+  async switchActiveMode(userId: string, mode: 'USER' | 'PROFESSIONAL') {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        role: true,
+        activeMode: true,
+        professionalProfile: { select: { reviewStatus: true } },
+      },
+    });
+
+    if (!user) throw new NotFoundException('Usuario no encontrado.');
+
+    const capabilities = computeCapabilities({
+      role: user.role,
+      hasProfessionalProfile: Boolean(user.professionalProfile),
+    });
+
+    if (mode === UserRole.PROFESSIONAL && !capabilities.isProfessional) {
+      throw new BadRequestException(
+        'Aún no eres profesional. Completa tu registro como profesional para activar este modo.',
+      );
+    }
+
+    if (user.activeMode !== mode) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { activeMode: mode as UserRole },
+      });
+    }
+
+    return {
+      activeMode: mode,
+      capabilities,
+      professionalReviewStatus: user.professionalProfile?.reviewStatus ?? null,
+    };
   }
 }

@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateDepositRequestDto } from './dto/create-depositRequest.dto';
-import { DepositStatus, UserRole } from '@prisma/client';
+import { DepositStatus } from '@prisma/client';
 import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 
@@ -46,7 +46,8 @@ export class DepositsService {
     }
 
     const user = await this.prisma.user.findFirst({
-      where: { id: userId, role: UserRole.USER, isActive: true },
+      // Cualquier cuenta activa puede recargar (un profesional también compra como cliente).
+      where: { id: userId, isActive: true },
     });
 
     if (!user) {

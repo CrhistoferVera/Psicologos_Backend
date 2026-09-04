@@ -523,6 +523,7 @@ export class AuthService {
       phoneNumber: user.phoneNumber,
       email: user.email,
       role: user.role,
+      activeMode: user.activeMode,
       isProfileComplete: user.isProfileComplete,
     };
 

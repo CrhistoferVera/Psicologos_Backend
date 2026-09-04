@@ -83,11 +83,25 @@ export class ReferralsService {
         isActive: true,
         role: { not: UserRole.ADMIN },
       },
-      select: { id: true, firstName: true, lastName: true, referralCode: true, role: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        referralCode: true,
+        role: true,
+        professionalProfile: { select: { id: true } },
+      },
     });
 
     if (!referrer) throw new BadRequestException('Codigo de referido invalido.');
     return referrer;
+  }
+
+  // El "rol" que se congela en un referido se deriva de la capacidad profesional
+  // (tener ProfessionalProfile), no solo del enum role. Así una cuenta híbrida
+  // (usuario + profesional) se clasifica correctamente para el caso PRO_TO_*.
+  private referralRoleOf(hasProfessionalProfile: boolean): UserRole {
+    return hasProfessionalProfile ? UserRole.PROFESSIONAL : UserRole.USER;
   }
 
   async createReferralLink(referredUserId: string, rawCode: string) {
@@ -99,7 +113,7 @@ export class ReferralsService {
 
     const referred = await this.prisma.user.findUnique({
       where: { id: referredUserId },
-      select: { id: true, role: true },
+      select: { id: true, role: true, professionalProfile: { select: { id: true } } },
     });
 
     if (!referred) throw new NotFoundException('Usuario referido no encontrado.');
@@ -119,8 +133,8 @@ export class ReferralsService {
           codeUsed: referrer.referralCode as string,
           status: ReferralStatus.QUALIFIED,
           qualifiedAt: new Date(),
-          referrerRole: referrer.role,
-          referredRole: referred.role,
+          referrerRole: this.referralRoleOf(Boolean(referrer.professionalProfile)),
+          referredRole: this.referralRoleOf(Boolean(referred.professionalProfile)),
         },
         select: { id: true, status: true },
       });

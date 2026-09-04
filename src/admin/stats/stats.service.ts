@@ -103,8 +103,10 @@ export class StatsService {
     ] = await Promise.all([
       this.prisma.user.count({ where: { role: UserRole.USER } }),
       this.prisma.user.count({ where: { role: UserRole.USER, isActive: true } }),
-      this.prisma.user.count({ where: { role: { in: PROFESSIONAL_ROLES } } }),
-      this.prisma.user.count({ where: { role: { in: PROFESSIONAL_ROLES }, isActive: true } }),
+      // Profesionales = cuentas con ProfessionalProfile (incluye cuentas híbridas
+      // usuario+profesional), no solo las que tienen role PROFESSIONAL.
+      this.prisma.user.count({ where: { professionalProfile: { isNot: null } } }),
+      this.prisma.user.count({ where: { professionalProfile: { isNot: null }, isActive: true } }),
       this.prisma.depositRequest.count({ where: { status: DepositStatus.PENDING } }),
       this.prisma.depositRequest.count({
         where: {

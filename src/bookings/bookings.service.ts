@@ -1542,8 +1542,11 @@ export class BookingsService {
 
     if (!client) throw new NotFoundException('Cliente no encontrado.');
 
-    if (client.role !== UserRole.USER) {
-      throw new ForbiddenException('Solo clientes pueden crear reservas.');
+    // Cualquier cuenta no-admin puede reservar como cliente (incluidos los
+    // profesionales que reservan a otro profesional). La auto-reserva ya se
+    // bloquea arriba (dto.professionalId === clientId).
+    if (client.role === UserRole.ADMIN) {
+      throw new ForbiddenException('Los administradores no pueden crear reservas.');
     }
 
     await this.ensureProfessionalExists(dto.professionalId);

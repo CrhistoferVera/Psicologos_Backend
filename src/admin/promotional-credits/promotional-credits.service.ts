@@ -12,8 +12,10 @@ export class PromotionalCreditsService {
       throw new BadRequestException('No puedes autoasignarte créditos promocionales.');
     }
 
+    // Cualquier cuenta activa no-admin puede recibir créditos (incluidos profesionales,
+    // que también operan como clientes).
     const recipient = await this.prisma.user.findFirst({
-      where: { id: dto.userId, role: UserRole.USER, isActive: true },
+      where: { id: dto.userId, role: { not: UserRole.ADMIN }, isActive: true },
       select: { id: true, firstName: true, lastName: true },
     });
 

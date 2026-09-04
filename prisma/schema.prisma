@@ -24,6 +24,7 @@ model User {
   updatedAt           DateTime  @updatedAt
   lastLogin           DateTime?
   role                UserRole  @default(USER)
+  activeMode          UserRole  @default(USER)
   resetPasswordExpiry DateTime?
   resetPasswordToken  String?
   isActive            Boolean   @default(true)

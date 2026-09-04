@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 
 function makePrisma() {
-  return {
+  const prisma: any = {
     user: {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
@@ -35,6 +35,9 @@ function makePrisma() {
       create: jest.fn(),
     },
   };
+  // Ejecuta el callback de la transacción con el propio mock como tx.
+  prisma.$transaction = jest.fn((cb: any) => cb(prisma));
+  return prisma;
 }
 
 describe('ReferralsService', () => {
@@ -68,10 +71,17 @@ describe('ReferralsService', () => {
       referralCode: 'ANACODE',
       isActive: true,
       role: UserRole.USER,
+      professionalProfile: null,
     };
 
     beforeEach(() => {
       prisma.user.findFirst.mockResolvedValue(referrer);
+      // Usuario referido (sin perfil profesional → se clasifica como USER).
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'referred-1',
+        role: UserRole.USER,
+        professionalProfile: null,
+      });
       prisma.referral.findUnique.mockResolvedValue(null);
       prisma.referral.create.mockResolvedValue({
         id: 'ref-1',
@@ -113,9 +123,26 @@ describe('ReferralsService', () => {
       expect(result).toBe(existing);
     });
 
-    it('throws when referred already has a different referral', async () => {
-      prisma.referral.findUnique.mockResolvedValue({ id: 'ref-old', codeUsed: 'OTHERCODE' });
-      await expect(service.createReferralLink('referred-1', 'ANACODE')).rejects.toThrow(BadRequestException);
+    it('is idempotent: returns the existing referral without creating another', async () => {
+      const existing = { id: 'ref-old', codeUsed: 'OTHERCODE' };
+      prisma.referral.findUnique.mockResolvedValue(existing);
+      const result = await service.createReferralLink('referred-1', 'ANACODE');
+      expect(prisma.referral.create).not.toHaveBeenCalled();
+      expect(result).toBe(existing);
+    });
+
+    it('freezes referred role as PROFESSIONAL when the referred has a professional profile', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'referred-1',
+        role: UserRole.USER,
+        professionalProfile: { id: 'prof-1' },
+      });
+      await service.createReferralLink('referred-1', 'ANACODE');
+      expect(prisma.referral.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ referredRole: UserRole.PROFESSIONAL }),
+        }),
+      );
     });
   });
 });
