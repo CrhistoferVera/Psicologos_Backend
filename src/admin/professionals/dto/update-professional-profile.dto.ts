@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PROFESSIONAL_TITLES } from '../../../professionals/constants/professional-titles';
 
@@ -32,5 +32,14 @@ export class AdminUpdateProfessionalProfileDto {
   @IsOptional()
   @IsString()
   bio?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description:
+      'Habilita/inhabilita el cobro. Al habilitar (tras revisar el título subido) se marca como TITULO y se baja la bandera de revisión pendiente.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  canCharge?: boolean;
 }
 

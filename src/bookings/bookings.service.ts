@@ -800,6 +800,17 @@ export class BookingsService {
     return professional;
   }
 
+  // Un profesional solo puede cobrar si su verificacion lo habilita (TITULO/MATRICULA
+  // aprobados => canCharge=true). Los verificados solo con CI quedan en modo gratuito,
+  // por lo que sus precios se fuerzan a 0.
+  private async professionalCanCharge(professionalId: string) {
+    const profile = await this.prisma.professionalProfile.findUnique({
+      where: { userId: professionalId },
+      select: { canCharge: true },
+    });
+    return Boolean(profile?.canCharge);
+  }
+
   private async ensureRuleDoesNotOverlap(
     professionalId: string,
     dayOfWeek: WeekDay,
@@ -1154,16 +1165,19 @@ export class BookingsService {
       throw new BadRequestException('durationMinutes debe ser mayor que 0.');
     }
 
-    if (!dto.priceBob && !dto.priceUsd) {
-      throw new BadRequestException('Debes indicar priceBob o priceUsd.');
-    }
-
+    const canCharge = await this.professionalCanCharge(professionalId);
     const rate = await this.getBobToUsdRate();
 
     let finalPriceBob: number;
     let finalPriceUsd: number;
 
-    if (dto.priceUsd) {
+    if (!canCharge) {
+      // No habilitado para cobrar: la sesion es gratuita (costo 0 forzado).
+      finalPriceBob = 0;
+      finalPriceUsd = 0;
+    } else if (dto.priceUsd === undefined && dto.priceBob === undefined) {
+      throw new BadRequestException('Debes indicar priceBob o priceUsd.');
+    } else if (dto.priceUsd !== undefined) {
       finalPriceUsd = dto.priceUsd;
       finalPriceBob = Math.round(dto.priceUsd * rate * 100) / 100;
     } else {
@@ -1214,13 +1228,18 @@ export class BookingsService {
     }
 
     const bobToUsdRate = await this.getBobToUsdRate();
+    const canCharge = await this.professionalCanCharge(professionalId);
 
-    if (dto.priceUsd !== undefined) {
-      if (dto.priceUsd <= 0) throw new BadRequestException('priceUsd debe ser mayor que 0.');
+    if (!canCharge && (dto.priceUsd !== undefined || dto.priceBob !== undefined)) {
+      // No habilitado para cobrar: cualquier precio que intente poner se fuerza a 0.
+      payload.priceBob = new Prisma.Decimal(0);
+      payload.priceUsd = new Prisma.Decimal(0);
+    } else if (dto.priceUsd !== undefined) {
+      if (dto.priceUsd < 0) throw new BadRequestException('priceUsd no puede ser negativo.');
       payload.priceUsd = new Prisma.Decimal(dto.priceUsd);
       payload.priceBob = new Prisma.Decimal(Math.round(dto.priceUsd * bobToUsdRate * 100) / 100);
     } else if (dto.priceBob !== undefined) {
-      if (dto.priceBob <= 0) throw new BadRequestException('priceBob debe ser mayor que 0.');
+      if (dto.priceBob < 0) throw new BadRequestException('priceBob no puede ser negativo.');
       payload.priceBob = new Prisma.Decimal(dto.priceBob);
       payload.priceUsd = new Prisma.Decimal(Math.round((dto.priceBob / bobToUsdRate) * 100) / 100);
     }
@@ -2893,14 +2912,21 @@ export class BookingsService {
   async activateImmediateAvailability(professionalId: string, dto: SetImmediateAvailabilityDto) {
     await this.ensureProfessionalExists(professionalId);
 
-    if (!dto.priceBob && !dto.priceUsd) {
+    const canCharge = await this.professionalCanCharge(professionalId);
+
+    if (canCharge && dto.priceBob === undefined && dto.priceUsd === undefined) {
       throw new BadRequestException('Debes proporcionar priceBob o priceUsd.');
     }
 
     const expiresAt = new Date(Date.now() + dto.activeForMinutes * 60 * 1000);
     const bobToUsdRate = await this.getBobToUsdRate();
-    const priceBob = dto.priceBob ?? Math.round(dto.priceUsd! * bobToUsdRate * 100) / 100;
-    const priceUsd = dto.priceUsd ?? Math.round((dto.priceBob! / bobToUsdRate) * 100) / 100;
+    // No habilitado para cobrar => atencion inmediata gratuita (costo 0 forzado).
+    const priceBob = !canCharge
+      ? 0
+      : dto.priceBob ?? Math.round(dto.priceUsd! * bobToUsdRate * 100) / 100;
+    const priceUsd = !canCharge
+      ? 0
+      : dto.priceUsd ?? Math.round((dto.priceBob! / bobToUsdRate) * 100) / 100;
 
     // Upsert del registro de disponibilidad inmediata
     const availability = await this.prisma.professionalImmediateAvailability.upsert({

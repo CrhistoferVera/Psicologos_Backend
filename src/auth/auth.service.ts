@@ -11,7 +11,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomInt, randomUUID, timingSafeEqual } from 'crypto';
-import { User } from '@prisma/client';
+import { User, VerificationDocType } from '@prisma/client';
 import { UsersService } from '../users/users.service';
 import { UserEntity } from '../users/entities/user.entity';
 import { CompleteRegistrationDto } from './dto/complete-registration.dto';
@@ -25,7 +25,6 @@ import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { PROFESSIONAL_ROLE } from '../common/professional-role';
 import { ReferralsService } from '../referrals/referrals.service';
 import { createUniqueReferralCode } from '../referrals/utils/referral-code.util';
-import { FaceMatchService } from '../kyc/face-match.service';
 import { deriveBillingFields } from '../common/phone-metadata.util';
 
 type GoogleTokenInfo = {
@@ -64,7 +63,6 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
     private readonly referralsService: ReferralsService,
-    private readonly faceMatch: FaceMatchService,
   ) {}
 
   private normalizeEmail(value: string) {
@@ -213,14 +211,24 @@ export class AuthService {
     return this.generateTokenResponse(userWithoutPass);
   }
 
+  // Mapea la URL subida a la columna segun el tipo de documento elegido, de modo que
+  // el panel admin siga mostrando el archivo en su visor correspondiente.
+  private buildVerificationDocFields(
+    type: VerificationDocType,
+    uploaded: { secureUrl: string; publicId: string } | null,
+  ) {
+    if (!uploaded) return {};
+    const { secureUrl, publicId } = uploaded;
+    if (type === 'CI') return { idDocUrl: secureUrl, idDocPublicId: publicId };
+    if (type === 'MATRICULA') return { matriculaUrl: secureUrl, matriculaPublicId: publicId };
+    return { tituloProfesionalUrl: secureUrl, tituloProfesionalPublicId: publicId };
+  }
+
   async completeProfessionalRegistration(
     dto: CompleteProfessionalRegistrationDto,
     files?: {
-      idDoc?: Express.Multer.File;
+      verificationDoc?: Express.Multer.File;
       kycVideo?: Express.Multer.File;
-      kycSelfie?: Express.Multer.File;
-      matricula?: Express.Multer.File;
-      tituloProfesional?: Express.Multer.File;
     },
   ) {
     const payload = this.verifyEmailToken(dto.tempToken);
@@ -272,38 +280,28 @@ export class AuthService {
     // Generate ID upfront so Cloudinary uploads can use it before any DB write
     const uid = randomUUID();
 
-    // Upload all KYC files first — if this fails, no user is left in the DB
-    const [idDocResult, kycVideoResult, kycSelfieResult, matriculaResult, tituloResult] =
-      await Promise.all([
-        files?.idDoc
-          ? this.cloudinary.uploadProfessionalIdDoc({ file: files.idDoc, userId: uid })
-          : null,
-        files?.kycVideo
-          ? this.cloudinary.uploadKycFile({ file: files.kycVideo, userId: uid, folder: 'kyc/video', publicIdPrefix: 'kyc_video' })
-          : null,
-        files?.kycSelfie
-          ? this.cloudinary.uploadKycFile({ file: files.kycSelfie, userId: uid, folder: 'kyc/selfie', publicIdPrefix: 'kyc_selfie' })
-          : null,
-        files?.matricula
-          ? this.cloudinary.uploadKycFile({ file: files.matricula, userId: uid, folder: 'kyc/matricula', publicIdPrefix: 'matricula' })
-          : null,
-        files?.tituloProfesional
-          ? this.cloudinary.uploadKycFile({ file: files.tituloProfesional, userId: uid, folder: 'kyc/titulo', publicIdPrefix: 'titulo' })
-          : null,
-      ]);
-
-    // Automatic face comparison: selfie thumbnail vs ID document
-    let faceMatchScore: number | null = null;
-    let kycFaceMatchStatus: 'PENDING' | 'PASSED' | 'FAILED' | 'SKIPPED' = 'SKIPPED';
-
-    if (files?.kycSelfie && files?.idDoc?.mimetype.startsWith('image/')) {
-      const result = await this.faceMatch.compareFaces(
-        files.kycSelfie.buffer,
-        files.idDoc.buffer,
-      );
-      faceMatchScore = result.score;
-      kycFaceMatchStatus = result.status;
-    }
+    // Sube el video de rostro y el unico documento elegido (CI / TITULO / MATRICULA).
+    // Si algo falla, no queda ningun usuario en la DB.
+    const docFolder = dto.verificationDocType.toLowerCase();
+    const [uploaded, videoUploaded] = await Promise.all([
+      files?.verificationDoc
+        ? this.cloudinary.uploadKycFile({
+            file: files.verificationDoc,
+            userId: uid,
+            folder: `kyc/${docFolder}`,
+            publicIdPrefix: docFolder,
+          })
+        : null,
+      files?.kycVideo
+        ? this.cloudinary.uploadKycFile({
+            file: files.kycVideo,
+            userId: uid,
+            folder: 'kyc/video',
+            publicIdPrefix: 'kyc_video',
+          })
+        : null,
+    ]);
+    const docFields = this.buildVerificationDocFields(dto.verificationDocType, uploaded);
 
     // Create user + wallet + profile atomically — if anything fails, nothing is committed
     const { newUser, profile } = await this.prisma.$transaction(async (tx) => {
@@ -332,19 +330,12 @@ export class AuthService {
           cedula: dto.cedula,
           username: dto.username,
           bio: dto.bio?.trim() || null,
-          idDocUrl: idDocResult?.secureUrl ?? null,
-          idDocPublicId: idDocResult?.publicId ?? null,
-          kycVideoUrl: kycVideoResult?.secureUrl ?? null,
-          kycVideoPublicId: kycVideoResult?.publicId ?? null,
-          kycSelfieUrl: kycSelfieResult?.secureUrl ?? null,
-          kycSelfiePublicId: kycSelfieResult?.publicId ?? null,
-          matriculaUrl: matriculaResult?.secureUrl ?? null,
-          matriculaPublicId: matriculaResult?.publicId ?? null,
-          tituloProfesionalUrl: tituloResult?.secureUrl ?? null,
-          tituloProfesionalPublicId: tituloResult?.publicId ?? null,
-          kycFaceMatchScore: faceMatchScore,
-          kycFaceMatchStatus,
+          verificationDocType: dto.verificationDocType,
+          canCharge: false,
           reviewStatus: 'PENDING',
+          kycVideoUrl: videoUploaded?.secureUrl ?? null,
+          kycVideoPublicId: videoUploaded?.publicId ?? null,
+          ...docFields,
         },
       });
 
@@ -354,6 +345,13 @@ export class AuthService {
     if (requestedReferralCode) {
       await this.referralsService.createReferralLink(uid, requestedReferralCode);
     }
+
+    // Avisa al admin que hay una verificación por revisar (no bloquea el registro).
+    void this.mailService.sendAdminVerificationAlert({
+      professionalName: `${dto.firstName} ${dto.lastName}`.trim(),
+      kind: 'REGISTRO',
+      docType: dto.verificationDocType,
+    });
 
     const { password: _, ...userWithoutPass } = newUser;
     return {

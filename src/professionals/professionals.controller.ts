@@ -80,17 +80,26 @@ export class ProfessionalsController {
     return this.service.getMyReviewStatus(userId);
   }
 
+  // Un profesional verificado con CI sube su título para habilitar el cobro.
+  @Post('me/charge-verification')
+  @Roles(...PROFESSIONAL_ROLES)
+  @UseInterceptors(FileInterceptor('tituloProfesional', { storage: memoryStorage() }))
+  submitChargeVerification(
+    @Request() req,
+    @UploadedFile() tituloProfesional?: Express.Multer.File,
+  ) {
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+    return this.service.submitChargeVerification(userId, tituloProfesional);
+  }
+
   // Convertir una cuenta existente en profesional (activar modo profesional).
   // Sin @Roles: accesible a cualquier usuario autenticado que aún no sea profesional.
   @Post('me/upgrade')
   @UseInterceptors(
     FileFieldsInterceptor(
       [
-        { name: 'idDoc', maxCount: 1 },
+        { name: 'verificationDoc', maxCount: 1 },
         { name: 'kycVideo', maxCount: 1 },
-        { name: 'kycSelfie', maxCount: 1 },
-        { name: 'matricula', maxCount: 1 },
-        { name: 'tituloProfesional', maxCount: 1 },
       ],
       { storage: memoryStorage() },
     ),
@@ -100,20 +109,14 @@ export class ProfessionalsController {
     @Body() dto: UpgradeToProfessionalDto,
     @UploadedFiles()
     files?: {
-      idDoc?: Express.Multer.File[];
+      verificationDoc?: Express.Multer.File[];
       kycVideo?: Express.Multer.File[];
-      kycSelfie?: Express.Multer.File[];
-      matricula?: Express.Multer.File[];
-      tituloProfesional?: Express.Multer.File[];
     },
   ) {
     const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
     return this.service.upgradeToProfessional(userId, dto, {
-      idDoc: files?.idDoc?.[0],
+      verificationDoc: files?.verificationDoc?.[0],
       kycVideo: files?.kycVideo?.[0],
-      kycSelfie: files?.kycSelfie?.[0],
-      matricula: files?.matricula?.[0],
-      tituloProfesional: files?.tituloProfesional?.[0],
     });
   }
 

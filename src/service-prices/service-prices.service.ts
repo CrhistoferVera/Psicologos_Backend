@@ -26,24 +26,30 @@ export class ServicePricesService {
 
   // Crea o actualiza un precio para un tipo de servicio.
   async upsertPrice(userId: string, dto: UpsertServicePriceDto) {
-    const minPrice = this.minPriceByService[dto.serviceType] ?? 0;
-    if (dto.price <= minPrice) {
-      const label =
-        dto.serviceType === ServiceType.MESSAGE_SEND
-          ? 'mensajes'
-          : dto.serviceType === ServiceType.CALL
-            ? 'llamadas'
-            : 'videollamadas';
-      throw new BadRequestException(
-        `La tarifa para ${label} debe ser mayor a ${minPrice} créditos.`,
-      );
-    }
-
     const profile = await this.prisma.professionalProfile.findUnique({
       where: { userId },
     });
 
     if (!profile) throw new NotFoundException('Perfil profesional no encontrado');
+
+    // Profesionales no habilitados para cobrar (verificados solo con CI) quedan en
+    // modo gratuito: su tarifa se fuerza a 0 y no aplica el mínimo por servicio.
+    const price = profile.canCharge ? dto.price : 0;
+
+    if (profile.canCharge) {
+      const minPrice = this.minPriceByService[dto.serviceType] ?? 0;
+      if (dto.price <= minPrice) {
+        const label =
+          dto.serviceType === ServiceType.MESSAGE_SEND
+            ? 'mensajes'
+            : dto.serviceType === ServiceType.CALL
+              ? 'llamadas'
+              : 'videollamadas';
+        throw new BadRequestException(
+          `La tarifa para ${label} debe ser mayor a ${minPrice} créditos.`,
+        );
+      }
+    }
 
     return this.prisma.servicePrice.upsert({
       where: {
@@ -55,10 +61,10 @@ export class ServicePricesService {
       create: {
         profileId: profile.id,
         serviceType: dto.serviceType,
-        price: dto.price,
+        price,
       },
       update: {
-        price: dto.price,
+        price,
       },
     });
   }

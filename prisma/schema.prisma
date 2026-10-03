@@ -144,6 +144,16 @@ model ProfessionalProfile {
   isOnline       Boolean                  @default(false)
   reviewStatus   ProfessionalReviewStatus @default(PENDING)
   reviewNotes    String?
+
+  // Tipo de documento con el que se verifica (elige 1). CI => solo sesiones
+  // gratuitas; TITULO o MATRICULA => puede cobrar dentro de la app.
+  verificationDocType VerificationDocType?
+  canCharge           Boolean             @default(false)
+
+  // Un profesional verificado con CI que luego sube su titulo desde el perfil
+  // queda con esta bandera en true: sigue activo (practicando gratis) pero el
+  // admin debe revisar el titulo para habilitarle el cobro (canCharge).
+  chargeVerificationPending Boolean @default(false)
   availability   Json?
   coverPublicId  String?
   coverUrl       String?
@@ -885,6 +895,12 @@ enum ProfessionalReviewStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+enum VerificationDocType {
+  CI
+  TITULO
+  MATRICULA
 }
 
 enum KycFaceMatchStatus {

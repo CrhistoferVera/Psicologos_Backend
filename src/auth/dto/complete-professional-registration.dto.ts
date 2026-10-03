@@ -5,8 +5,10 @@ import {
   IsEmail,
   MinLength,
   IsDateString,
+  IsEnum,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { VerificationDocType } from '@prisma/client';
 
 export class CompleteProfessionalRegistrationDto {
   @ApiProperty({ description: 'Token temporal obtenido al verificar OTP' })
@@ -61,6 +63,15 @@ export class CompleteProfessionalRegistrationDto {
   @IsString()
   @IsNotEmpty()
   cedula: string;
+
+  @ApiProperty({
+    enum: VerificationDocType,
+    example: 'TITULO',
+    description:
+      'Documento con el que se verifica. CI => solo sesiones gratuitas; TITULO o MATRICULA => puede cobrar.',
+  })
+  @IsEnum(VerificationDocType)
+  verificationDocType: VerificationDocType;
 
   @ApiProperty({ example: 'SALUDAB12', required: false })
   @IsOptional()

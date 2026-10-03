@@ -9,9 +9,10 @@ import { SpecialtyModule } from '../admin/specialty/specialty.module';
 import { ProfessionalPerfilService } from './professional.perfil.service';
 import { ProfessionalEnvironmentService } from './professional.environment.service';
 import { KycModule } from '../kyc/kyc.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
-  imports: [PrismaModule, CloudinaryModule, NotificationsModule, SpecialtyModule, KycModule],
+  imports: [PrismaModule, CloudinaryModule, NotificationsModule, SpecialtyModule, KycModule, MailModule],
   controllers: [PublicProfessionalsController, ProfessionalsController],
   providers: [ProfessionalsService, ProfessionalPerfilService, ProfessionalEnvironmentService],
 })

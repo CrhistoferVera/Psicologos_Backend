@@ -45,30 +45,21 @@ export class AuthController {
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(
     FileFieldsInterceptor([
-      { name: 'idDoc', maxCount: 1 },
+      { name: 'verificationDoc', maxCount: 1 },
       { name: 'kycVideo', maxCount: 1 },
-      { name: 'kycSelfie', maxCount: 1 },
-      { name: 'matricula', maxCount: 1 },
-      { name: 'tituloProfesional', maxCount: 1 },
     ]),
   )
   async completeProfessionalRegistration(
     @Body() dto: CompleteProfessionalRegistrationDto,
     @UploadedFiles()
     files?: {
-      idDoc?: Express.Multer.File[];
+      verificationDoc?: Express.Multer.File[];
       kycVideo?: Express.Multer.File[];
-      kycSelfie?: Express.Multer.File[];
-      matricula?: Express.Multer.File[];
-      tituloProfesional?: Express.Multer.File[];
     },
   ) {
     return this.authService.completeProfessionalRegistration(dto, {
-      idDoc: files?.idDoc?.[0],
+      verificationDoc: files?.verificationDoc?.[0],
       kycVideo: files?.kycVideo?.[0],
-      kycSelfie: files?.kycSelfie?.[0],
-      matricula: files?.matricula?.[0],
-      tituloProfesional: files?.tituloProfesional?.[0],
     });
   }
   @Post('login')

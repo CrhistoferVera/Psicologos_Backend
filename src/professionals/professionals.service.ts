@@ -6,10 +6,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { Prisma, UserRole } from '@prisma/client';
+import { Prisma, UserRole, VerificationDocType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
-import { FaceMatchService } from '../kyc/face-match.service';
 import { UpgradeToProfessionalDto } from './dto/upgrade-to-professional.dto';
 import { CreateProfessionalDto } from './dto/create-professional.dto';
 import { UpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
@@ -20,13 +19,14 @@ import {
 import { ProfessionalPublicDetailDto } from './dto/professional-public-detail.dto';
 import { PROFESSIONAL_ROLE, PROFESSIONAL_ROLES } from '../common/professional-role';
 import { createUniqueReferralCode } from '../referrals/utils/referral-code.util';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class ProfessionalsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
-    private readonly faceMatch: FaceMatchService,
+    private readonly mailService: MailService,
   ) {}
 
   async create(dto: CreateProfessionalDto, idDocFile?: Express.Multer.File) {
@@ -411,6 +411,10 @@ export class ProfessionalsService {
             reviewNotes: true,
             availability: true,
             languages: true,
+            canCharge: true,
+            verificationDocType: true,
+            chargeVerificationPending: true,
+            tituloProfesionalUrl: true,
           },
         },
       },
@@ -435,6 +439,10 @@ export class ProfessionalsService {
       education: (user.professionalProfile?.education ?? []) as Record<string, unknown>[],
       languages: user.professionalProfile?.languages ?? [],
       isActive: user.isActive,
+      canCharge: user.professionalProfile?.canCharge ?? false,
+      verificationDocType: user.professionalProfile?.verificationDocType ?? null,
+      chargeVerificationPending: user.professionalProfile?.chargeVerificationPending ?? false,
+      hasTitulo: Boolean(user.professionalProfile?.tituloProfesionalUrl),
     };
   }
 
@@ -461,6 +469,54 @@ export class ProfessionalsService {
       notes: user.professionalProfile?.reviewNotes ?? null,
       isActive: user.isActive,
       updatedAt: user.professionalProfile?.updatedAt ?? null,
+    };
+  }
+
+  // Un profesional verificado con CI (canCharge=false) sube su titulo para habilitar
+  // el cobro. No toca reviewStatus/isActive (sigue practicando gratis): solo guarda el
+  // titulo y marca chargeVerificationPending para que el admin lo revise.
+  async submitChargeVerification(userId: string, tituloFile?: Express.Multer.File) {
+    const profile = await this.prisma.professionalProfile.findUnique({
+      where: { userId },
+      select: { id: true, canCharge: true },
+    });
+
+    if (!profile) throw new NotFoundException('Perfil profesional no encontrado.');
+    if (profile.canCharge) {
+      throw new ConflictException('Tu cuenta ya tiene el cobro habilitado.');
+    }
+    if (!tituloFile) {
+      throw new BadRequestException('Debes adjuntar tu título.');
+    }
+
+    const uploaded = await this.cloudinary.uploadKycFile({
+      file: tituloFile,
+      userId,
+      folder: 'kyc/titulo',
+      publicIdPrefix: 'titulo',
+    });
+
+    const updated = await this.prisma.professionalProfile.update({
+      where: { userId },
+      data: {
+        tituloProfesionalUrl: uploaded.secureUrl,
+        tituloProfesionalPublicId: uploaded.publicId,
+        chargeVerificationPending: true,
+      },
+      select: { chargeVerificationPending: true, canCharge: true, username: true },
+    });
+
+    // Avisa al admin que hay un título por revisar para habilitar el cobro.
+    void this.mailService.sendAdminVerificationAlert({
+      professionalName: updated.username,
+      kind: 'TITULO',
+      docType: 'TITULO',
+    });
+
+    return {
+      message: 'Título enviado. Lo revisaremos para habilitar tu cobro.',
+      chargeVerificationPending: updated.chargeVerificationPending,
+      canCharge: updated.canCharge,
     };
   }
 
@@ -594,15 +650,25 @@ export class ProfessionalsService {
   // profesional"). Crea el ProfessionalProfile en PENDING sobre la misma cuenta,
   // sin crear un usuario nuevo y sin tocar su saldo/datos de cliente. Mantiene
   // isActive para no perder el acceso como cliente mientras se revisa el KYC.
+  // Mapea la URL subida a la columna segun el tipo de documento elegido, de modo que
+  // el panel admin siga mostrando el archivo en su visor correspondiente.
+  private buildVerificationDocFields(
+    type: VerificationDocType,
+    uploaded: { secureUrl: string; publicId: string } | null,
+  ) {
+    if (!uploaded) return {};
+    const { secureUrl, publicId } = uploaded;
+    if (type === 'CI') return { idDocUrl: secureUrl, idDocPublicId: publicId };
+    if (type === 'MATRICULA') return { matriculaUrl: secureUrl, matriculaPublicId: publicId };
+    return { tituloProfesionalUrl: secureUrl, tituloProfesionalPublicId: publicId };
+  }
+
   async upgradeToProfessional(
     userId: string,
     dto: UpgradeToProfessionalDto,
     files?: {
-      idDoc?: Express.Multer.File;
+      verificationDoc?: Express.Multer.File;
       kycVideo?: Express.Multer.File;
-      kycSelfie?: Express.Multer.File;
-      matricula?: Express.Multer.File;
-      tituloProfesional?: Express.Multer.File;
     },
   ) {
     const user = await this.prisma.user.findUnique({
@@ -622,39 +688,28 @@ export class ProfessionalsService {
     if (existingCedula) throw new ConflictException('La cedula ya esta registrada.');
     if (existingUsername) throw new ConflictException('El nombre de usuario ya esta en uso.');
 
-    // Se suben los archivos KYC antes de escribir en la BD; si algo falla, no queda
-    // un perfil a medias.
-    const [idDocResult, kycVideoResult, kycSelfieResult, matriculaResult, tituloResult] =
-      await Promise.all([
-        files?.idDoc
-          ? this.cloudinary.uploadProfessionalIdDoc({ file: files.idDoc, userId })
-          : null,
-        files?.kycVideo
-          ? this.cloudinary.uploadKycFile({ file: files.kycVideo, userId, folder: 'kyc/video', publicIdPrefix: 'kyc_video' })
-          : null,
-        files?.kycSelfie
-          ? this.cloudinary.uploadKycFile({ file: files.kycSelfie, userId, folder: 'kyc/selfie', publicIdPrefix: 'kyc_selfie' })
-          : null,
-        files?.matricula
-          ? this.cloudinary.uploadKycFile({ file: files.matricula, userId, folder: 'kyc/matricula', publicIdPrefix: 'matricula' })
-          : null,
-        files?.tituloProfesional
-          ? this.cloudinary.uploadKycFile({ file: files.tituloProfesional, userId, folder: 'kyc/titulo', publicIdPrefix: 'titulo' })
-          : null,
-      ]);
-
-    // Comparación facial automática: selfie vs documento de identidad.
-    let faceMatchScore: number | null = null;
-    let kycFaceMatchStatus: 'PENDING' | 'PASSED' | 'FAILED' | 'SKIPPED' = 'SKIPPED';
-
-    if (files?.kycSelfie && files?.idDoc?.mimetype.startsWith('image/')) {
-      const result = await this.faceMatch.compareFaces(
-        files.kycSelfie.buffer,
-        files.idDoc.buffer,
-      );
-      faceMatchScore = result.score;
-      kycFaceMatchStatus = result.status;
-    }
+    // Sube el video de rostro y el unico documento elegido (CI / TITULO / MATRICULA).
+    // Si algo falla, no queda un perfil a medias.
+    const docFolder = dto.verificationDocType.toLowerCase();
+    const [uploaded, videoUploaded] = await Promise.all([
+      files?.verificationDoc
+        ? this.cloudinary.uploadKycFile({
+            file: files.verificationDoc,
+            userId,
+            folder: `kyc/${docFolder}`,
+            publicIdPrefix: docFolder,
+          })
+        : null,
+      files?.kycVideo
+        ? this.cloudinary.uploadKycFile({
+            file: files.kycVideo,
+            userId,
+            folder: 'kyc/video',
+            publicIdPrefix: 'kyc_video',
+          })
+        : null,
+    ]);
+    const docFields = this.buildVerificationDocFields(dto.verificationDocType, uploaded);
 
     const profile = await this.prisma.$transaction(async (tx) => {
       const prof = await tx.professionalProfile.create({
@@ -664,19 +719,12 @@ export class ProfessionalsService {
           cedula: dto.cedula,
           username: dto.username,
           bio: dto.bio?.trim() || null,
-          idDocUrl: idDocResult?.secureUrl ?? null,
-          idDocPublicId: idDocResult?.publicId ?? null,
-          kycVideoUrl: kycVideoResult?.secureUrl ?? null,
-          kycVideoPublicId: kycVideoResult?.publicId ?? null,
-          kycSelfieUrl: kycSelfieResult?.secureUrl ?? null,
-          kycSelfiePublicId: kycSelfieResult?.publicId ?? null,
-          matriculaUrl: matriculaResult?.secureUrl ?? null,
-          matriculaPublicId: matriculaResult?.publicId ?? null,
-          tituloProfesionalUrl: tituloResult?.secureUrl ?? null,
-          tituloProfesionalPublicId: tituloResult?.publicId ?? null,
-          kycFaceMatchScore: faceMatchScore,
-          kycFaceMatchStatus,
+          verificationDocType: dto.verificationDocType,
+          canCharge: false,
           reviewStatus: 'PENDING',
+          kycVideoUrl: videoUploaded?.secureUrl ?? null,
+          kycVideoPublicId: videoUploaded?.publicId ?? null,
+          ...docFields,
         },
       });
 
@@ -688,6 +736,13 @@ export class ProfessionalsService {
       });
 
       return prof;
+    });
+
+    // Avisa al admin que hay una verificación por revisar (no bloquea el upgrade).
+    void this.mailService.sendAdminVerificationAlert({
+      professionalName: dto.username,
+      kind: 'UPGRADE',
+      docType: dto.verificationDocType,
     });
 
     return {

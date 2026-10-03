@@ -22,12 +22,12 @@ export class CreateSessionOfferingDto {
   @ApiPropertyOptional({ example: 200 })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0.01)
+  @Min(0)
   priceBob?: number;
 
   @ApiPropertyOptional({ example: 28.5 })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0.01)
+  @Min(0)
   priceUsd?: number;
 }

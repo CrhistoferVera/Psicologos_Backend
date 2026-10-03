@@ -3,8 +3,10 @@ import {
   IsNotEmpty,
   IsOptional,
   IsDateString,
+  IsEnum,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { VerificationDocType } from '@prisma/client';
 
 // Datos para que una cuenta EXISTENTE (ya autenticada) active su capacidad
 // profesional. No incluye email/password/country: ya viven en la cuenta.
@@ -31,4 +33,13 @@ export class UpgradeToProfessionalDto {
   @IsString()
   @IsNotEmpty()
   cedula: string;
+
+  @ApiProperty({
+    enum: VerificationDocType,
+    example: 'TITULO',
+    description:
+      'Documento con el que se verifica. CI => solo sesiones gratuitas; TITULO o MATRICULA => puede cobrar.',
+  })
+  @IsEnum(VerificationDocType)
+  verificationDocType: VerificationDocType;
 }

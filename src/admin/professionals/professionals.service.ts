@@ -21,6 +21,7 @@ export class AdminProfessionalsService {
         professionalProfile: {
           select: {
             username: true,
+            verificationDocType: true,
           },
         },
       },
@@ -34,6 +35,13 @@ export class AdminProfessionalsService {
       ? ProfessionalReviewStatus.APPROVED
       : ProfessionalReviewStatus.REJECTED;
 
+    // El cobro solo se habilita si se aprueba Y el documento es TITULO o MATRICULA.
+    // Verificados solo con CI quedan como gratuitos (costo 0 forzado).
+    const docType = user.professionalProfile?.verificationDocType;
+    const canCharge =
+      updateStatusDto.isActive &&
+      (docType === 'TITULO' || docType === 'MATRICULA');
+
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id },
@@ -43,6 +51,7 @@ export class AdminProfessionalsService {
         where: { userId: id },
         update: {
           reviewStatus,
+          canCharge,
           ...(updateStatusDto.reviewNotes !== undefined
             ? { reviewNotes: updateStatusDto.reviewNotes }
             : {}),
@@ -51,6 +60,7 @@ export class AdminProfessionalsService {
           userId: id,
           username: user.professionalProfile?.username || `prof_${id.slice(0, 8)}`,
           reviewStatus,
+          canCharge,
           ...(updateStatusDto.reviewNotes !== undefined
             ? { reviewNotes: updateStatusDto.reviewNotes }
             : {}),
@@ -81,12 +91,20 @@ export class AdminProfessionalsService {
           ...(dto.username !== undefined && { username: dto.username }),
           ...(dto.title !== undefined && { title: dto.title === '' ? null : dto.title }),
           ...(dto.bio !== undefined && { bio: dto.bio }),
+          // Al habilitar el cobro (tras revisar el título subido desde el perfil):
+          // se marca como TITULO, se habilita canCharge y se baja la bandera pendiente.
+          ...(dto.canCharge !== undefined && {
+            canCharge: dto.canCharge,
+            chargeVerificationPending: false,
+            ...(dto.canCharge && { verificationDocType: 'TITULO' as const }),
+          }),
         },
         create: {
           userId: id,
           username: dto.username || `prof_${id.slice(0, 8)}`,
           ...(dto.title !== undefined && dto.title !== '' && { title: dto.title }),
           ...(dto.bio !== undefined && { bio: dto.bio }),
+          ...(dto.canCharge !== undefined && { canCharge: dto.canCharge }),
         },
       }),
     ]);
@@ -117,6 +135,9 @@ export class AdminProfessionalsService {
             idDocUrl: true,
             reviewStatus: true,
             reviewNotes: true,
+            verificationDocType: true,
+            canCharge: true,
+            chargeVerificationPending: true,
             availability: true,
             kycVideoUrl: true,
             kycSelfieUrl: true,
@@ -170,6 +191,9 @@ export class AdminProfessionalsService {
             idDocUrl: true,
             reviewStatus: true,
             reviewNotes: true,
+            verificationDocType: true,
+            canCharge: true,
+            chargeVerificationPending: true,
             kycVideoUrl: true,
             kycSelfieUrl: true,
             matriculaUrl: true,

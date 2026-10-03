@@ -104,6 +104,40 @@ export class MailService {
         }
     }
 
+    // NOTIFICA AL ADMIN QUE HAY UNA VERIFICACION POR REVISAR (registro, upgrade o
+    // titulo para habilitar cobro). No lanza error: nunca debe bloquear el registro.
+    async sendAdminVerificationAlert(params: {
+        professionalName: string;
+        kind: 'REGISTRO' | 'UPGRADE' | 'TITULO';
+        docType?: string | null;
+    }) {
+        const adminEmail =
+            process.env.ADMIN_NOTIFICATIONS_EMAIL ?? 'jaimeluismamanicuellar@gmail.com';
+
+        const kindLabel = {
+            REGISTRO: 'Nuevo registro profesional',
+            UPGRADE: 'Nueva solicitud de modo profesional',
+            TITULO: 'Título enviado para habilitar cobro',
+        }[params.kind];
+
+        try {
+            await this.mailerService.sendMail({
+                to: adminEmail,
+                subject: `Verificación por revisar: ${kindLabel} - SanaMente`,
+                html: `
+                    <h2>Hay una verificación por revisar</h2>
+                    <p><strong>Tipo:</strong> ${kindLabel}</p>
+                    <p><strong>Profesional:</strong> ${params.professionalName}</p>
+                    ${params.docType ? `<p><strong>Documento:</strong> ${params.docType}</p>` : ''}
+                    <p>Ingresa al panel de administración para revisar y aprobar.</p>
+                `,
+            });
+            this.logger.log(`📧 Alerta de verificación enviada al admin (${params.kind})`);
+        } catch (error) {
+            this.logger.error(`Error enviando alerta de verificación al admin. code=${this.getErrorCode(error)}`);
+        }
+    }
+
     //METODO PARA ENVIAR NOTIFICACION DE ESTADO DE SOLICITUD DE RETIRO
     async sendWithdrawalRequestNotification(
         email: string,
