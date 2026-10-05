@@ -475,7 +475,10 @@ export class ProfessionalsService {
   // Un profesional verificado con CI (canCharge=false) sube su titulo para habilitar
   // el cobro. No toca reviewStatus/isActive (sigue practicando gratis): solo guarda el
   // titulo y marca chargeVerificationPending para que el admin lo revise.
-  async submitChargeVerification(userId: string, tituloFile?: Express.Multer.File) {
+  async submitChargeVerification(
+    userId: string,
+    files: { titulo?: Express.Multer.File; matricula?: Express.Multer.File },
+  ) {
     const profile = await this.prisma.professionalProfile.findUnique({
       where: { userId },
       select: { id: true, canCharge: true },
@@ -485,28 +488,43 @@ export class ProfessionalsService {
     if (profile.canCharge) {
       throw new ConflictException('Tu cuenta ya tiene el cobro habilitado.');
     }
-    if (!tituloFile) {
-      throw new BadRequestException('Debes adjuntar tu título.');
+    if (!files.titulo && !files.matricula) {
+      throw new BadRequestException('Debes adjuntar tu título o tu matrícula.');
     }
 
-    const uploaded = await this.cloudinary.uploadKycFile({
-      file: tituloFile,
-      userId,
-      folder: 'kyc/titulo',
-      publicIdPrefix: 'titulo',
-    });
+    const data: Prisma.ProfessionalProfileUpdateInput = {
+      chargeVerificationPending: true,
+    };
+
+    if (files.titulo) {
+      const uploaded = await this.cloudinary.uploadKycFile({
+        file: files.titulo,
+        userId,
+        folder: 'kyc/titulo',
+        publicIdPrefix: 'titulo',
+      });
+      data.tituloProfesionalUrl = uploaded.secureUrl;
+      data.tituloProfesionalPublicId = uploaded.publicId;
+    }
+
+    if (files.matricula) {
+      const uploaded = await this.cloudinary.uploadKycFile({
+        file: files.matricula,
+        userId,
+        folder: 'kyc/matricula',
+        publicIdPrefix: 'matricula',
+      });
+      data.matriculaUrl = uploaded.secureUrl;
+      data.matriculaPublicId = uploaded.publicId;
+    }
 
     const updated = await this.prisma.professionalProfile.update({
       where: { userId },
-      data: {
-        tituloProfesionalUrl: uploaded.secureUrl,
-        tituloProfesionalPublicId: uploaded.publicId,
-        chargeVerificationPending: true,
-      },
+      data,
       select: { chargeVerificationPending: true, canCharge: true, username: true },
     });
 
-    // Avisa al admin que hay un título por revisar para habilitar el cobro.
+    // Avisa al admin que hay documentación por revisar para habilitar el cobro.
     void this.mailService.sendAdminVerificationAlert({
       professionalName: updated.username,
       kind: 'TITULO',
@@ -514,7 +532,7 @@ export class ProfessionalsService {
     });
 
     return {
-      message: 'Título enviado. Lo revisaremos para habilitar tu cobro.',
+      message: 'Documentación enviada. La revisaremos para habilitar tu cobro.',
       chargeVerificationPending: updated.chargeVerificationPending,
       canCharge: updated.canCharge,
     };

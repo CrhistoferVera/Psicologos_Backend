@@ -80,16 +80,31 @@ export class ProfessionalsController {
     return this.service.getMyReviewStatus(userId);
   }
 
-  // Un profesional verificado con CI sube su título para habilitar el cobro.
+  // Un profesional verificado con CI sube su título y/o matrícula para habilitar el cobro.
   @Post('me/charge-verification')
   @Roles(...PROFESSIONAL_ROLES)
-  @UseInterceptors(FileInterceptor('tituloProfesional', { storage: memoryStorage() }))
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'tituloProfesional', maxCount: 1 },
+        { name: 'matricula', maxCount: 1 },
+      ],
+      { storage: memoryStorage() },
+    ),
+  )
   submitChargeVerification(
     @Request() req,
-    @UploadedFile() tituloProfesional?: Express.Multer.File,
+    @UploadedFiles()
+    files?: {
+      tituloProfesional?: Express.Multer.File[];
+      matricula?: Express.Multer.File[];
+    },
   ) {
     const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
-    return this.service.submitChargeVerification(userId, tituloProfesional);
+    return this.service.submitChargeVerification(userId, {
+      titulo: files?.tituloProfesional?.[0],
+      matricula: files?.matricula?.[0],
+    });
   }
 
   // Convertir una cuenta existente en profesional (activar modo profesional).
