@@ -117,7 +117,7 @@ export class MailService {
         const kindLabel = {
             REGISTRO: 'Nuevo registro profesional',
             UPGRADE: 'Nueva solicitud de modo profesional',
-            TITULO: 'Título enviado para habilitar cobro',
+            TITULO: 'Documentación enviada para habilitar cobro',
         }[params.kind];
 
         try {

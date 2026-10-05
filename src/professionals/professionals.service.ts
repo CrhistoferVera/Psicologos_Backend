@@ -524,11 +524,18 @@ export class ProfessionalsService {
       select: { chargeVerificationPending: true, canCharge: true, username: true },
     });
 
-    // Avisa al admin que hay documentación por revisar para habilitar el cobro.
+    // Avisa al admin que hay documentación por revisar para habilitar el cobro,
+    // reflejando qué subió realmente (título, matrícula o ambos).
+    const uploadedDocs = [
+      files.titulo ? 'TÍTULO' : null,
+      files.matricula ? 'MATRÍCULA' : null,
+    ]
+      .filter(Boolean)
+      .join(' y ');
     void this.mailService.sendAdminVerificationAlert({
       professionalName: updated.username,
       kind: 'TITULO',
-      docType: 'TITULO',
+      docType: uploadedDocs,
     });
 
     return {
