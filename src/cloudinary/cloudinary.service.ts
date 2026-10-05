@@ -1,8 +1,38 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { v2 as cloudinary } from 'cloudinary';
+import sharp from 'sharp';
+
+// Cloudinary (plan Free) rechaza imágenes de más de 10 MB. Recomprimimos por
+// debajo de ese límite con un margen de seguridad antes de subir.
+const CLOUDINARY_IMAGE_TARGET_BYTES = 9 * 1024 * 1024;
 
 @Injectable()
 export class CloudinaryService {
+  private readonly logger = new Logger(CloudinaryService.name);
+
+  // Redimensiona y recomprime una imagen hasta dejarla bajo el límite de Cloudinary.
+  // Devuelve el buffer original si ya está dentro del objetivo.
+  private async compressImage(buffer: Buffer): Promise<Buffer> {
+    if (buffer.length <= CLOUDINARY_IMAGE_TARGET_BYTES) return buffer;
+
+    let out = buffer;
+    let width = 2500;
+    let quality = 82;
+    for (let i = 0; i < 5 && out.length > CLOUDINARY_IMAGE_TARGET_BYTES; i++) {
+      out = await sharp(buffer)
+        .rotate() // respeta la orientación EXIF del teléfono
+        .resize({ width, height: width, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality, mozjpeg: true })
+        .toBuffer();
+      width = Math.round(width * 0.8);
+      quality -= 12;
+    }
+    this.logger.log(
+      `Imagen recomprimida ${(buffer.length / 1024 / 1024).toFixed(2)}MB -> ${(out.length / 1024 / 1024).toFixed(2)}MB antes de subir a Cloudinary`,
+    );
+    return out;
+  }
+
   constructor() {
     const cloudinaryUrl = process.env.CLOUDINARY_URL;
 
@@ -218,35 +248,54 @@ export class CloudinaryService {
   }): Promise<{ publicId: string; resourceType: 'image' | 'video' | 'raw'; bytes: number; format?: string }> {
     const { file, folder, publicId, resourceType } = params;
 
+    // Las imágenes grandes (p. ej. foto de CI de 16MB) superan el límite de
+    // Cloudinary Free (10MB); las recomprimimos antes de subir.
+    const buffer =
+      resourceType === 'image' ? await this.compressImage(file.buffer) : file.buffer;
+
+    const options = {
+      folder,
+      public_id: publicId,
+      resource_type: resourceType,
+      type: 'authenticated' as const,
+      overwrite: true,
+      invalidate: true,
+    };
+
     return new Promise((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
-        {
-          folder,
-          public_id: publicId,
-          resource_type: resourceType,
-          type: 'authenticated',
-          overwrite: true,
-          invalidate: true,
-        },
-        (error, result) => {
-          if (error || !result?.public_id) {
-            return reject(
-              new InternalServerErrorException(
-                'No se pudo subir el archivo a Cloudinary.',
-              ),
-            );
-          }
+      const handler = (error: any, result: any) => {
+        if (error || !result?.public_id) {
+          // Loguea la causa real de Cloudinary para poder diagnosticar el 500.
+          this.logger.error(
+            `Fallo al subir a Cloudinary (${resourceType}, ${(file.size / 1024 / 1024).toFixed(2)}MB) en ${folder}/${publicId}: ${error?.message ?? 'sin resultado'}`,
+            error?.stack,
+          );
+          return reject(
+            new InternalServerErrorException(
+              `No se pudo subir el archivo a Cloudinary: ${error?.message ?? 'error desconocido'}`,
+            ),
+          );
+        }
 
-          resolve({
-            publicId: result.public_id,
-            resourceType: resourceType,
-            bytes: result.bytes ?? 0,
-            format: result.format,
-          });
-        },
-      );
+        resolve({
+          publicId: result.public_id,
+          resourceType: resourceType,
+          bytes: result.bytes ?? 0,
+          format: result.format,
+        });
+      };
 
-      uploadStream.end(file.buffer);
+      // Los videos pueden superar el límite de una sola petición; Cloudinary
+      // recomienda subida por chunks (upload_chunked_stream) para resource_type video.
+      const uploadStream =
+        resourceType === 'video'
+          ? cloudinary.uploader.upload_chunked_stream(
+              { ...options, chunk_size: 6_000_000 },
+              handler,
+            )
+          : cloudinary.uploader.upload_stream(options, handler);
+
+      uploadStream.end(buffer);
     });
   }
 
