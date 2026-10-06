@@ -211,8 +211,16 @@ export class BookingsService {
       };
     }
 
-    const pair = this.resolveCommunicationPair(currentUser, otherUser);
-    if (!pair) {
+    // La relación cliente↔profesional se determina por la reserva en cualquier
+    // dirección. Esto soporta que un profesional (en modo usuario) reserve a otro
+    // profesional: la comunicación se habilita si existe una reserva entre ambos
+    // sin importar quién figura como cliente o profesional. Solo se excluye a los
+    // administradores y la auto-conversación.
+    if (
+      currentUser.role === UserRole.ADMIN ||
+      otherUser.role === UserRole.ADMIN ||
+      currentUser.id === otherUser.id
+    ) {
       return {
         allowed: false,
         bookingId: null,
@@ -224,6 +232,13 @@ export class BookingsService {
       };
     }
 
+    const participants = {
+      OR: [
+        { clientId: currentUser.id, professionalId: otherUser.id },
+        { clientId: otherUser.id, professionalId: currentUser.id },
+      ],
+    };
+
     const now = new Date();
 
     // La comunicación se habilita apenas la reserva está pagada y confirmada,
@@ -232,8 +247,7 @@ export class BookingsService {
     // curso como una próxima ya pagada.
     const activeOrUpcomingPaidBooking = await this.prisma.booking.findFirst({
       where: {
-        clientId: pair.clientId,
-        professionalId: pair.professionalId,
+        ...participants,
         status: BookingStatus.CONFIRMED,
         paymentStatus: BookingPaymentStatus.PAID,
         scheduledEndAt: { gte: now },
@@ -262,17 +276,20 @@ export class BookingsService {
 
     const activeButUnpaidBooking = await this.prisma.booking.findFirst({
       where: {
-        clientId: pair.clientId,
-        professionalId: pair.professionalId,
         scheduledStartAt: { lte: now },
         scheduledEndAt: { gte: now },
-        OR: [
+        AND: [
+          participants,
           {
-            status: BookingStatus.CONFIRMED,
-            paymentStatus: { not: BookingPaymentStatus.PAID },
-          },
-          {
-            status: BookingStatus.PENDING_PAYMENT,
+            OR: [
+              {
+                status: BookingStatus.CONFIRMED,
+                paymentStatus: { not: BookingPaymentStatus.PAID },
+              },
+              {
+                status: BookingStatus.PENDING_PAYMENT,
+              },
+            ],
           },
         ],
       },
@@ -298,8 +315,7 @@ export class BookingsService {
 
     const nextPendingPaymentBooking = await this.prisma.booking.findFirst({
       where: {
-        clientId: pair.clientId,
-        professionalId: pair.professionalId,
+        ...participants,
         status: BookingStatus.PENDING_PAYMENT,
         paymentStatus: BookingPaymentStatus.PENDING,
         scheduledStartAt: { gt: now },
@@ -326,8 +342,7 @@ export class BookingsService {
 
     const lastConfirmedPaidBooking = await this.prisma.booking.findFirst({
       where: {
-        clientId: pair.clientId,
-        professionalId: pair.professionalId,
+        ...participants,
         status: BookingStatus.CONFIRMED,
         paymentStatus: BookingPaymentStatus.PAID,
         scheduledEndAt: { lt: now },
