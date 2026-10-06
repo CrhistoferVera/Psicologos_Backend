@@ -226,13 +226,16 @@ export class BookingsService {
 
     const now = new Date();
 
-    const activePaidBooking = await this.prisma.booking.findFirst({
+    // La comunicación se habilita apenas la reserva está pagada y confirmada,
+    // aunque la sesión aún no haya iniciado, y permanece activa hasta que el
+    // horario de la sesión termine (scheduledEndAt). Cubre tanto la sesión en
+    // curso como una próxima ya pagada.
+    const activeOrUpcomingPaidBooking = await this.prisma.booking.findFirst({
       where: {
         clientId: pair.clientId,
         professionalId: pair.professionalId,
         status: BookingStatus.CONFIRMED,
         paymentStatus: BookingPaymentStatus.PAID,
-        scheduledStartAt: { lte: now },
         scheduledEndAt: { gte: now },
       },
       orderBy: { scheduledStartAt: 'asc' },
@@ -245,15 +248,15 @@ export class BookingsService {
       },
     });
 
-    if (activePaidBooking) {
+    if (activeOrUpcomingPaidBooking) {
       return {
         allowed: true,
-        bookingId: activePaidBooking.id,
+        bookingId: activeOrUpcomingPaidBooking.id,
         reason: null,
-        sessionStartsAt: activePaidBooking.scheduledStartAt,
-        sessionEndsAt: activePaidBooking.scheduledEndAt,
-        clientJoinedAt: activePaidBooking.clientJoinedAt,
-        professionalJoinedAt: activePaidBooking.professionalJoinedAt,
+        sessionStartsAt: activeOrUpcomingPaidBooking.scheduledStartAt,
+        sessionEndsAt: activeOrUpcomingPaidBooking.scheduledEndAt,
+        clientJoinedAt: activeOrUpcomingPaidBooking.clientJoinedAt,
+        professionalJoinedAt: activeOrUpcomingPaidBooking.professionalJoinedAt,
       };
     }
 
@@ -288,34 +291,6 @@ export class BookingsService {
         reason: 'PAYMENT_PENDING',
         sessionStartsAt: activeButUnpaidBooking.scheduledStartAt,
         sessionEndsAt: activeButUnpaidBooking.scheduledEndAt,
-        clientJoinedAt: null,
-        professionalJoinedAt: null,
-      };
-    }
-
-    const nextConfirmedPaidBooking = await this.prisma.booking.findFirst({
-      where: {
-        clientId: pair.clientId,
-        professionalId: pair.professionalId,
-        status: BookingStatus.CONFIRMED,
-        paymentStatus: BookingPaymentStatus.PAID,
-        scheduledStartAt: { gt: now },
-      },
-      orderBy: { scheduledStartAt: 'asc' },
-      select: {
-        id: true,
-        scheduledStartAt: true,
-        scheduledEndAt: true,
-      },
-    });
-
-    if (nextConfirmedPaidBooking) {
-      return {
-        allowed: false,
-        bookingId: nextConfirmedPaidBooking.id,
-        reason: 'SESSION_NOT_STARTED',
-        sessionStartsAt: nextConfirmedPaidBooking.scheduledStartAt,
-        sessionEndsAt: nextConfirmedPaidBooking.scheduledEndAt,
         clientJoinedAt: null,
         professionalJoinedAt: null,
       };

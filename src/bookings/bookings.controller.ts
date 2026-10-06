@@ -35,7 +35,8 @@ import { UpdateSessionOfferingStatusDto } from './dto/update-session-offering-st
 import { SetImmediateAvailabilityDto } from './dto/set-immediate-availability.dto';
 import { CreateImmediateBookingDto } from './dto/create-immediate-booking.dto';
 import { ReportNoShowDto } from './dto/report-no-show.dto';
-import { RequestRefundDto } from './dto/request-refund.dto';
+// REEMBOLSOS DESHABILITADOS: import de RequestRefundDto comentado.
+// import { RequestRefundDto } from './dto/request-refund.dto';
 import { BookingsService } from './bookings.service';
 
 interface JwtUser {
@@ -392,15 +393,17 @@ export class BookingsController {
     return this.bookingsService.reportNoShow(bookingId, user.userId, user.role);
   }
 
-  @Post('bookings/:bookingId/request-refund')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.USER)
-  @ApiOperation({ summary: 'Solicitar reembolso tras no-show del psicólogo' })
-  requestRefund(
-    @CurrentUser() user: JwtUser,
-    @Param('bookingId') bookingId: string,
-    @Body() dto: RequestRefundDto,
-  ) {
-    return this.bookingsService.requestRefund(bookingId, user.userId, dto.clientPayoutAccountId);
-  }
+  // ─── REEMBOLSOS DESHABILITADOS ────────────────────────────────────────────
+  // Endpoint de solicitud de reembolso comentado por decisión de negocio.
+  // @Post('bookings/:bookingId/request-refund')
+  // @UseGuards(JwtAuthGuard, RolesGuard)
+  // @Roles(UserRole.USER)
+  // @ApiOperation({ summary: 'Solicitar reembolso tras no-show del psicólogo' })
+  // requestRefund(
+  //   @CurrentUser() user: JwtUser,
+  //   @Param('bookingId') bookingId: string,
+  //   @Body() dto: RequestRefundDto,
+  // ) {
+  //   return this.bookingsService.requestRefund(bookingId, user.userId, dto.clientPayoutAccountId);
+  // }
 }

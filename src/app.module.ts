@@ -31,7 +31,8 @@ import { BookingsModule } from './bookings/bookings.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { ChatIaModule } from './chat-ia/chat-ia.module';
 import { ClientPayoutAccountsModule } from './client-payout-accounts/client-payout-accounts.module';
-import { AdminRefundRequestsModule } from './admin/refund-requests/admin-refund-requests.module';
+// REEMBOLSOS DESHABILITADOS: módulo admin de reembolsos comentado.
+// import { AdminRefundRequestsModule } from './admin/refund-requests/admin-refund-requests.module';
 
 @Module({
   imports: [
@@ -70,7 +71,7 @@ import { AdminRefundRequestsModule } from './admin/refund-requests/admin-refund-
     ReviewsModule,
     ChatIaModule,
     ClientPayoutAccountsModule,
-    AdminRefundRequestsModule,
+    // REEMBOLSOS DESHABILITADOS: AdminRefundRequestsModule,
   ],
   controllers: [],
   providers: [],
