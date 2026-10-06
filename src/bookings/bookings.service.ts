@@ -2556,8 +2556,11 @@ export class BookingsService {
       select: { id: true, role: true, billingRegion: true, country: true, firstName: true, lastName: true },
     });
     if (!client) throw new NotFoundException('Cliente no encontrado.');
-    if (client.role !== UserRole.USER) {
-      throw new ForbiddenException('Solo clientes pueden crear reservas.');
+    // Cualquier cuenta no-admin puede reservar como cliente (incluidos los
+    // profesionales que, en modo usuario, reservan a otro profesional). La
+    // auto-reserva se bloquea más abajo por cada profesional del lote.
+    if (client.role === UserRole.ADMIN) {
+      throw new ForbiddenException('Los administradores no pueden crear reservas.');
     }
 
     const uniqueProfIds = [...new Set(dtos.map((d) => d.professionalId))];
@@ -3151,7 +3154,11 @@ export class BookingsService {
       select: { id: true, role: true, billingRegion: true, country: true },
     });
     if (!client) throw new NotFoundException('Cliente no encontrado.');
-    if (client.role !== UserRole.USER) throw new ForbiddenException('Solo clientes pueden crear reservas.');
+    // Cualquier cuenta no-admin puede reservar como cliente (incluidos los
+    // profesionales en modo usuario). Solo se bloquea a los administradores.
+    if (client.role === UserRole.ADMIN) {
+      throw new ForbiddenException('Los administradores no pueden crear reservas.');
+    }
 
     const bobToUsdRate = await this.getBobToUsdRate();
     const priceUsd = Math.round((Number(offering.priceBob) / bobToUsdRate) * 100) / 100;
