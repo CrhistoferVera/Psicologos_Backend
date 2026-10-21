@@ -28,18 +28,8 @@ export class UsersService {
           referralCode,
           wallet: {
             create: {
-              balance: 3000,
-              promotionalBalance: 3000,
-              transactions: {
-                create: {
-                  amount: 3000,
-                  promotionalAmount: 3000,
-                  realAmount: 0,
-                  isPromotional: true,
-                  type: TransactionType.PROMOTIONAL_GRANT,
-                  description: 'Regalo de bienvenida - 3000 creditos',
-                },
-              },
+              balance: 0,
+              promotionalBalance: 0,
             },
           },
           userProfile: {
